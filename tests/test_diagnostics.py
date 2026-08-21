@@ -38,7 +38,7 @@ def test_doctor_reports_missing_memory_root_as_warning(tmp_path: Path) -> None:
 def test_doctor_reports_uninitialized_tree_as_warning(tmp_path: Path) -> None:
     path = tmp_path / "keepygaga.toml"
     memory_root = tmp_path / "missing"
-    path.write_text(f'[memory]\nroot = "{memory_root}"\n', encoding="utf-8")
+    path.write_text(f'[memory]\nroot = "{memory_root.as_posix()}"\n', encoding="utf-8")
     result = run_doctor(path, project_root=tmp_path)
     assert result["status"] == "warning"
 
@@ -50,7 +50,7 @@ def test_doctor_reports_healthy_initialized_memory(
     memory_root = tmp_path / "memory"
     config = MemoryFilesConfig(root=str(memory_root))
     assert initialize_memory_tree(memory_root, config)["status"] == "applied"
-    path.write_text(f'[memory]\nroot = "{memory_root}"\n', encoding="utf-8")
+    path.write_text(f'[memory]\nroot = "{memory_root.as_posix()}"\n', encoding="utf-8")
     result = run_doctor(path, project_root=tmp_path)
     assert result["status"] == "ok"
     checks = cast(list[dict[str, object]], result["checks"])

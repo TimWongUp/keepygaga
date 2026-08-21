@@ -58,7 +58,7 @@ async def run_smoke(timeout: float) -> dict[str, object]:
         memory_root = workspace / "memory"
         initialized = initialize_memory_tree(
             memory_root,
-            MemoryFilesConfig(root=str(memory_root)),
+            MemoryFilesConfig(root=memory_root.as_posix()),
         )
         if initialized["status"] != "applied":
             raise RuntimeError(f"memory fixture failed: {initialized}")
@@ -66,7 +66,7 @@ async def run_smoke(timeout: float) -> dict[str, object]:
         config_path.write_text(
             f"""
 [memory]
-root = "{memory_root}"
+root = "{memory_root.as_posix()}"
 """.strip()
             + "\n",
             encoding="utf-8",
@@ -75,7 +75,7 @@ root = "{memory_root}"
         environment["KEEPYGAGA_CONFIG"] = str(config_path)
         parameters = StdioServerParameters(
             command=sys.executable,
-            args=[str(ROOT / "mcp_server.py")],
+            args=["-m", "keepygaga.server"],
             cwd=ROOT,
             env=environment,
         )

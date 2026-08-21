@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 import pytest
@@ -561,6 +562,7 @@ def test_read_rejects_duplicate_paths(memory_store: tuple[Path, MemoryStore]) ->
     assert store.read(["profile.md", "profile.md"])["status"] == "invalid_entry"
 
 
+@pytest.mark.skipif(sys.platform == 'win32', reason='Windows does not support POSIX file modes')
 def test_mutation_preserves_existing_file_mode(
     memory_store: tuple[Path, MemoryStore],
 ) -> None:
