@@ -660,6 +660,6 @@ def test_add_duplicate_path_in_batch_returns_duplicate_target(
     assert result["status"] == "duplicate_target"
     assert "more than once" in str(result.get("message", ""))
     # Verify no files were written
-    content = (root / "preferences.md").read_text()
+    content = (root / "preferences.md").read_text(encoding="utf-8")
     assert "First fact." not in content
     assert "Second fact." not in content
