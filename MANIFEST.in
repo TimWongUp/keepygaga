@@ -1,0 +1,11 @@
+include AGENTS.md
+include CLAUDE.md
+include CODE_OF_CONDUCT.md
+include CONTEXT.md
+include CONTRIBUTING.md
+include README.zh-CN.md
+include SECURITY.md
+include keepygaga.example.toml
+include scripts/smoke_mcp_server.py
+recursive-include contracts *.md
+recursive-include docs *.md

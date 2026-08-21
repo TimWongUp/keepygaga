@@ -8,6 +8,9 @@
 2. `uv run python scripts/smoke_mcp_server.py` 验证八个 raw Tool、最小 mutation/read 与 Doctor。
 3. `uv run pytest -q`。
 4. `uv run ruff check . && uv run pyright`。
+5. 发行包或入口变化还要运行 `uv build`，在隔离虚拟环境安装生成的 wheel，
+   再用 `scripts/smoke_mcp_server.py --server-command <installed keepygaga-mcp>`
+   验证已安装的 console script；不能用源码 checkout 遮蔽 wheel，也不能吞掉入口失败。
 
 普通验证不修改真实 Vault；测试使用临时 memory tree。当前配置与 live 页面状态必须从 `keepygaga.toml`、Doctor 和目标 Markdown 现场刷新，不能从本文推断。
 
@@ -28,6 +31,8 @@ Doctor 只报告非敏感 metadata，不输出正文、凭据、API key、cookie
 - `write_failed`：首个文件尚未提交时写入失败；现场未应用本批次内容，排除文件系统问题后重新读取并重试。
 - `partial_commit`：响应中的 `applied_paths` 已完成替换，其余路径未完成；重新读取整批相关页面并明确合并，不重复提交原批次，也不假设跨文件回滚。
 - smoke 失败：先核对 raw Tool 集合与 schema，再进入对应 Store 实现；不以 Doctor 替代协议验证。
+- wheel smoke 失败：先区分发行包内容、console script 生成和 MCP 协议失败；源码 smoke
+  通过不能替代已安装 artifact 的验证。
 
 ## Evidence
 

@@ -1,3 +1,4 @@
 [memory]
-# Directory containing the fixed memory pages and topics/areas/people children.
+# Keep this private and outside the Keepygaga checkout or public directories.
+# It contains the fixed memory pages and topics/areas/people children.
 root = "/path/to/your/agents-memory"

@@ -66,9 +66,9 @@ Give the prompt below to the Agent that should use Keepygaga:
 Install and connect https://github.com/TimWongUp/keepygaga for yourself.
 
 1. Read the repository `AGENTS.md` and the current host's MCP documentation, then determine whether the Agent actually runs in native Windows, macOS, Linux, or WSL; all subsequent paths and the Python executable must belong to that same runtime.
-2. Run `uv sync`, copy `keepygaga.example.toml` to a machine-local `keepygaga.toml`, and resolve `memory.root`: prefer an existing memory tree explicitly supplied by the user in this turn, then a single valid tree from an existing Keepygaga configuration; do not scan an entire disk. If no existing tree is available, choose a new writable directory. If candidates are ambiguous or the user's intent is unclear, ask only for the missing choice.
+2. Run `uv sync`, copy `keepygaga.example.toml` to a machine-local `keepygaga.toml`, and resolve `memory.root`: prefer an existing memory tree explicitly supplied by the user in this turn, then a single valid tree from an existing Keepygaga configuration; do not scan an entire disk. If no existing tree is available, choose a new writable directory outside the Keepygaga checkout and any publicly shared or automatically published directory. A synchronized directory is acceptable only when its access is private and trusted. If candidates are ambiguous or the user's intent is unclear, ask only for the missing choice.
 3. When reusing an existing tree, point `memory.root` directly to it, do not copy, move, or rewrite its pages, and run `uv run keepygaga doctor --json` first. Inspect the JSON check whose `id` is `memory_tree`: run `uv run keepygaga memory init` to fill missing structure only when its message explicitly reports that the tree is not initialized. If it reports `invalid_source`, malformed content, or a specific invalid page, stop the installation and report the exact path to the user; do not run init or continue registration. After init, rerun Doctor regardless of the command exit code or whether the payload says `applied` or `no_op`, and treat the new `memory_tree` check as authoritative. For a new directory, run init to create the canonical tree. `memory init` must never overwrite existing files.
-4. Register `mcp_server.py` as a stdio server under the key `keepygaga`, using the virtual environment's native Python and an absolute `KEEPYGAGA_CONFIG`. Preserve unrelated host MCP settings, and do not sync `.venv` or `keepygaga.toml` between machines.
+4. Register `keepygaga.server` as a stdio server under the key `keepygaga`, using the virtual environment's native Python with arguments `-m` and `keepygaga.server`, plus an absolute `KEEPYGAGA_CONFIG`. Preserve unrelated host MCP settings, and do not sync `.venv` or `keepygaga.toml` between machines.
 5. Merge `docs/agent-contract.md` into the global host rules that are actually loaded, preserving unrelated settings.
 6. If the host supports Hooks, read `docs/hooks/README.md`, select exactly the page for the current Agent host, and install only the capabilities documented on that page. Use the same physical memory root as Keepygaga, merge only Hook entries owned by that runtime, and preserve every unrelated host setting. If no compatible runtime is available, finish the MCP installation and report that Hook integration was not installed; do not invent or download Hook executables.
 7. Run `uv run keepygaga doctor --json` and `uv run python scripts/smoke_mcp_server.py`, then confirm the host exposes exactly list, read, create, add, update, move, rename, and delete. When Hooks were installed, also run the selected Agent host's verification.
@@ -82,7 +82,7 @@ Report the files changed, memory root, MCP registration, validation results, and
 ```bash
 uv run keepygaga doctor
 uv run keepygaga memory init
-uv run python mcp_server.py
+uv run keepygaga-mcp
 ```
 
 `doctor` checks core memory and reports the eight raw tools. `memory init`
@@ -96,8 +96,8 @@ tool names look like `mcp__keepygaga__read`:
 {
   "mcpServers": {
     "keepygaga": {
-      "command": "/path/to/keepygaga/venv/bin/python",
-      "args": ["/path/to/keepygaga/mcp_server.py"],
+      "command": "/path/to/keepygaga/.venv/bin/python",
+      "args": ["-m", "keepygaga.server"],
       "env": {
         "KEEPYGAGA_CONFIG": "/path/to/keepygaga.toml"
       }
@@ -105,6 +105,9 @@ tool names look like `mcp__keepygaga__read`:
   }
 }
 ```
+
+Use the virtual environment's absolute native Python path. On Windows this is
+typically `.venv\Scripts\python.exe` instead of `.venv/bin/python`.
 
 `KEEPYGAGA_CONFIG` overrides the default config path.
 
@@ -120,10 +123,11 @@ Hook integration is **optional** and requires an external Agent Hook Runtime
 that is **not included** in this repository. It can inject the two core
 memory pages and routing listing at session start, remind the Agent to route
 memory work before each turn when the host supports it, and prompt Project /
-Memory Closeout through that host's supported event. The installing Agent must
-If you want Hook integration, the installing Agent must select the exact host contract from [`docs/hooks/`](docs/hooks/README.md) and use
-a compatible runtime already selected for the target machine; the MCP
-server remains fully usable when no Hook runtime is installed.
+Memory Closeout through that host's supported event. If you want Hook
+integration, the installing Agent must select the exact host contract from
+[`docs/hooks/`](docs/hooks/README.md) and use a compatible runtime already
+selected for the target machine; the MCP server remains fully usable when no
+Hook runtime is installed.
 
 ## Safety boundaries
 
@@ -138,6 +142,13 @@ server remains fully usable when no Hook runtime is installed.
 - Delete operations require explicit current-turn user authorization.
 - Applied mutations return a server-generated receipt; echo it exactly once
   and never invent one for reads, no-ops, skips, or failures.
+
+## Community
+
+Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) before
+opening a pull request and follow the [Code of Conduct](CODE_OF_CONDUCT.md).
+Report vulnerabilities privately according to [SECURITY.md](SECURITY.md), not
+in a public issue.
 
 ## Acknowledgements
 

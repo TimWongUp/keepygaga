@@ -1,0 +1,62 @@
+name: Bug report
+description: Report a reproducible problem in Keepygaga
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve Keepygaga. Remove credentials, private memory content, and identifying data before submitting.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Pre-submission checks
+      options:
+        - label: I searched existing issues for the same problem.
+          required: true
+        - label: I removed credentials and real personal memory content.
+          required: true
+        - label: This is not a security vulnerability; security reports belong in the private reporting form.
+          required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Actual behavior
+      description: What happened, including the exact error when safe to share?
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What did you expect to happen?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      description: Provide the smallest sanitized reproduction.
+      placeholder: |
+        1. Configure ...
+        2. Run ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Include Keepygaga version or commit, OS, Python version, and MCP host.
+      placeholder: |
+        Keepygaga: 0.1.0
+        OS: Ubuntu 24.04
+        Python: 3.12.x
+        MCP host: ...
+    validations:
+      required: true
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional context
+      description: Add sanitized logs or other context if useful.

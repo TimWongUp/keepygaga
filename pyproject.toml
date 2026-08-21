@@ -8,7 +8,16 @@ version = "0.1.0"
 description = "A warm, local-first keeper of memories for AI agents."
 readme = "README.md"
 license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "TimWongUp" }]
 requires-python = ">=3.12"
+keywords = ["ai-agents", "local-first", "markdown", "mcp", "memory"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.12",
+]
 dependencies = [
   "filelock>=3.16,<4",
   "mcp>=1.0.0,<2",
@@ -19,13 +28,19 @@ dependencies = [
 [dependency-groups]
 dev = [
   "pyright>=1.1.400,<2",
-  "pytest>=8.3,<9",
+  "pytest>=9.0.3,<10",
   "ruff>=0.11,<1",
 ]
 
 [project.scripts]
 keepygaga = "keepygaga.cli:main"
 keepygaga-mcp = "keepygaga.server:main"
+
+[project.urls]
+Homepage = "https://github.com/TimWongUp/keepygaga"
+Documentation = "https://github.com/TimWongUp/keepygaga/tree/main/docs"
+Issues = "https://github.com/TimWongUp/keepygaga/issues"
+Repository = "https://github.com/TimWongUp/keepygaga"
 
 [tool.setuptools.packages.find]
 include = ["keepygaga*"]

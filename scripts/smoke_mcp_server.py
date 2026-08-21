@@ -17,7 +17,6 @@ from keepygaga.config import MemoryFilesConfig
 from keepygaga.diagnostics import run_doctor
 from keepygaga.memory import initialize_memory_tree
 
-ROOT = Path(__file__).resolve().parent.parent
 REQUIRED_TOOLS = {
     "list",
     "read",
@@ -35,6 +34,11 @@ def parse_args() -> argparse.Namespace:
         description="检查 Keepygaga stdio、八个 raw Tool 契约与只读 Doctor。"
     )
     parser.add_argument("--timeout", type=float, default=20.0)
+    parser.add_argument(
+        "--server-command",
+        type=Path,
+        help="改用指定的 keepygaga-mcp console script，而不是当前 Python 模块。",
+    )
     return parser.parse_args()
 
 
@@ -52,7 +56,9 @@ def _payload(result: Any) -> dict[str, object]:
     raise RuntimeError("MCP tool did not return a JSON object")
 
 
-async def run_smoke(timeout: float) -> dict[str, object]:
+async def run_smoke(
+    timeout: float, server_command: Path | None = None
+) -> dict[str, object]:
     with tempfile.TemporaryDirectory(prefix="keepygaga-smoke-") as directory:
         workspace = Path(directory)
         memory_root = workspace / "memory"
@@ -73,10 +79,12 @@ root = "{memory_root.as_posix()}"
         )
         environment = dict(os.environ)
         environment["KEEPYGAGA_CONFIG"] = str(config_path)
+        command = str(server_command.resolve()) if server_command else sys.executable
+        arguments = [] if server_command else ["-m", "keepygaga.server"]
         parameters = StdioServerParameters(
-            command=sys.executable,
-            args=["-m", "keepygaga.server"],
-            cwd=ROOT,
+            command=command,
+            args=arguments,
+            cwd=workspace,
             env=environment,
         )
         async with asyncio.timeout(timeout):
@@ -156,7 +164,7 @@ root = "{memory_root.as_posix()}"
                             },
                         )
                     )
-        doctor = run_doctor(config_path, project_root=ROOT)
+        doctor = run_doctor(config_path, project_root=workspace)
         status = (
             "ok"
             if set(tool_names) == REQUIRED_TOOLS
@@ -182,7 +190,7 @@ root = "{memory_root.as_posix()}"
 def main() -> int:
     args = parse_args()
     try:
-        report = asyncio.run(run_smoke(args.timeout))
+        report = asyncio.run(run_smoke(args.timeout, args.server_command))
     except Exception as exc:
         report = {
             "schema": "keepygaga-mcp-smoke-v4",
