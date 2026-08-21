@@ -58,7 +58,7 @@ async def run_smoke(timeout: float) -> dict[str, object]:
         memory_root = workspace / "memory"
         initialized = initialize_memory_tree(
             memory_root,
-            MemoryFilesConfig(root=str(memory_root)),
+            MemoryFilesConfig(root=memory_root.as_posix()),
         )
         if initialized["status"] != "applied":
             raise RuntimeError(f"memory fixture failed: {initialized}")
@@ -66,7 +66,7 @@ async def run_smoke(timeout: float) -> dict[str, object]:
         config_path.write_text(
             f"""
 [memory]
-root = "{memory_root}"
+root = "{memory_root.as_posix()}"
 """.strip()
             + "\n",
             encoding="utf-8",
