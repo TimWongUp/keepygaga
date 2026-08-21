@@ -75,7 +75,7 @@ root = "{memory_root}"
         environment["KEEPYGAGA_CONFIG"] = str(config_path)
         parameters = StdioServerParameters(
             command=sys.executable,
-            args=[str(ROOT / "mcp_server.py")],
+            args=["-m", "keepygaga.server"],
             cwd=ROOT,
             env=environment,
         )

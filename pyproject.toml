@@ -11,7 +11,7 @@ license = "MIT"
 requires-python = ">=3.12"
 dependencies = [
   "filelock>=3.16,<4",
-  "mcp>=1.0.0",
+  "mcp>=1.0.0,<2",
   "pydantic>=2.7,<3",
   "python-frontmatter>=1.1,<2",
 ]
@@ -25,6 +25,7 @@ dev = [
 
 [project.scripts]
 keepygaga = "keepygaga.cli:main"
+keepygaga-mcp = "keepygaga.server:main"
 
 [tool.setuptools.packages.find]
 include = ["keepygaga*"]
@@ -37,7 +38,7 @@ select = ["B", "E", "F", "I", "SIM", "UP"]
 ignore = ["E501"]
 
 [tool.pyright]
-include = ["keepygaga", "mcp_server.py", "scripts", "tests"]
+include = ["keepygaga", "scripts", "tests"]
 exclude = ["**/__pycache__", ".keepygaga", ".venv"]
 pythonVersion = "3.12"
 typeCheckingMode = "basic"

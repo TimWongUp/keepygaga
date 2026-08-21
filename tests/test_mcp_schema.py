@@ -5,7 +5,7 @@ import asyncio
 import pytest
 from pydantic import ValidationError
 
-import mcp_server
+from keepygaga import server as mcp_server
 
 EXPECTED_TOOLS = {
     "list",

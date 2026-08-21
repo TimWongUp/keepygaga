@@ -595,9 +595,19 @@ class MemoryStore:
             }
         except MemoryValidationError as exc:
             return exc.response()
+        except PermissionError as exc:
+            return {
+                "status": "permission_denied",
+                "message": f"{type(exc).__name__}: {exc}",
+            }
+        except (OSError, UnicodeDecodeError) as exc:
+            return {
+                "status": "read_failed",
+                "message": f"{type(exc).__name__}: {exc}",
+            }
         except Exception as exc:
             return {
-                "status": "write_conflict",
+                "status": "internal_error",
                 "message": f"{type(exc).__name__}: {exc}",
             }
 

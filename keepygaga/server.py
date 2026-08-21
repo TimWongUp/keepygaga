@@ -26,7 +26,6 @@ CONFIG_PATH = (
     .resolve()
 )
 
-
 class StrictFastMCP(FastMCP):
     """FastMCP with closed top-level argument models."""
 
@@ -59,7 +58,6 @@ class StrictFastMCP(FastMCP):
         arguments.model_config["extra"] = "forbid"
         arguments.model_rebuild(force=True)
         tool.parameters = arguments.model_json_schema(by_alias=True)
-
 
 mcp = StrictFastMCP("Keepygaga")
 
@@ -131,5 +129,8 @@ def delete_memory(operations: DeleteOperations) -> dict[str, object]:
     return _with_memory_store(lambda store: store.delete(operations))
 
 
-if __name__ == "__main__":
+def main() -> None:
     mcp.run()
+
+if __name__ == "__main__":
+    main()
