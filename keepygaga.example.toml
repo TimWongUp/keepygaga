@@ -1,0 +1,3 @@
+[memory]
+# Directory containing the fixed memory pages and topics/areas/people children.
+root = "/path/to/your/agents-memory"

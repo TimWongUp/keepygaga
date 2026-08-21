@@ -1,0 +1,135 @@
+from __future__ import annotations
+
+import os
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any
+
+from mcp.server.fastmcp import FastMCP
+from mcp.types import AnyFunction, Icon, ToolAnnotations
+
+from keepygaga.config import DEFAULT_CONFIG_PATH, load_config
+from keepygaga.memory import (
+    AddOperations,
+    CreateOperations,
+    DeleteOperations,
+    MemoryStore,
+    MoveOperations,
+    ReadPaths,
+    RenameOperations,
+    UpdateOperations,
+)
+
+CONFIG_PATH = (
+    Path(os.environ.get("KEEPYGAGA_CONFIG", str(DEFAULT_CONFIG_PATH)))
+    .expanduser()
+    .resolve()
+)
+
+
+class StrictFastMCP(FastMCP):
+    """FastMCP with closed top-level argument models."""
+
+    def add_tool(
+        self,
+        fn: AnyFunction,
+        name: str | None = None,
+        title: str | None = None,
+        description: str | None = None,
+        annotations: ToolAnnotations | None = None,
+        icons: list[Icon] | None = None,
+        meta: dict[str, Any] | None = None,
+        structured_output: bool | None = None,
+    ) -> None:
+        super().add_tool(
+            fn,
+            name=name,
+            title=title,
+            description=description,
+            annotations=annotations,
+            icons=icons,
+            meta=meta,
+            structured_output=structured_output,
+        )
+        tool_name = name or fn.__name__
+        tool = self._tool_manager.get_tool(tool_name)
+        if tool is None:  # pragma: no cover
+            raise RuntimeError(f"tool registration failed: {tool_name}")
+        arguments = tool.fn_metadata.arg_model
+        arguments.model_config["extra"] = "forbid"
+        arguments.model_rebuild(force=True)
+        tool.parameters = arguments.model_json_schema(by_alias=True)
+
+
+mcp = StrictFastMCP("Keepygaga")
+
+
+def _with_memory_store(
+    operation: Callable[[MemoryStore], dict[str, object]],
+) -> dict[str, object]:
+    try:
+        config = load_config(CONFIG_PATH)
+    except Exception as exc:
+        return {
+            "status": "invalid_source",
+            "message": f"configuration could not be loaded: {exc}",
+        }
+    if not config.memory.root.strip():
+        return {
+            "status": "not_initialized",
+            "message": "memory.root is not configured",
+        }
+    store = MemoryStore(Path(config.memory.root), config.memory)
+    return operation(store)
+
+
+@mcp.tool(name="list", annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False))
+def list_memory() -> dict[str, object]:
+    """List canonical paths, descriptions, and optional routing aliases."""
+    return _with_memory_store(MemoryStore.list_files)
+
+
+@mcp.tool(name="read", annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False))
+def read_memory(paths: ReadPaths) -> dict[str, object]:
+    """Read 1–20 canonical pages and return facts plus write versions."""
+    return _with_memory_store(lambda store: store.read(paths))
+
+
+@mcp.tool(name="create", annotations=ToolAnnotations(readOnlyHint=False))
+def create_pages(operations: CreateOperations) -> dict[str, object]:
+    """Create dynamic topics, areas, or people pages after full-batch validation."""
+    return _with_memory_store(lambda store: store.create(operations))
+
+
+@mcp.tool(name="add", annotations=ToolAnnotations(readOnlyHint=False))
+def add_facts(operations: AddOperations) -> dict[str, object]:
+    """Add independent facts using the current page version."""
+    return _with_memory_store(lambda store: store.add(operations))
+
+
+@mcp.tool(name="update", annotations=ToolAnnotations(readOnlyHint=False))
+def update_memory(operations: UpdateOperations) -> dict[str, object]:
+    """Update an exact fact or page metadata using the current version."""
+    return _with_memory_store(lambda store: store.update(operations))
+
+
+@mcp.tool(name="move", annotations=ToolAnnotations(readOnlyHint=False))
+def move_fact(operations: MoveOperations) -> dict[str, object]:
+    """Move exact facts between current-version pages."""
+    return _with_memory_store(lambda store: store.move(operations))
+
+
+@mcp.tool(name="rename", annotations=ToolAnnotations(readOnlyHint=False))
+def rename_page(operations: RenameOperations) -> dict[str, object]:
+    """Rename dynamic pages and preserve the previous name as an alias."""
+    return _with_memory_store(lambda store: store.rename(operations))
+
+
+@mcp.tool(name="delete", annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True))
+def delete_memory(operations: DeleteOperations) -> dict[str, object]:
+    """Delete exact facts or dynamic pages with explicit user authorization."""
+    return _with_memory_store(lambda store: store.delete(operations))
+
+
+if __name__ == "__main__":
+    mcp.run()
