@@ -2,12 +2,39 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-**Keeper of Memories for AI agents.**
+**A small, deliberate long-term memory for AI agents.**
 
-Keepygaga is a warm, local-first memory keeper. Durable user and environment
-memories live in readable Markdown, and explicit versioned MCP tools perform
-every mutation. There is no database, index, or embedding service: the memory
-tree is the product.
+AI agents do not get better by remembering everything. If every conversation,
+temporary state, and project detail is pushed into long-term memory, useful
+facts are buried under stale and irrelevant context. Memory without selection
+is noise.
+
+Keepygaga keeps only a small set of durable facts that remain useful across
+tasks: who the user is, how they want an Agent to work, and a few ongoing
+topics, responsibilities, or relationships. These memories stay in readable
+local Markdown, and every change goes through an explicit, versioned MCP tool.
+There is no database, index, or embedding service.
+
+For code projects, the priority is not to remember more about the user. The
+Agent should instead keep the repository's own terms, architecture, operating
+guides, and important decisions organized in `AGENTS.md`, `CONTEXT.md`, and
+`docs/`. Keepygaga does not replace project documentation; it supplies only the
+small amount of stable personal context that is useful across projects.
+
+**Why not track the user's recent state?**
+
+Many AI platforms try to remember what the user is doing right now, their
+latest progress, or every short-term plan. Once stored, a model may bring that
+state into an unrelated conversation or start discussing it at the wrong time,
+forcing the user to correct the context or steer the conversation back. This
+unselective recall turns quickly outdated information into repeated,
+unrequested interruptions.
+
+Keepygaga leaves temporary state in the current conversation or its direct
+source, such as a calendar, task manager, project documentation, issue tracker,
+or Git history. A fact enters core memory only when it has been deliberately
+judged useful across tasks. In code projects, current plans and progress belong
+to the repository's own documentation, not the user's personal memory.
 
 Its MCP surface is intentionally small — exactly eight action tools:
 
@@ -19,8 +46,7 @@ Its MCP surface is intentionally small — exactly eight action tools:
   `authorization="user_requested"`.
 
 Core memory consists of `profile.md`, `preferences.md`, and direct `topics/`,
-`areas/`, and `people/` pages. It is never indexed. Project instructions remain
-in each project's own agent entry and long-term context.
+`areas/`, and `people/` pages. It is never indexed.
 
 ## Requirements
 
@@ -44,8 +70,9 @@ Install and connect https://github.com/TimWongUp/keepygaga for yourself.
 3. When reusing an existing tree, point `memory.root` directly to it, do not copy, move, or rewrite its pages, and run `uv run keepygaga doctor --json` first. Inspect the JSON check whose `id` is `memory_tree`: run `uv run keepygaga memory init` to fill missing structure only when its message explicitly reports that the tree is not initialized. If it reports `invalid_source`, malformed content, or a specific invalid page, stop the installation and report the exact path to the user; do not run init or continue registration. After init, rerun Doctor regardless of the command exit code or whether the payload says `applied` or `no_op`, and treat the new `memory_tree` check as authoritative. For a new directory, run init to create the canonical tree. `memory init` must never overwrite existing files.
 4. Register `mcp_server.py` as a stdio server under the key `keepygaga`, using the virtual environment's native Python and an absolute `KEEPYGAGA_CONFIG`. Preserve unrelated host MCP settings, and do not sync `.venv` or `keepygaga.toml` between machines.
 5. Merge `docs/agent-contract.md` into the global host rules that are actually loaded, preserving unrelated settings.
-6. Run `uv run keepygaga doctor --json` and `uv run python scripts/smoke_mcp_server.py`, then confirm the host exposes exactly list, read, create, add, update, move, rename, and delete.
-7. On a first installation only, inspect content that predated this installation in the host's actually loaded global rules and identify candidate long-term personal preferences about how the user wants the Agent to respond and work. Skip this step for reinstalls, repairs, or upgrades, and do not use the Agent Contract or installation instructions merged in this run as candidate sources. Exclude safety boundaries, tool or memory routing, project rules, current state, inference, and facts recoverable from a direct source. Show the user the deduplicated candidates and ask once whether to import them into `preferences.md`; do not write before explicit confirmation. After confirmation, first `read` `preferences.md`, classify each candidate as covered / refines / new / conflict, and write confirmed candidates as `stated`. If the user declines or there are no candidates, write nothing and do not save an onboarding marker.
+6. If the host supports Hooks, read `docs/hooks/README.md`, select exactly the page for the current Agent host, and install only the capabilities documented on that page. Use the same physical memory root as Keepygaga, merge only Hook entries owned by that runtime, and preserve every unrelated host setting. If no compatible runtime is available, finish the MCP installation and report that Hook integration was not installed; do not invent or download Hook executables.
+7. Run `uv run keepygaga doctor --json` and `uv run python scripts/smoke_mcp_server.py`, then confirm the host exposes exactly list, read, create, add, update, move, rename, and delete. When Hooks were installed, also run the selected Agent host's verification.
+8. On a first installation only, inspect content that predated this installation in the host's actually loaded global rules and identify candidate long-term personal preferences about how the user wants the Agent to respond and work. Skip this step for reinstalls, repairs, or upgrades, and do not use the Agent Contract or installation instructions merged in this run as candidate sources. Exclude safety boundaries, tool or memory routing, project rules, current state, inference, and facts recoverable from a direct source. Show the user the deduplicated candidates and ask once whether to import them into `preferences.md`; do not write before explicit confirmation. After confirmation, first `read` `preferences.md`, classify each candidate as covered / refines / new / conflict, and write confirmed candidates as `stated`. If the user declines or there are no candidates, write nothing and do not save an onboarding marker.
 
 Report the files changed, memory root, MCP registration, validation results, and remaining gaps. Never print credentials.
 ```
@@ -80,6 +107,16 @@ tool names look like `mcp__keepygaga__read`:
 ```
 
 `KEEPYGAGA_CONFIG` overrides the default config path.
+
+## Hook integration
+
+Hook integration is optional and host-specific. It can inject the two core
+memory pages and routing listing at session start, remind the Agent to route
+memory work before each turn when the host supports it, and prompt Project /
+Memory Closeout through that host's supported event. The installing Agent must
+select the exact host contract from [`docs/hooks/`](docs/hooks/README.md) and use
+a compatible runtime already selected for the target machine; the MCP
+server remains fully usable when no Hook runtime is installed.
 
 ## Safety boundaries
 

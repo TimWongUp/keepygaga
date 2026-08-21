@@ -2,11 +2,31 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-**AI Agent 的记忆守护者。**
+**给 AI Agent 一套少而准的长期记忆。**
 
-Keepygaga 是一个温和、local-first 的记忆守护工具。持久的用户与环境记忆以
-可读的 Markdown 保存，每一次修改都由显式、带版本控制的 MCP 工具完成。没有
-数据库、索引或 Embedding 服务：记忆树本身就是产品。
+AI 不是记得越多越好。把每次对话、临时状态和项目细节都塞进长期记忆，只会让
+真正有用的信息被过时、无关的内容淹没。没有选择的记忆不是上下文，而是噪声。
+
+Keepygaga 只保存少量、能跨任务长期发挥作用的信息：用户是谁、希望 Agent
+怎样工作，以及少数持续关注的主题、责任或人物关系。这些记忆以本地可读的
+Markdown 保存，每次修改都通过显式、带版本控制的 MCP 工具完成；不需要数据库、
+索引或 Embedding 服务。
+
+对代码项目来说，重点也不是让 Agent 记住更多用户信息，而是把项目自己的术语、
+架构、操作说明和重要决定整理进 `AGENTS.md`、`CONTEXT.md` 与 `docs/`。
+Keepygaga 不替代项目文档，只提供少量、跨项目仍然有用的稳定个人上下文。
+
+**为什么不记录用户的“最近状态”？**
+
+不少 AI 平台会持续记录用户最近在做什么、最新进度和每一个短期计划。静默记录
+之后，大模型可能在无关对话中突然拿出这些状态，或在不合时机时主动与用户讨论，
+迫使用户纠正上下文或把话题拉回正轨。这种没有选择的召回，会让很快过期的信息
+变成一次又一次未经请求的干扰。
+
+Keepygaga 把临时状态留在当前对话或它的直接真源里，例如日历、任务管理器、
+项目文档、Issue 或 Git 历史。只有经过明确判断、确认能跨任务长期发挥作用的事实，
+才进入核心记忆。对代码项目来说，当前计划和进度应写进仓库自己的项目文档，
+而不是用户的个人记忆。
 
 它刻意保持精简的 MCP 接口——恰好八个动作型工具：
 
@@ -18,8 +38,7 @@ Keepygaga 是一个温和、local-first 的记忆守护工具。持久的用户�
   `authorization="user_requested"`。
 
 核心记忆由 `profile.md`、`preferences.md`，以及 `topics/`、`areas/` 和
-`people/` 下的直属页面组成。核心记忆永不进入索引。项目指令仍保留在各项目
-自己的 Agent 入口和长期上下文中。
+`people/` 下的直属页面组成。核心记忆永不进入索引。
 
 ## 环境要求
 
@@ -42,8 +61,9 @@ Keepygaga 可以直接使用普通文件系统目录，不要求安装或运行 
 3. 如果复用现有记忆树，把 `memory.root` 直接指向它，不复制、不移动、不改写页面，并先运行 `uv run keepygaga doctor --json`。读取 JSON 中 `id="memory_tree"` 的检查：仅当其 message 明确报告未初始化时，才运行 `uv run keepygaga memory init` 补齐缺失结构；如果报告 `invalid_source`、格式错误或具体页面无效，停止安装并把确切路径报告给用户，不运行 init，也不继续注册。init 后无论命令退出码或 payload 是 `applied` 还是 `no_op`，都重新运行 Doctor，并以新的 `memory_tree` 检查为准。如果使用新目录，运行 init 创建规范树。`memory init` 不得覆盖已有文件。
 4. 使用仓库虚拟环境中的原生 Python 和绝对 `KEEPYGAGA_CONFIG`，把 `mcp_server.py` 作为 stdio server 注册到 key `keepygaga`；保留宿主其他 MCP 配置，不同步 `.venv` 或 `keepygaga.toml` 到其他机器。
 5. 把 `docs/agent-contract.md` 合并到宿主实际加载的全局规则入口，保留无关设置。
-6. 运行 `uv run keepygaga doctor --json` 和 `uv run python scripts/smoke_mcp_server.py`，再确认宿主恰好暴露 list、read、create、add、update、move、rename、delete。
-7. 仅在首次安装时，检查本次安装前已存在于宿主实际加载的全局规则中的内容，筛出“用户希望 Agent 如何回应和工作”的长期个人偏好候选；重装、修复或升级时跳过，也不把本次合并的 Agent Contract 或安装指令作为候选来源。排除安全边界、工具或记忆路由、项目规则、当前状态、推断和可从直接真源重取的事实。向用户展示去重后的候选，并只问一次是否导入 `preferences.md`；明确确认前不写。确认后先 `read` `preferences.md`，按 covered / refines / new / conflict 处理，并把用户确认的候选以 `stated` 写入；拒绝或无候选则不写，也不保存 onboarding 标记。
+6. 如果宿主支持 Hook，读取 `docs/hooks/README.md`，只选择当前 Agent 对应的专页，并且只安装该页明确支持的能力。Hook 必须使用与 Keepygaga 相同的物理记忆根，只合并该 runtime 自有条目，并保留宿主全部无关设置。若没有兼容 runtime，继续完成 MCP 安装并明确报告 Hook 未安装；不得自行编造或下载 Hook 可执行文件。
+7. 运行 `uv run keepygaga doctor --json` 和 `uv run python scripts/smoke_mcp_server.py`，再确认宿主恰好暴露 list、read、create、add、update、move、rename、delete。若安装了 Hook，再完成所选 Agent 专页中的验证。
+8. 仅在首次安装时，检查本次安装前已存在于宿主实际加载的全局规则中的内容，筛出“用户希望 Agent 如何回应和工作”的长期个人偏好候选；重装、修复或升级时跳过，也不把本次合并的 Agent Contract 或安装指令作为候选来源。排除安全边界、工具或记忆路由、项目规则、当前状态、推断和可从直接真源重取的事实。向用户展示去重后的候选，并只问一次是否导入 `preferences.md`；明确确认前不写。确认后先 `read` `preferences.md`，按 covered / refines / new / conflict 处理，并把用户确认的候选以 `stated` 写入；拒绝或无候选则不写，也不保存 onboarding 标记。
 
 最终报告修改文件、memory root、MCP 注册、验证结果和剩余缺口，绝不输出凭据。
 ```
@@ -77,6 +97,14 @@ Markdown 记忆树，且拒绝覆盖已有文件。不带子命令运行 CLI 时
 ```
 
 `KEEPYGAGA_CONFIG` 用于覆盖默认配置路径。
+
+## Hook 集成
+
+Hook 集成是可选且因宿主而异的增强能力：它可以在 Session 启动时注入两个核心
+记忆首页与路由 listing，在宿主支持时于每轮前提醒 Agent 判断记忆路由，并通过该
+宿主真正支持的事件提示 Project / Memory Closeout。安装 Agent 必须从
+[`docs/hooks/`](docs/hooks/README.md) 选择准确的 Agent 专页，并使用目标机器已经
+选定的兼容 runtime；没有安装 Hook runtime 时，MCP server 仍可完整使用。
 
 ## 安全边界
 
