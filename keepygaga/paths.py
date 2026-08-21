@@ -1,17 +1,16 @@
 from __future__ import annotations
 
+import re
 from pathlib import PurePosixPath
 
 from keepygaga.errors import MemoryValidationError
 
 FIXED_PATHS = ("profile.md", "preferences.md")
 DYNAMIC_DIRS = ("topics", "areas", "people")
-DYNAMIC_STEM_RE = None  # Will be set by memory.py to avoid circular import
+DYNAMIC_STEM_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
 
 def canonical_memory_path(value: str) -> str:
-    from keepygaga.memory import DYNAMIC_DIRS, DYNAMIC_STEM_RE, FIXED_PATHS
-
     if not isinstance(value, str):
         raise MemoryValidationError("invalid_path", "path must be a string")
     if not value or value.strip() != value or "\\" in value or "\x00" in value:

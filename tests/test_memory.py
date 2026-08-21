@@ -7,6 +7,8 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+from keepygaga import codec, paths
+from keepygaga import memory as memory_module
 from keepygaga.config import MemoryFilesConfig
 from keepygaga.memory import (
     AddOperation,
@@ -26,6 +28,19 @@ from keepygaga.memory import (
 )
 
 CONTRACT_ROOT = Path(__file__).resolve().parents[1] / "contracts" / "core-memory-v1"
+
+
+def test_memory_module_reexports_canonical_models_and_paths() -> None:
+    assert memory_module.Basis is codec.Basis
+    assert memory_module.Fact is codec.Fact
+    assert memory_module.MemoryDocument is codec.MemoryDocument
+    assert memory_module.MAX_FACT_CONTENT_CHARS == codec.MAX_FACT_CONTENT_CHARS
+    assert memory_module.PROFILE_FACT_CONTENT_LIMIT == codec.PROFILE_FACT_CONTENT_LIMIT
+    assert memory_module.FACT_LINE_RE is codec.FACT_LINE_RE
+    assert memory_module.FRONTMATTER_KEY_RE is codec.FRONTMATTER_KEY_RE
+    assert memory_module.DYNAMIC_STEM_RE is paths.DYNAMIC_STEM_RE
+    assert memory_module.canonical_memory_path is paths.canonical_memory_path
+    assert memory_module.canonical_path is paths.canonical_path
 
 
 @pytest.fixture
