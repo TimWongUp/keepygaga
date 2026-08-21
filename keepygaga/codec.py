@@ -5,15 +5,22 @@ import json
 import re
 import unicodedata
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import PurePosixPath
-from typing import TYPE_CHECKING
+from typing import Literal
 
 import frontmatter
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from keepygaga.errors import MemoryValidationError
+from keepygaga.paths import canonical_memory_path
 
-if TYPE_CHECKING:
-    from keepygaga.memory import Fact
+MAX_FACT_CONTENT_CHARS = 4096
+PROFILE_FACT_CONTENT_LIMIT = 300
+FACT_LINE_RE = re.compile(r"^- \[(stated|observed)\] (.+)$")
+FRONTMATTER_KEY_RE = re.compile(r"^(name|description|sources|aliases):")
+
+Basis = Literal["stated", "observed"]
 
 
 def normalize_text(text: str) -> str:
@@ -27,6 +34,33 @@ def unicode_chars(text: str) -> int:
 def sha256_text(text: str) -> str:
     digest = hashlib.sha256(normalize_text(text).encode("utf-8")).hexdigest()
     return f"sha256:{digest}"
+
+
+class StrictModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class Fact(StrictModel):
+    basis: Basis
+    content: str = Field(max_length=MAX_FACT_CONTENT_CHARS)
+
+    @field_validator("content")
+    @classmethod
+    def validate_content(cls, value: str) -> str:
+        normalized = normalize_text(value).strip()
+        if not normalized:
+            raise ValueError("fact content must not be empty")
+        if "\x00" in normalized or "\n" in normalized:
+            raise ValueError("fact content must be one non-empty line")
+        return normalized
+
+
+@dataclass(frozen=True)
+class MemoryDocument:
+    name: str
+    description: str
+    aliases: tuple[str, ...]
+    facts: tuple[Fact, ...]
 
 
 def _identity(value: str) -> str:
@@ -81,8 +115,7 @@ def receipt(action: str, scope: str, contents: Sequence[str]) -> str:
     return f"{fence}{padding}{text}{padding}{fence}"
 
 
-def validate_document(document, path: str):
-    from keepygaga.memory import PROFILE_FACT_CONTENT_LIMIT, Fact, MemoryDocument
+def validate_document(document: MemoryDocument, path: str) -> MemoryDocument:
     expected_name = PurePosixPath(path).stem
     try:
         name = _one_line(document.name, "name")
@@ -125,9 +158,7 @@ def validate_document(document, path: str):
     )
 
 
-def parse_memory_file(text: str, path: str):
-    from keepygaga.memory import FACT_LINE_RE, FRONTMATTER_KEY_RE, Fact, MemoryDocument
-    from keepygaga.paths import canonical_memory_path
+def parse_memory_file(text: str, path: str) -> MemoryDocument:
     canonical_memory_path(path)
     normalized = normalize_text(text)
     if not normalized.startswith("---\n"):
@@ -213,7 +244,7 @@ def parse_memory_file(text: str, path: str):
     )
 
 
-def render_memory_file(document, path: str) -> str:
+def render_memory_file(document: MemoryDocument, path: str) -> str:
     validated = validate_document(document, path)
     lines = [
         "---",
@@ -229,4 +260,3 @@ def render_memory_file(document, path: str) -> str:
         lines.append("")
         lines.extend(f"- [{fact.basis}] {fact.content}" for fact in validated.facts)
     return "\n".join(lines).rstrip() + "\n"
-

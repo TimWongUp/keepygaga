@@ -12,8 +12,32 @@ from pathlib import Path, PurePosixPath
 from typing import Annotated, Literal
 
 from filelock import FileLock, Timeout
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import Field, field_validator, model_validator
 
+from keepygaga.codec import (
+    FACT_LINE_RE as FACT_LINE_RE,
+)
+from keepygaga.codec import (
+    FRONTMATTER_KEY_RE as FRONTMATTER_KEY_RE,
+)
+from keepygaga.codec import (
+    MAX_FACT_CONTENT_CHARS as MAX_FACT_CONTENT_CHARS,
+)
+from keepygaga.codec import (
+    PROFILE_FACT_CONTENT_LIMIT as PROFILE_FACT_CONTENT_LIMIT,
+)
+from keepygaga.codec import (
+    Basis as Basis,
+)
+from keepygaga.codec import (
+    Fact as Fact,
+)
+from keepygaga.codec import (
+    MemoryDocument as MemoryDocument,
+)
+from keepygaga.codec import (
+    StrictModel as StrictModel,
+)
 from keepygaga.codec import (
     _identity,
     _one_line,
@@ -28,48 +52,86 @@ from keepygaga.codec import (
 )
 from keepygaga.config import MemoryFilesConfig
 from keepygaga.errors import MemoryValidationError
+from keepygaga.paths import (
+    DYNAMIC_DIRS as DYNAMIC_DIRS,
+)
+from keepygaga.paths import (
+    DYNAMIC_STEM_RE as DYNAMIC_STEM_RE,
+)
+from keepygaga.paths import (
+    FIXED_PATHS as FIXED_PATHS,
+)
+from keepygaga.paths import (
+    canonical_memory_path as canonical_memory_path,
+)
+from keepygaga.paths import (
+    canonical_path as canonical_path,
+)
+from keepygaga.paths import (
+    is_dynamic_path,
+)
 
-Basis = Literal["stated", "observed"]
-
-FIXED_PATHS = ("profile.md", "preferences.md")
-DYNAMIC_DIRS = ("topics", "areas", "people")
 PROFILE_SOFT_LIMIT = 2000
 PREFERENCES_SOFT_LIMIT = 2000
 PAGE_SOFT_LIMIT = 8000
 MAX_READ_PATHS = 20
 MAX_MUTATION_OPERATIONS = 20
 MAX_FACTS_PER_OPERATION = 50
-MAX_FACT_CONTENT_CHARS = 4096
-PROFILE_FACT_CONTENT_LIMIT = 300
 
-DYNAMIC_STEM_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 VERSION_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
-FACT_LINE_RE = re.compile(r"^- \[(stated|observed)\] (.+)$")
-FRONTMATTER_KEY_RE = re.compile(r"^(name|description|sources|aliases):")
 
 DEFAULT_DESCRIPTIONS = {
     "profile.md": "用户的稳定身份、背景与长期个人事实。",
     "preferences.md": "用户希望 Agent 如何回应和工作的长期偏好。",
 }
 
-
-class StrictModel(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-
-class Fact(StrictModel):
-    basis: Basis
-    content: str = Field(max_length=MAX_FACT_CONTENT_CHARS)
-
-    @field_validator("content")
-    @classmethod
-    def validate_content(cls, value: str) -> str:
-        normalized = normalize_text(value).strip()
-        if not normalized:
-            raise ValueError("fact content must not be empty")
-        if "\x00" in normalized or "\n" in normalized:
-            raise ValueError("fact content must be one non-empty line")
-        return normalized
+__all__ = [
+    "AddOperation",
+    "AddOperations",
+    "Basis",
+    "CreateOperation",
+    "CreateOperations",
+    "DEFAULT_DESCRIPTIONS",
+    "DYNAMIC_DIRS",
+    "DYNAMIC_STEM_RE",
+    "DeleteFactOperation",
+    "DeleteOperation",
+    "DeleteOperations",
+    "DeletePageOperation",
+    "FACT_LINE_RE",
+    "FIXED_PATHS",
+    "FRONTMATTER_KEY_RE",
+    "Fact",
+    "LoadedFile",
+    "MAX_FACTS_PER_OPERATION",
+    "MAX_FACT_CONTENT_CHARS",
+    "MAX_MUTATION_OPERATIONS",
+    "MAX_READ_PATHS",
+    "MemoryDocument",
+    "MemoryStore",
+    "MoveOperation",
+    "MoveOperations",
+    "PAGE_SOFT_LIMIT",
+    "PREFERENCES_SOFT_LIMIT",
+    "PROFILE_FACT_CONTENT_LIMIT",
+    "PROFILE_SOFT_LIMIT",
+    "ReadPaths",
+    "RenameOperation",
+    "RenameOperations",
+    "StrictModel",
+    "UpdateFactOperation",
+    "UpdateOperation",
+    "UpdateOperations",
+    "UpdatePageOperation",
+    "VERSION_RE",
+    "canonical_memory_path",
+    "canonical_path",
+    "initialize_memory_tree",
+    "is_dynamic_path",
+    "parse_memory_file",
+    "render_memory_file",
+    "soft_limit",
+]
 
 
 class CreateOperation(StrictModel):
@@ -180,58 +242,11 @@ ReadPaths = Annotated[list[str], Field(min_length=1, max_length=MAX_READ_PATHS)]
 
 
 @dataclass(frozen=True)
-class MemoryDocument:
-    name: str
-    description: str
-    aliases: tuple[str, ...]
-    facts: tuple[Fact, ...]
-
-
-@dataclass(frozen=True)
 class LoadedFile:
     path: str
     document: MemoryDocument
     text: str
     version: str
-
-
-def canonical_memory_path(value: str) -> str:
-    if not isinstance(value, str):
-        raise MemoryValidationError("invalid_path", "path must be a string")
-    if not value or value.strip() != value or "\\" in value or "\x00" in value:
-        raise MemoryValidationError(
-            "invalid_path", "path must be a canonical POSIX-relative key"
-        )
-    path = PurePosixPath(value)
-    if path.is_absolute() or str(path) != value or ".." in path.parts:
-        raise MemoryValidationError(
-            "invalid_path", "path must be a canonical POSIX-relative key"
-        )
-    if value in FIXED_PATHS:
-        return value
-    if (
-        len(path.parts) == 2
-        and path.parts[0] in DYNAMIC_DIRS
-        and path.suffix == ".md"
-        and DYNAMIC_STEM_RE.fullmatch(path.stem)
-        and not path.name.startswith(".")
-    ):
-        return value
-    raise MemoryValidationError(
-        "invalid_path",
-        "path must be a fixed memory file or one direct topics/areas/people "
-        "Markdown child with a lowercase kebab-case stem",
-        path=value,
-    )
-
-
-def canonical_path(value: str) -> str:
-    return canonical_memory_path(value)
-
-
-def is_dynamic_path(path: str) -> bool:
-    canonical = canonical_memory_path(path)
-    return PurePosixPath(canonical).parts[0] in DYNAMIC_DIRS
 
 
 def soft_limit(path: str) -> int:
