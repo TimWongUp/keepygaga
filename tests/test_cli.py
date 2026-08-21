@@ -24,7 +24,7 @@ def test_memory_init_initializes_fixed_pages(
     config_path = tmp_path / "keepygaga.toml"
     memory_root = tmp_path / "memory"
     config_path.write_text(
-        f'[memory]\nroot = "{memory_root}"\n',
+        f'[memory]\nroot = "{memory_root.as_posix()}"\n',
         encoding="utf-8",
     )
 
@@ -49,7 +49,7 @@ def test_doctor_prints_json_and_reports_eight_tools(
     config_path = tmp_path / "keepygaga.toml"
     memory_root = tmp_path / "memory"
     config_path.write_text(
-        f'[memory]\nroot = "{memory_root}"\n',
+        f'[memory]\nroot = "{memory_root.as_posix()}"\n',
         encoding="utf-8",
     )
     assert cli.main(["--config", str(config_path), "memory", "init"]) == 0
