@@ -637,3 +637,29 @@ def test_atomic_replace_failure_leaves_no_temp_file(
     )
     assert result["status"] == "write_failed"
     assert not list(root.glob(".profile.md.*.tmp"))
+
+
+def test_add_duplicate_path_in_batch_returns_duplicate_target(
+    memory_store: tuple[Path, MemoryStore],
+) -> None:
+    root, store = memory_store
+    result = store.add(
+        [
+            AddOperation(
+                path="preferences.md",
+                if_version=version(store, "preferences.md"),
+                facts=[fact("First fact.")],
+            ),
+            AddOperation(
+                path="preferences.md",
+                if_version=version(store, "preferences.md"),
+                facts=[fact("Second fact.")],
+            ),
+        ]
+    )
+    assert result["status"] == "duplicate_target"
+    assert "more than once" in str(result.get("message", ""))
+    # Verify no files were written
+    content = (root / "preferences.md").read_text(encoding="utf-8")
+    assert "First fact." not in content
+    assert "Second fact." not in content

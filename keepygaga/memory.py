@@ -1,24 +1,33 @@
 from __future__ import annotations
 
 import errno
-import hashlib
-import json
 import os
 import re
 import stat
 import tempfile
-import unicodedata
 from collections.abc import Callable, Sequence
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Annotated, Literal
 
-import frontmatter
 from filelock import FileLock, Timeout
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from keepygaga.codec import (
+    _identity,
+    _one_line,
+    fact_key,
+    normalize_text,
+    parse_memory_file,
+    receipt,
+    render_memory_file,
+    sha256_text,
+    unicode_chars,
+    validate_document,
+)
 from keepygaga.config import MemoryFilesConfig
+from keepygaga.errors import MemoryValidationError
 
 Basis = Literal["stated", "observed"]
 
@@ -85,7 +94,7 @@ class UpdateFactOperation(StrictModel):
 
     @model_validator(mode="after")
     def validate_change(self) -> UpdateFactOperation:
-        if _fact_key(self.old_fact) == _fact_key(self.new_fact):
+        if fact_key(self.old_fact) == fact_key(self.new_fact):
             raise ValueError("old_fact and new_fact must differ")
         return self
 
@@ -184,245 +193,6 @@ class LoadedFile:
     document: MemoryDocument
     text: str
     version: str
-
-
-class MemoryValidationError(ValueError):
-    def __init__(
-        self,
-        status: str,
-        message: str,
-        *,
-        path: str | None = None,
-        latest: dict[str, object] | None = None,
-        applied_paths: Sequence[str] | None = None,
-    ):
-        self.status = status
-        self.path = path
-        self.latest = latest
-        self.applied_paths = list(applied_paths or [])
-        super().__init__(message)
-
-    def response(self) -> dict[str, object]:
-        payload: dict[str, object] = {"status": self.status, "message": str(self)}
-        if self.path is not None:
-            payload["path"] = self.path
-        if self.latest is not None:
-            payload["latest"] = self.latest
-        if self.applied_paths:
-            payload["applied_paths"] = self.applied_paths
-        return payload
-
-
-def normalize_text(text: str) -> str:
-    return text.replace("\r\n", "\n").replace("\r", "\n")
-
-
-def unicode_chars(text: str) -> int:
-    return len(normalize_text(text))
-
-
-def sha256_text(text: str) -> str:
-    digest = hashlib.sha256(normalize_text(text).encode("utf-8")).hexdigest()
-    return f"sha256:{digest}"
-
-
-def _identity(value: str) -> str:
-    return unicodedata.normalize("NFKC", value.strip()).casefold()
-
-
-def _one_line(value: str, field: str) -> str:
-    normalized = normalize_text(value).strip()
-    if not normalized:
-        raise ValueError(f"{field} must not be empty")
-    if "\x00" in normalized or "\n" in normalized:
-        raise ValueError(f"{field} must be one non-empty line")
-    return normalized
-
-
-def _string_array(
-    values: object,
-    field: str,
-    *,
-    maximum: int | None = None,
-) -> tuple[str, ...]:
-    if not isinstance(values, list) or not all(
-        isinstance(item, str) for item in values
-    ):
-        raise MemoryValidationError("invalid_source", f"{field} must be a string array")
-    if maximum is not None and len(values) > maximum:
-        raise MemoryValidationError(
-            "invalid_entry", f"{field} cannot contain more than {maximum} values"
-        )
-    try:
-        normalized = tuple(_one_line(item, field) for item in values)
-    except ValueError as exc:
-        raise MemoryValidationError("invalid_entry", str(exc)) from exc
-    identities = [_identity(item) for item in normalized]
-    if len(identities) != len(set(identities)):
-        raise MemoryValidationError(
-            "invalid_entry", f"{field} contains duplicate values"
-        )
-    return normalized
-
-
-def _fact_key(fact: Fact) -> tuple[str, str]:
-    return fact.basis, fact.content
-
-
-def _receipt(action: str, scope: str, contents: Sequence[str]) -> str:
-    prefix = f"🧠 {action} [{scope}]"
-    text = f"{prefix}: {' · '.join(contents)}" if contents else prefix
-    backtick_runs = re.findall(r"`+", text)
-    fence = "`" * (max((len(run) for run in backtick_runs), default=0) + 1)
-    padding = " " if text.endswith("`") else ""
-    return f"{fence}{padding}{text}{padding}{fence}"
-
-
-def _validate_document(document: MemoryDocument, path: str) -> MemoryDocument:
-    expected_name = PurePosixPath(path).stem
-    try:
-        name = _one_line(document.name, "name")
-        description = _one_line(document.description, "description")
-    except ValueError as exc:
-        raise MemoryValidationError("invalid_entry", str(exc), path=path) from exc
-    if name != expected_name:
-        raise MemoryValidationError(
-            "invalid_source",
-            f"{path} frontmatter name must equal file stem {expected_name!r}",
-            path=path,
-        )
-    aliases = _string_array(list(document.aliases), "aliases", maximum=8)
-    if _identity(name) in {_identity(alias) for alias in aliases}:
-        raise MemoryValidationError(
-            "invalid_entry", f"{path} aliases cannot repeat its name", path=path
-        )
-    facts = tuple(Fact.model_validate(fact) for fact in document.facts)
-    if (
-        path == "profile.md"
-        and sum(unicode_chars(fact.content) for fact in facts)
-        > PROFILE_FACT_CONTENT_LIMIT
-    ):
-        raise MemoryValidationError(
-            "invalid_entry",
-            "profile.md Fact.content cannot exceed "
-            f"{PROFILE_FACT_CONTENT_LIMIT} characters in total",
-            path=path,
-        )
-    fact_keys = [_fact_key(fact) for fact in facts]
-    if len(fact_keys) != len(set(fact_keys)):
-        raise MemoryValidationError(
-            "invalid_entry", f"{path} contains duplicate facts", path=path
-        )
-    return MemoryDocument(
-        name=name,
-        description=description,
-        aliases=aliases,
-        facts=facts,
-    )
-
-
-def parse_memory_file(text: str, path: str) -> MemoryDocument:
-    canonical_memory_path(path)
-    normalized = normalize_text(text)
-    if not normalized.startswith("---\n"):
-        raise MemoryValidationError(
-            "invalid_source", f"{path} must begin with YAML frontmatter", path=path
-        )
-    lines = normalized.splitlines()
-    try:
-        closing_index = lines.index("---", 1)
-    except ValueError as exc:
-        raise MemoryValidationError(
-            "invalid_source",
-            f"{path} frontmatter must end with a --- delimiter",
-            path=path,
-        ) from exc
-    field_order = [
-        match.group(1)
-        for line in lines[1:closing_index]
-        if (match := FRONTMATTER_KEY_RE.match(line)) is not None
-    ]
-    accepted_orders = (
-        ["name", "description", "aliases"],
-        ["name", "description", "sources", "aliases"],
-    )
-    if field_order not in accepted_orders:
-        raise MemoryValidationError(
-            "invalid_source",
-            f"{path} frontmatter must contain name, description, aliases in order",
-            path=path,
-        )
-    try:
-        post = frontmatter.loads(normalized)
-    except Exception as exc:
-        raise MemoryValidationError(
-            "invalid_source",
-            f"{path} frontmatter could not be parsed: {type(exc).__name__}: {exc}",
-            path=path,
-        ) from exc
-    metadata = dict(post.metadata)
-    accepted_keys = (
-        ("name", "description", "aliases"),
-        ("name", "description", "sources", "aliases"),
-    )
-    if tuple(metadata) not in accepted_keys:
-        raise MemoryValidationError(
-            "invalid_source",
-            f"{path} frontmatter must contain name, description, aliases in order",
-            path=path,
-        )
-    if not isinstance(metadata["name"], str) or not isinstance(
-        metadata["description"], str
-    ):
-        raise MemoryValidationError(
-            "invalid_source", f"{path} name and description must be strings", path=path
-        )
-    if "sources" in metadata:
-        _string_array(metadata["sources"], "sources")
-    aliases = _string_array(metadata["aliases"], "aliases", maximum=8)
-    facts: list[Fact] = []
-    body = normalize_text(post.content).strip()
-    if body:
-        for line in body.splitlines():
-            if not line.strip():
-                continue
-            match = FACT_LINE_RE.fullmatch(line)
-            if match is None:
-                raise MemoryValidationError(
-                    "invalid_source",
-                    f"{path} body may contain only - [stated]/[observed] bullets",
-                    path=path,
-                )
-            basis = match.group(1)
-            assert basis in ("stated", "observed")
-            facts.append(Fact(basis=basis, content=match.group(2)))
-    return _validate_document(
-        MemoryDocument(
-            name=metadata["name"],
-            description=metadata["description"],
-            aliases=aliases,
-            facts=tuple(facts),
-        ),
-        path,
-    )
-
-
-def render_memory_file(document: MemoryDocument, path: str) -> str:
-    validated = _validate_document(document, path)
-    lines = [
-        "---",
-        f"name: {json.dumps(validated.name, ensure_ascii=False)}",
-        f"description: {json.dumps(validated.description, ensure_ascii=False)}",
-        "aliases: "
-        + json.dumps(
-            list(validated.aliases), ensure_ascii=False, separators=(",", ":")
-        ),
-        "---",
-    ]
-    if validated.facts:
-        lines.append("")
-        lines.extend(f"- [{fact.basis}] {fact.content}" for fact in validated.facts)
-    return "\n".join(lines).rstrip() + "\n"
 
 
 def canonical_memory_path(value: str) -> str:
@@ -766,6 +536,7 @@ class MemoryStore:
 
     def _add_locked(self, operations: list[AddOperation]) -> dict[str, object]:
         self._require_operations(operations)
+        self._check_duplicate_targets([op.path for op in operations])
         initial = self._load_catalog()
         working = dict(initial)
         mutations: list[dict[str, object]] = []
@@ -790,6 +561,7 @@ class MemoryStore:
 
     def _update_locked(self, operations: list[UpdateOperation]) -> dict[str, object]:
         self._require_operations(operations)
+        self._check_duplicate_targets([op.path for op in operations])
         initial = self._load_catalog()
         working = dict(initial)
         mutations: list[dict[str, object]] = []
@@ -822,7 +594,7 @@ class MemoryStore:
                     index = next(
                         index
                         for index, fact in enumerate(facts)
-                        if _fact_key(fact) == _fact_key(operation.old_fact)
+                        if fact_key(fact) == fact_key(operation.old_fact)
                     )
                 except StopIteration as exc:
                     raise MemoryValidationError(
@@ -843,6 +615,9 @@ class MemoryStore:
 
     def _move_locked(self, operations: list[MoveOperation]) -> dict[str, object]:
         self._require_operations(operations)
+        self._check_duplicate_targets(
+            [op.source_path for op in operations] + [op.destination_path for op in operations]
+        )
         initial = self._load_catalog()
         working = dict(initial)
         mutations: list[dict[str, object]] = []
@@ -858,7 +633,7 @@ class MemoryStore:
                 index = next(
                     index
                     for index, fact in enumerate(source_facts)
-                    if _fact_key(fact) == _fact_key(operation.fact)
+                    if fact_key(fact) == fact_key(operation.fact)
                 )
             except StopIteration as exc:
                 raise MemoryValidationError(
@@ -895,6 +670,7 @@ class MemoryStore:
 
     def _rename_locked(self, operations: list[RenameOperation]) -> dict[str, object]:
         self._require_operations(operations)
+        self._check_duplicate_targets([op.path for op in operations])
         initial = self._load_catalog()
         working = dict(initial)
         mutations: list[dict[str, object]] = []
@@ -932,6 +708,7 @@ class MemoryStore:
 
     def _delete_locked(self, operations: list[DeleteOperation]) -> dict[str, object]:
         self._require_operations(operations)
+        self._check_duplicate_targets([op.path for op in operations])
         initial = self._load_catalog()
         working = dict(initial)
         mutations: list[dict[str, object]] = []
@@ -951,7 +728,7 @@ class MemoryStore:
                     index = next(
                         index
                         for index, fact in enumerate(facts)
-                        if _fact_key(fact) == _fact_key(operation.fact)
+                        if fact_key(fact) == fact_key(operation.fact)
                     )
                 except StopIteration as exc:
                     raise MemoryValidationError(
@@ -1121,7 +898,7 @@ class MemoryStore:
         text = render_memory_file(document, path)
         return LoadedFile(
             path=path,
-            document=_validate_document(document, path),
+            document=validate_document(document, path),
             text=text,
             version=sha256_text(text),
         )
@@ -1172,6 +949,18 @@ class MemoryStore:
             )
 
     @staticmethod
+    def _check_duplicate_targets(paths: Sequence[str]) -> None:
+        seen: set[str] = set()
+        for path in paths:
+            if path in seen:
+                raise MemoryValidationError(
+                    "duplicate_target",
+                    f"path appears more than once in this batch: {path}",
+                    path=path,
+                )
+            seen.add(path)
+
+    @staticmethod
     def _mutation(
         action: str, target: str, path: str, contents: Sequence[str]
     ) -> dict[str, object]:
@@ -1179,7 +968,7 @@ class MemoryStore:
             "action": action,
             "target": target,
             "path": path,
-            "receipt": _receipt(action, path, contents),
+            "receipt": receipt(action, path, contents),
         }
 
 
@@ -1187,7 +976,7 @@ def _validate_catalog(files: dict[str, LoadedFile]) -> None:
     identities: dict[str, tuple[str, str]] = {}
     for path, loaded in files.items():
         canonical_memory_path(path)
-        document = _validate_document(loaded.document, path)
+        document = validate_document(loaded.document, path)
         for kind, value in (
             ("name", document.name),
             *(("alias", alias) for alias in document.aliases),
