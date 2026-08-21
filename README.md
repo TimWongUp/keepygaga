@@ -108,13 +108,20 @@ tool names look like `mcp__keepygaga__read`:
 
 `KEEPYGAGA_CONFIG` overrides the default config path.
 
-## Hook integration
+## Core capabilities (self-contained)
 
-Hook integration is optional and host-specific. It can inject the two core
+The MCP server is fully self-contained in this repository. After uv sync,
+keepygaga doctor, and the smoke test pass, all eight memory tools are ready
+to use. No external runtime or service is required.
+
+## Optional: Hook integration (requires external runtime)
+
+Hook integration is **optional** and requires an external Agent Hook Runtime
+that is **not included** in this repository. It can inject the two core
 memory pages and routing listing at session start, remind the Agent to route
 memory work before each turn when the host supports it, and prompt Project /
 Memory Closeout through that host's supported event. The installing Agent must
-select the exact host contract from [`docs/hooks/`](docs/hooks/README.md) and use
+If you want Hook integration, the installing Agent must select the exact host contract from [`docs/hooks/`](docs/hooks/README.md) and use
 a compatible runtime already selected for the target machine; the MCP
 server remains fully usable when no Hook runtime is installed.
 

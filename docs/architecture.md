@@ -41,6 +41,19 @@ agents-memory/
 - 格式、path、identity、version 或授权无效时保留现场并返回结构化失败。
 - applied mutation 返回带安全 CommonMark 行内代码标记的 receipt；读取、no-op 和失败不返回 receipt。
 
+
+## Threat model
+
+Keepygaga 的安全边界分为三层，各自由不同主体保证：
+
+| 边界 | 保证方式 | 责任方 |
+|------|----------|--------|
+| 文件系统安全 | canonical path 白名单、symlink 检查、原子替换、文件锁 | 代码强制 |
+| 用户意图授权 | `delete` 要求 `authorization="user_requested"`；宿主和 Agent 必须确保用户当轮明确授权后才调用 | 宿主 + Agent |
+| 内容信任 | Memory Root 内 Markdown 被视为可信输入；格式校验不防御恶意内容 | 本地环境 |
+
+`authorization="user_requested"` 是 Agent 自我声明的审计字段，不是服务端可验证的授权凭证。Keepygaga 不依赖它作为硬安全保障；真正的用户意图确认由宿主和 Agent 行为约束保证。
+
 ## Non-goals
 
 Keepygaga 不负责跨文件崩溃恢复、恶意本地并发或消除 version 复核与原子替换之间不可避免的极短竞态窗口，也不负责 Vault wikilink 校验或重写、writer provenance、语义匹配、会话历史、候选池、自动删除、压缩、拆分或转移。
