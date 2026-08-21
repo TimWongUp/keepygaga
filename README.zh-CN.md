@@ -57,9 +57,9 @@ Keepygaga 可以直接使用普通文件系统目录，不要求安装或运行 
 请为你自己安装并接入 https://github.com/TimWongUp/keepygaga。
 
 1. 读取仓库 `AGENTS.md` 和当前宿主的 MCP 文档，并确认 Agent 实际运行在原生 Windows、macOS、Linux 还是 WSL；后续路径和 Python 可执行文件必须属于同一运行环境。
-2. 运行 `uv sync`，把 `keepygaga.example.toml` 复制为本机 `keepygaga.toml`，再解析 `memory.root`：优先使用用户本轮明确提供的现有记忆树，其次复用现有 Keepygaga 配置中唯一且有效的记忆树；不要扫描整块磁盘。若没有现有记忆树，选择一个可写的新目录；若候选不唯一或意图不清楚，先询问用户最小缺失项。
+2. 运行 `uv sync`，把 `keepygaga.example.toml` 复制为本机 `keepygaga.toml`，再解析 `memory.root`：优先使用用户本轮明确提供的现有记忆树，其次复用现有 Keepygaga 配置中唯一且有效的记忆树；不要扫描整块磁盘。若没有现有记忆树，选择 Keepygaga 仓库之外、且不会公开共享或自动发布的可写新目录；只有访问范围私密且可信时才可使用同步目录。若候选不唯一或意图不清楚，先询问用户最小缺失项。
 3. 如果复用现有记忆树，把 `memory.root` 直接指向它，不复制、不移动、不改写页面，并先运行 `uv run keepygaga doctor --json`。读取 JSON 中 `id="memory_tree"` 的检查：仅当其 message 明确报告未初始化时，才运行 `uv run keepygaga memory init` 补齐缺失结构；如果报告 `invalid_source`、格式错误或具体页面无效，停止安装并把确切路径报告给用户，不运行 init，也不继续注册。init 后无论命令退出码或 payload 是 `applied` 还是 `no_op`，都重新运行 Doctor，并以新的 `memory_tree` 检查为准。如果使用新目录，运行 init 创建规范树。`memory init` 不得覆盖已有文件。
-4. 使用仓库虚拟环境中的原生 Python 和绝对 `KEEPYGAGA_CONFIG`，把 `mcp_server.py` 作为 stdio server 注册到 key `keepygaga`；保留宿主其他 MCP 配置，不同步 `.venv` 或 `keepygaga.toml` 到其他机器。
+4. 使用仓库虚拟环境中的原生 Python，以 `-m` 和 `keepygaga.server` 作为参数，把 `keepygaga.server` 注册为 key `keepygaga` 下的 stdio server，并设置绝对 `KEEPYGAGA_CONFIG`；保留宿主其他 MCP 配置，不同步 `.venv` 或 `keepygaga.toml` 到其他机器。
 5. 把 `docs/agent-contract.md` 合并到宿主实际加载的全局规则入口，保留无关设置。
 6. 如果宿主支持 Hook，读取 `docs/hooks/README.md`，只选择当前 Agent 对应的专页，并且只安装该页明确支持的能力。Hook 必须使用与 Keepygaga 相同的物理记忆根，只合并该 runtime 自有条目，并保留宿主全部无关设置。若没有兼容 runtime，继续完成 MCP 安装并明确报告 Hook 未安装；不得自行编造或下载 Hook 可执行文件。
 7. 运行 `uv run keepygaga doctor --json` 和 `uv run python scripts/smoke_mcp_server.py`，再确认宿主恰好暴露 list、read、create、add、update、move、rename、delete。若安装了 Hook，再完成所选 Agent 专页中的验证。
@@ -73,7 +73,7 @@ Keepygaga 可以直接使用普通文件系统目录，不要求安装或运行 
 ```bash
 uv run keepygaga doctor
 uv run keepygaga memory init
-uv run python mcp_server.py
+uv run keepygaga-mcp
 ```
 
 `doctor` 只检查核心记忆并报告八个 raw Tool。`memory init` 创建规范
@@ -86,8 +86,8 @@ Markdown 记忆树，且拒绝覆盖已有文件。不带子命令运行 CLI 时
 {
   "mcpServers": {
     "keepygaga": {
-      "command": "/path/to/keepygaga/venv/bin/python",
-      "args": ["/path/to/keepygaga/mcp_server.py"],
+      "command": "/path/to/keepygaga/.venv/bin/python",
+      "args": ["-m", "keepygaga.server"],
       "env": {
         "KEEPYGAGA_CONFIG": "/path/to/keepygaga.toml"
       }
@@ -95,6 +95,9 @@ Markdown 记忆树，且拒绝覆盖已有文件。不带子命令运行 CLI 时
   }
 }
 ```
+
+请使用虚拟环境在当前运行平台上的原生 Python 绝对路径；Windows 通常是
+`.venv\Scripts\python.exe`，而不是 `.venv/bin/python`。
 
 `KEEPYGAGA_CONFIG` 用于覆盖默认配置路径。
 
@@ -119,6 +122,12 @@ Hook 集成是可选且因宿主而异的增强能力：它可以在 Session 启
 - 删除操作必须获得用户在当前轮次中的明确授权。
 - 已应用的修改会返回服务端生成的 receipt；请原样回显一次，绝不杜撰读取、
   无操作、跳过或失败的 receipt。
+
+## 社区
+
+欢迎参与贡献。提交 PR 前请先阅读 [CONTRIBUTING.md](CONTRIBUTING.md)，并遵守
+[行为准则](CODE_OF_CONDUCT.md)。安全漏洞请按照 [SECURITY.md](SECURITY.md)
+私密报告，不要发布到公开 Issue。
 
 ## 致谢
 

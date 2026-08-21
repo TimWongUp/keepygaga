@@ -1,0 +1,17 @@
+name: Request a private conduct channel
+description: Ask the maintainer to establish a private channel for a Code of Conduct report
+title: "[Conduct contact]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This request is public. Do not describe the incident or include names, screenshots, links, or personal information here. The maintainer will invite you to a temporary private repository for the actual report.
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety confirmation
+      options:
+        - label: I have included no incident details or personal information in this public request.
+          required: true
+        - label: I want the maintainer to create a temporary private repository and invite me there.
+          required: true

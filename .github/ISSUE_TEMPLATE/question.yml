@@ -1,0 +1,33 @@
+name: Usage question
+description: Ask for help using or integrating Keepygaga
+title: "[Question]: "
+labels: ["question"]
+body:
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Pre-submission checks
+      options:
+        - label: I read the README and relevant documentation.
+          required: true
+        - label: I removed credentials and real personal memory content.
+          required: true
+        - label: This is not a security vulnerability; security reports belong in the private reporting form.
+          required: true
+  - type: textarea
+    id: question
+    attributes:
+      label: Question
+      description: What are you trying to do, and where are you blocked?
+    validations:
+      required: true
+  - type: textarea
+    id: attempted
+    attributes:
+      label: What you tried
+      description: Include sanitized commands, configuration structure, or documentation you followed.
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Include Keepygaga version or commit, OS, Python version, and MCP host when relevant.

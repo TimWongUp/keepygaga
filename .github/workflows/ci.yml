@@ -45,6 +45,19 @@ jobs:
       - name: Verify wheel install
         shell: bash
         run: |
-          pip install dist/*.whl
-          keepygaga --help
-          keepygaga-mcp --help 2>&1 | head -1 || true
+          wheel_venv="${RUNNER_TEMP}/keepygaga-wheel"
+          python -m venv "${wheel_venv}"
+          if [[ "${RUNNER_OS}" == "Windows" ]]; then
+            wheel_python="${wheel_venv}/Scripts/python.exe"
+            wheel_bin="${wheel_venv}/Scripts"
+            cli_command="${wheel_bin}/keepygaga.exe"
+            mcp_command="${wheel_bin}/keepygaga-mcp.exe"
+          else
+            wheel_python="${wheel_venv}/bin/python"
+            wheel_bin="${wheel_venv}/bin"
+            cli_command="${wheel_bin}/keepygaga"
+            mcp_command="${wheel_bin}/keepygaga-mcp"
+          fi
+          "${wheel_python}" -m pip install dist/*.whl
+          "${cli_command}" --help
+          "${wheel_python}" -P scripts/smoke_mcp_server.py --server-command "${mcp_command}"

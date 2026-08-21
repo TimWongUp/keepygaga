@@ -2,6 +2,7 @@
 .env
 .keepygaga/
 .obsidian/
+agents-memory/
 .pytest_cache/
 .ruff_cache/
 .venv/

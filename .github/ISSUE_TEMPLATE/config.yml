@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/TimWongUp/keepygaga/security/advisories/new
+    about: Report security vulnerabilities privately instead of opening an issue.
+  - name: Report GitHub platform abuse
+    url: https://support.github.com/contact/report-abuse
+    about: Report violations of GitHub's platform rules privately to GitHub Support.
