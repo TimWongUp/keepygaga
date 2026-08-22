@@ -21,7 +21,8 @@ agents-memory/
 - `contracts/core-memory-v1/` 保存 canonical 与 legacy-sources golden pages；Keepygaga 测试裁决其与当前 parser/renderer 一致，宿主注入器只读消费该版本化合同。
 - `core-memory-v1` 冻结字段顺序与 Fact 行语法；破坏性格式变化新建下一版本，并保留 v1 直到已知消费者完成迁移。fixture 的非语义样本文本可以在 v1 内调整。
 - 正文只允许单行 `- [stated|observed] ...` Fact。
-- `profile.md` 保存三个月后仍应成立的身份级背景，可包含能改善跨任务交流的稳定项目归属或长期角色；项目实现、决策、计划、进度和运行状态属于项目 Authority 或 `areas/`。
+- `profile.md` 保存三个月后仍应成立的身份级背景，可包含能改善跨任务交流的稳定项目归属或长期角色；直属 `areas/` 页面可以维护持续项目的项目索引，只记录项目存放位置与已完成的重大进展。项目详情、决策、计划和当前状态仍属于项目 Authority 或直接真源，二者与项目索引冲突时优先。
+- 同一项目的位置与重大进展使用不同 Fact。位置在首次登记或移动时更新；进展只在完成会改变项目整体判断的重大里程碑时更新。阶段快照、角色、计划、阻塞、下一步、普通提交、单次任务、测试结果和临时运行状态不写入核心记忆。
 - `profile.md` 的 Fact content 合计不超过 300 字符；其他页面超出 soft limit 只返回 `split_recommended`。
 - name 与 aliases 在全库规范化后不得冲突。
 

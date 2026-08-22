@@ -24,6 +24,10 @@ _Avoid_: 关键词、最短碎片、推断
 三个月后仍应成立的身份级背景 Fact；可包含能改善跨任务交流的稳定项目归属或长期角色，但不包含项目实现、决策、计划、进度或运行状态。
 _Avoid_: 项目档案、项目状态
 
+**项目索引（Project Index）**：
+存于直属 `areas/` 页面、用于跨任务定位持续项目并了解重大进展的简短记录。它只包含项目存放位置与已完成的重大里程碑；项目详情、计划与当前状态仍由项目 Authority 或直接真源裁决。
+_Avoid_: 状态仪表板、项目日志、项目 Authority 副本
+
 **Route Catalog**：
 由 live allowlist 生成的 `path + description + aliases` 路由目录，不包含 Fact 或 version。
 _Avoid_: 搜索结果、页面摘要
