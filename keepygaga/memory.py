@@ -270,23 +270,38 @@ def initialize_memory_tree(
     root: Path,
     _config: MemoryFilesConfig,
 ) -> dict[str, object]:
-    root = root.expanduser().resolve()
-    root.mkdir(parents=True, exist_ok=True)
     rendered: list[Path] = []
-    lock_path = root / ".keepygaga.lock"
-    if lock_path.is_symlink():
-        raise MemoryValidationError(
-            "invalid_source", f"memory lock path must not be a symlink: {lock_path}"
-        )
+    created_directories: list[Path] = []
     try:
+        root = root.expanduser().resolve()
+        if root.exists() and not root.is_dir():
+            raise MemoryValidationError(
+                "invalid_source", f"memory root must be a directory: {root}"
+            )
+        if root.is_dir():
+            MemoryStore(root, _config)._load_catalog(require_complete=False)
+        root_was_missing = not root.exists()
+        root.mkdir(parents=True, exist_ok=True)
+        if root_was_missing:
+            created_directories.append(root)
+        lock_path = root / ".keepygaga.lock"
+        if lock_path.is_symlink():
+            raise MemoryValidationError(
+                "invalid_source", f"memory lock path must not be a symlink: {lock_path}"
+            )
         with FileLock(str(lock_path), timeout=30):
+            store = MemoryStore(root, _config)
+            store._load_catalog(require_complete=False)
             for directory in DYNAMIC_DIRS:
                 target = root / directory
                 if target.is_symlink() or (target.exists() and not target.is_dir()):
                     raise MemoryValidationError(
                         "invalid_source", f"memory path must be a directory: {target}"
                     )
+                target_was_missing = not target.exists()
                 target.mkdir(exist_ok=True)
+                if target_was_missing:
+                    created_directories.append(target)
             for relative in FIXED_PATHS:
                 target = root / relative
                 if target.is_symlink():
@@ -294,19 +309,56 @@ def initialize_memory_tree(
                         "invalid_source", f"memory page must not be a symlink: {target}"
                     )
                 if target.exists():
+                    if not target.is_file():
+                        raise MemoryValidationError(
+                            "invalid_source",
+                            f"memory page must be a regular file: {target}",
+                        )
                     continue
                 if _exclusive_create(
                     target, render_memory_file(_default_document(relative), relative)
                 ):
                     rendered.append(target)
+            store._load_catalog()
     except Timeout:
-        return {
-            "status": "write_conflict",
+        payload: dict[str, object] = {
+            "status": "partial_commit" if created_directories else "write_conflict",
             "message": "could not acquire the global memory lock",
+        }
+        if created_directories:
+            payload["directories"] = [str(path) for path in created_directories]
+        return payload
+    except MemoryValidationError as exc:
+        payload = exc.response()
+        if rendered:
+            payload["files"] = [str(path) for path in rendered]
+        if created_directories:
+            payload["directories"] = [str(path) for path in created_directories]
+        return payload
+    except PermissionError as exc:
+        return {
+            "status": (
+                "partial_commit"
+                if rendered or created_directories
+                else "permission_denied"
+            ),
+            "message": f"{type(exc).__name__}: {exc}",
+            "files": [str(path) for path in rendered],
+            "directories": [str(path) for path in created_directories],
+        }
+    except OSError as exc:
+        return {
+            "status": (
+                "partial_commit" if rendered or created_directories else "write_failed"
+            ),
+            "message": f"{type(exc).__name__}: {exc}",
+            "files": [str(path) for path in rendered],
+            "directories": [str(path) for path in created_directories],
         }
     return {
         "status": "applied" if rendered else "no_op",
         "files": [str(path) for path in rendered],
+        "directories": [str(path) for path in created_directories],
     }
 
 
@@ -361,6 +413,11 @@ class MemoryStore:
 
     def _run_locked(self, callback: Callable[[], dict[str, object]]) -> dict[str, object]:
         if not self.root.is_dir():
+            if self.root.exists():
+                return {
+                    "status": "invalid_source",
+                    "message": f"memory root must be a directory: {self.root}",
+                }
             return {
                 "status": "not_initialized",
                 "message": f"memory root does not exist: {self.root}",
@@ -396,7 +453,7 @@ class MemoryStore:
                 "message": f"{type(exc).__name__}: {exc}",
             }
 
-    def _catalog_paths(self) -> list[str]:
+    def _catalog_paths(self, *, require_complete: bool = True) -> list[str]:
         missing: list[str] = []
         paths: list[str] = []
         for directory_name in DYNAMIC_DIRS:
@@ -405,7 +462,12 @@ class MemoryStore:
                 raise MemoryValidationError(
                     "invalid_source", f"memory directory must not be a symlink: {directory}"
                 )
-            if not directory.is_dir():
+            if directory.exists() and not directory.is_dir():
+                raise MemoryValidationError(
+                    "invalid_source",
+                    f"memory path must be a directory: {directory}",
+                )
+            if not directory.exists():
                 missing.append(str(directory))
         for relative in FIXED_PATHS:
             target = self.root / relative
@@ -415,6 +477,12 @@ class MemoryStore:
                 )
             if target.is_file():
                 paths.append(relative)
+            elif target.exists():
+                raise MemoryValidationError(
+                    "invalid_source",
+                    f"memory path must be a regular file: {target}",
+                    path=relative,
+                )
             else:
                 missing.append(str(target))
         for directory_name in DYNAMIC_DIRS:
@@ -429,16 +497,18 @@ class MemoryStore:
                         "invalid_source", f"memory path must be a regular file: {target}"
                     )
                 paths.append(f"{directory_name}/{target.name}")
-        if missing:
+        if missing and require_complete:
             raise MemoryValidationError(
                 "not_initialized",
                 "memory tree is not initialized: " + ", ".join(missing),
             )
         return paths
 
-    def _load_catalog(self) -> dict[str, LoadedFile]:
+    def _load_catalog(
+        self, *, require_complete: bool = True
+    ) -> dict[str, LoadedFile]:
         files: dict[str, LoadedFile] = {}
-        for relative in self._catalog_paths():
+        for relative in self._catalog_paths(require_complete=require_complete):
             target = self.root / relative
             text = normalize_text(self._read_catalog_text(target, relative))
             files[relative] = LoadedFile(
@@ -473,6 +543,12 @@ class MemoryStore:
             with os.fdopen(descriptor, encoding="utf-8") as handle:
                 descriptor = -1
                 return handle.read()
+        except UnicodeDecodeError as exc:
+            raise MemoryValidationError(
+                "invalid_source",
+                f"{relative} must be valid UTF-8",
+                path=relative,
+            ) from exc
         finally:
             if descriptor >= 0:
                 os.close(descriptor)

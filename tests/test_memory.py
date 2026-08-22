@@ -140,10 +140,81 @@ def test_initialize_never_overwrites_an_existing_page(tmp_path: Path) -> None:
     root = tmp_path / "memory"
     root.mkdir()
     profile = root / "profile.md"
-    profile.write_text("human content\n", encoding="utf-8")
+    human_content = render_memory_file(
+        MemoryDocument(
+            name="profile",
+            description="Human-managed profile.",
+            aliases=(),
+            facts=(fact("Human content."),),
+        ),
+        "profile.md",
+    )
+    profile.write_text(human_content, encoding="utf-8")
     result = initialize_memory_tree(root, MemoryFilesConfig(root=str(root)))
     assert result["status"] == "applied"
-    assert profile.read_text(encoding="utf-8") == "human content\n"
+    assert profile.read_text(encoding="utf-8") == human_content
+
+
+def test_initialize_rejects_non_file_fixed_page(tmp_path: Path) -> None:
+    root = tmp_path / "memory"
+    root.mkdir()
+    (root / "profile.md").mkdir()
+
+    result = initialize_memory_tree(root, MemoryFilesConfig(root=str(root)))
+
+    assert result["status"] == "invalid_source"
+    assert "regular file" in str(result["message"])
+
+
+def test_initialize_reports_created_directories_on_partial_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "memory"
+    root.mkdir()
+    original_mkdir = Path.mkdir
+
+    def fail_areas(path: Path, *args, **kwargs) -> None:
+        if path == root / "areas":
+            raise PermissionError("simulated directory failure")
+        original_mkdir(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "mkdir", fail_areas)
+
+    result = initialize_memory_tree(root, MemoryFilesConfig(root=str(root)))
+
+    assert result["status"] == "partial_commit"
+    assert result["files"] == []
+    assert result["directories"] == [str(root / "topics")]
+
+
+def test_inspect_reports_invalid_utf8_with_exact_path(
+    memory_store: tuple[Path, MemoryStore],
+) -> None:
+    root, store = memory_store
+    (root / "profile.md").write_bytes(b"\xff")
+
+    result = store.inspect()
+
+    assert result["status"] == "invalid_source"
+    assert result["path"] == "profile.md"
+    assert "UTF-8" in str(result["message"])
+
+
+def test_inspect_reports_invalid_fact_with_exact_path(
+    memory_store: tuple[Path, MemoryStore],
+) -> None:
+    root, store = memory_store
+    page = root / "preferences.md"
+    page.write_text(
+        page.read_text(encoding="utf-8") + f"\n- [stated] {'x' * 4097}\n",
+        encoding="utf-8",
+    )
+
+    result = store.inspect()
+
+    assert result["status"] == "invalid_source"
+    assert result["path"] == "preferences.md"
+    assert "page schema" in str(result["message"])
 
 
 def test_legacy_sources_are_read_but_removed_on_write(

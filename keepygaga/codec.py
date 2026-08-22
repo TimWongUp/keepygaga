@@ -232,7 +232,14 @@ def parse_memory_file(text: str, path: str) -> MemoryDocument:
                 )
             basis = match.group(1)
             assert basis in ("stated", "observed")
-            facts.append(Fact(basis=basis, content=match.group(2)))
+            try:
+                facts.append(Fact(basis=basis, content=match.group(2)))
+            except ValueError as exc:
+                raise MemoryValidationError(
+                    "invalid_source",
+                    f"{path} contains a fact that violates the page schema",
+                    path=path,
+                ) from exc
     return validate_document(
         MemoryDocument(
             name=metadata["name"],
