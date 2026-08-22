@@ -11,15 +11,17 @@ is noise.
 
 Keepygaga keeps only a small set of durable facts that remain useful across
 tasks: who the user is, how they want an Agent to work, and a few ongoing
-topics, responsibilities, or relationships. These memories stay in readable
-local Markdown, and every change goes through an explicit, versioned MCP tool.
-There is no database, index, or embedding service.
+topics, projects, responsibilities, or relationships. These memories stay in
+readable local Markdown, and every change goes through an explicit, versioned
+MCP tool. There is no database, index, or embedding service.
 
 For code projects, the priority is not to remember more about the user. The
 Agent should instead keep the repository's own terms, architecture, operating
 guides, and important decisions organized in `AGENTS.md`, `CONTEXT.md`, and
-`docs/`. Keepygaga does not replace project documentation; it supplies only the
-small amount of stable personal context that is useful across projects.
+`docs/`. Keepygaga does not replace project documentation. For ongoing projects,
+it keeps only a compact index of where the project lives and which major
+milestones have been completed; the repository remains authoritative for all
+project details and current state.
 
 **Why not track the user's recent state?**
 
@@ -33,8 +35,9 @@ unrequested interruptions.
 Keepygaga leaves temporary state in the current conversation or its direct
 source, such as a calendar, task manager, project documentation, issue tracker,
 or Git history. A fact enters core memory only when it has been deliberately
-judged useful across tasks. In code projects, current plans and progress belong
-to the repository's own documentation, not the user's personal memory.
+judged useful across tasks. For code projects, implementation details and
+current state stay in repository-owned sources; core memory keeps only project
+locations and completed major milestones.
 
 Its MCP surface is intentionally small — exactly eight action tools:
 

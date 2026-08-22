@@ -26,7 +26,7 @@
 - 规范 frontmatter 固定为 `name`、`description`、`aliases`；正文只允许单行 `- [stated|observed]` Fact。读取兼容带 `sources` 的旧页面，下一次 mutation 将其规范化。
 - `contracts/core-memory-v1/` 是宿主注入器的版本化 consumer contract；页面格式变化必须同步 fixture，并由本仓测试裁决 parser/renderer 与 fixture 一致。
 - Fact 是可独立维护的完整断言。写入先判定 covered / refines / new / conflict：covered 不写，refines 用 `update`，new 用 `add`，conflict 先按当前用户陈述或直接证据核对。
-- `profile.md` 只保存三个月后仍应成立的身份与背景；能改善跨任务交流的稳定项目归属或长期角色可进入 Profile，项目实现、决策、计划、进度和运行状态留在项目 Authority 或 `areas/`。Profile Fact content 合计不超过 300 字符；`preferences.md` 只保存当前用户希望 Agent 如何回应和工作的长期偏好。
+- `profile.md` 只保存三个月后仍应成立的身份与背景；能改善跨任务交流的稳定项目归属或长期角色可进入 Profile。直属 `areas/` 页面维护持续项目的项目索引，只记录项目存放位置与已完成的重大进展；项目详情、决策、计划和当前状态仍以项目 Authority 或直接真源为准。位置在首次登记或移动时更新，进展只在完成会改变项目整体判断的重大里程碑时更新。Profile Fact content 合计不超过 300 字符；`preferences.md` 只保存当前用户希望 Agent 如何回应和工作的长期偏好。
 - 每次 list/read/mutation 都重新读取 live Markdown；旧 version 必须冲突，mutation 在全局锁内完成整批预检并逐文件原子替换。跨文件崩溃原子性不属于合同；格式无效时 fail closed 并保留现场。
 - Memory Tool 不做语义匹配、自动删除、压缩、拆分、转移或候选提升；不恢复旧 `USER.md`、`ENVIRONMENT.md`、`user/`、`active/`、`history/`、`review/` 或 `archive/` 结构。
 - `keepygaga.toml` 与 `.venv/` 是本机产物，不提交；密钥不得进入日志、Doctor、文档或测试 fixture。
