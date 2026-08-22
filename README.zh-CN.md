@@ -55,18 +55,18 @@ Keepygaga 可以直接使用普通文件系统目录，不要求安装或运行 
 把下面的 prompt 发给需要接入 Keepygaga 的目标 Agent：
 
 ```text
-请为你自己安装并接入 https://github.com/TimWongUp/keepygaga。
+请为你自己安装并接入 https://github.com/TimWongUp/keepygaga。只有用户明确要求你为某个其他 Agent 安装 Keepygaga 时，才为该 Agent 安装。
 
-1. 读取仓库 `AGENTS.md` 和当前宿主的 MCP 文档，并确认 Agent 实际运行在原生 Windows、macOS、Linux 还是 WSL；后续路径和 Python 可执行文件必须属于同一运行环境。
-2. 运行 `uv sync`，把 `keepygaga.example.toml` 复制为本机 `keepygaga.toml`，把该文件的绝对路径记为 `CONFIG_PATH`，再解析 `memory.root`：优先使用用户本轮明确提供的现有记忆树，其次复用现有 Keepygaga 配置中唯一且有效的记忆树；不要扫描整块磁盘。若没有现有记忆树，选择 Keepygaga 仓库之外、且不会公开共享或自动发布的可写新目录；只有访问范围私密且可信时才可使用同步目录。若候选不唯一或意图不清楚，先询问用户最小缺失项。后续每条 Keepygaga CLI 命令都传入 `--config CONFIG_PATH`。
-3. 如果复用现有记忆树，把 `memory.root` 直接指向它，不复制、不移动、不改写页面，并先运行 `uv run keepygaga --config CONFIG_PATH doctor --json`。读取 JSON 中 `id="memory_tree"` 的检查：仅当 `details.source_status` 为 `not_initialized` 时，才运行 `uv run keepygaga --config CONFIG_PATH memory init` 补齐缺失结构；如果报告其他 source status、格式错误或具体页面无效，停止安装并把确切路径报告给用户，不运行 init，也不继续注册。init 后重新运行 Doctor，并以新的 `memory_tree` 检查为准。如果使用新目录，运行 init 创建规范树。`memory init` 是幂等命令：无需补齐文件时以 `no_op` 成功返回，并且绝不覆盖已有文件。
-4. 先检查 key `keepygaga` 下是否已有 MCP 注册，再只注册或替换这一项：使用仓库虚拟环境中的原生 Python，以 `-m` 和 `keepygaga.server` 作为参数，把 `keepygaga.server` 注册为 stdio server，并设置绝对 `KEEPYGAGA_CONFIG=CONFIG_PATH`。删除不属于当前注册的过时 Keepygaga 启动参数或环境字段，确认可执行文件和模块存在，保留宿主全部无关 MCP 设置，不同步 `.venv` 或 `keepygaga.toml` 到其他机器。
-5. 把 `docs/agent-contract.md` 合并到宿主实际加载的全局规则入口，保留无关设置。
-6. 如果宿主支持 Hook，读取 `docs/hooks/README.md`，只选择当前 Agent 对应的专页，并且只安装该页明确支持的能力。Hook 必须使用与 Keepygaga 相同的物理记忆根，只合并该 runtime 自有条目，并保留宿主全部无关设置。若没有兼容 runtime，继续完成 MCP 安装并明确报告 Hook 未安装；不得自行编造或下载 Hook 可执行文件。
-7. 运行 `uv run keepygaga --config CONFIG_PATH doctor --json` 和 `uv run python scripts/smoke_mcp_server.py`，再确认宿主恰好暴露 list、read、create、add、update、move、rename、delete。若安装了 Hook，再完成所选 Agent 专页中的验证。
-8. 仅在首次安装时，检查本次安装前已存在于宿主实际加载的全局规则中的内容，筛出“用户希望 Agent 如何回应和工作”的长期个人偏好候选；重装、修复或升级时跳过，也不把本次合并的 Agent Contract 或安装指令作为候选来源。排除安全边界、工具或记忆路由、项目规则、当前状态、推断和可从直接真源重取的事实。向用户展示去重后的候选，并只问一次是否导入 `preferences.md`；明确确认前不写。确认后先 `read` `preferences.md`，按 covered / refines / new / conflict 处理，并把用户确认的候选以 `stated` 写入；拒绝或无候选则不写，也不保存 onboarding 标记。
+1. 根据用户请求确定 `TARGET_HOSTS`：默认只包含当前工作的 Agent，只有用户明确要求为某个其他 Agent 安装 Keepygaga 时才将其加入。读取仓库 `AGENTS.md` 和每个目标宿主的 MCP 文档，确认各目标实际运行在原生 Windows、macOS、Linux 还是 WSL，并按运行环境归组为 `TARGET_RUNTIMES`。逐个处理目标，不修改范围外的 Agent。
+2. 对每个不同的目标运行环境，使用该环境可访问的 Keepygaga checkout，在其中运行 `uv sync`，把 `keepygaga.example.toml` 复制为本机 `keepygaga.toml`，并把该运行环境原生的绝对路径记为其 `CONFIG_PATH`。为所有目标解析同一个物理记忆树：优先使用用户本轮明确提供的现有记忆树，其次复用现有 Keepygaga 配置中唯一且有效的记忆树；不要扫描整块磁盘。若没有现有记忆树，选择所有 Keepygaga checkout 之外、且不会公开共享或自动发布的可写新目录；只有访问范围私密且可信时才可使用同步目录。使用各运行环境的原生绝对路径，把每个配置的 `memory.root` 指向同一个物理记忆树。若候选不唯一、某个目标运行环境无法访问同一记忆树、路径映射无法核验或用户意图不清楚，先询问用户最小缺失项。不要在不同运行环境间复制或同步 `.venv`、`keepygaga.toml` 或记忆树。后续每条 Keepygaga CLI 命令都传入对应运行环境的 `--config CONFIG_PATH`。
+3. 注册宿主前，在每个目标运行环境中运行 `uv run keepygaga --config CONFIG_PATH doctor --json`，检查各自 JSON 中 `id="memory_tree"` 的项目。检查为 `ok` 表示该运行环境看到的是有效记忆树；失败检查的 `details.source_status` 为 `not_initialized` 时才允许 init。若出现其他失败状态、格式错误或具体页面无效，停止安装并报告确切运行环境和路径，不继续注册。共享记忆树是新目录或报告 `not_initialized` 时，只从一个目标运行环境运行一次 `uv run keepygaga --config CONFIG_PATH memory init`，创建或补齐规范结构，然后在每个目标运行环境中重新运行 Doctor，并以新的 `memory_tree` 检查为准。复用有效记忆树时，让每个配置直接指向它，不复制、不移动、不改写页面。`memory init` 是幂等命令：无需补齐文件时以 `no_op` 成功返回，并且绝不覆盖已有文件。
+4. 对每个目标宿主，先检查 key `keepygaga` 下是否已有 MCP 注册，再只注册或替换这一项：使用该目标运行环境中仓库虚拟环境的原生 Python，以 `-m` 和 `keepygaga.server` 作为参数，把 `keepygaga.server` 注册为 stdio server，并把绝对 `KEEPYGAGA_CONFIG` 设为该运行环境的 `CONFIG_PATH`。删除不属于当前注册的过时 Keepygaga 启动参数或环境字段，确认可执行文件和模块存在，保留宿主全部无关 MCP 设置，不修改范围外 Agent 的注册。
+5. 对每个目标宿主，把 `docs/agent-contract.md` 合并到该宿主实际加载的全局规则入口，保留无关设置；不修改范围外 Agent 的全局规则。
+6. 对每个支持 Hook 的目标宿主，读取 `docs/hooks/README.md`，只选择该宿主对应的专页，并且只安装该页明确支持的能力。Hook 必须使用与 Keepygaga 相同的物理记忆根，只合并该 runtime 自有条目，保留宿主全部无关设置，不修改范围外 Agent 的 Hook。若某个目标没有兼容 runtime，继续完成其 MCP 安装并明确报告 Hook 未安装；不得自行编造或下载 Hook 可执行文件。
+7. 在每个目标运行环境中重新运行 `uv run keepygaga --config CONFIG_PATH doctor --json` 和对应 checkout 中的 `uv run python scripts/smoke_mcp_server.py`。然后检查每个目标宿主实际显示的 MCP Tool 清单，确认各自都恰好暴露 list、read、create、add、update、move、rename、delete。若安装了 Hook，再完成各目标 Agent 专页中的验证。
+8. 仅在首次安装时，检查本次安装前已存在于各目标宿主实际加载的全局规则中的内容，筛出“用户希望 Agent 如何回应和工作”的长期个人偏好候选；重装、修复或升级时跳过，也不把本次合并的 Agent Contract 或安装指令作为候选来源。排除安全边界、工具或记忆路由、项目规则、当前状态、推断和可从直接真源重取的事实。跨目标去重后向用户展示候选，并只问一次是否导入 `preferences.md`；明确确认前不写。确认后先 `read` `preferences.md`，按 covered / refines / new / conflict 处理，并把用户确认的候选以 `stated` 写入；拒绝或无候选则不写，也不保存 onboarding 标记。
 
-最终报告修改文件、memory root、MCP 注册、验证结果和剩余缺口，绝不输出凭据。
+最终报告修改文件、memory root、各目标的 MCP 注册、验证结果和剩余缺口，绝不输出凭据。
 ```
 
 ## 使用
