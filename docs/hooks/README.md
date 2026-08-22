@@ -1,8 +1,11 @@
 # Hook integration by Agent host
 
-This directory is for the Agent installing Keepygaga. Select exactly one host
-page from the list below; do not infer one host's events or payload shape from
-another host.
+This directory is for the Agent installing Keepygaga. The installation scope
+defaults to the current working Agent. Include another Agent only when the user
+explicitly asks to install Keepygaga for it. For a single target, select exactly
+one host page; for explicit multi-Agent installation, process each target
+independently and select exactly one page per target. Do not modify non-target
+Agents or infer one host's events or payload shape from another host.
 
 | Agent host | Installation contract |
 | --- | --- |
@@ -37,8 +40,10 @@ Resolve the runtime's native absolute Python and checkout paths. Configure its
 memory root to the same physical directory as Keepygaga `memory.root`, preferably
 through `AGENT_HOOK_RUNTIME_MEMORY_ROOT`. Personal paths remain machine-local.
 
-Before writing, parse the complete live host configuration. Replace only entries
-whose commands point to one of the three runtime entrypoints, append the entries
-specified by the selected host page, and preserve every unrelated field and
-Hook. Never replace an entire configuration file or event key. Do not install
-legacy safety or authorization Hooks.
+For each selected target, parse only that Agent's complete live host
+configuration. Within the event keys documented by its selected host page,
+replace only entries whose commands point to one of the three runtime
+entrypoints, append the entries specified by that page, and preserve every
+unrelated field and Hook. Do not inspect or rewrite a non-target Agent's
+configuration, and never replace an entire configuration file or event key. Do
+not install legacy safety or authorization Hooks.

@@ -32,6 +32,10 @@ agents-memory/
 
 写入现有页面必须携带 `read` 返回的 version。`update target="fact"` 精确替换 Fact 且禁止把 stated 降级为 observed；`target="page"` 只更新 description/aliases。`delete` 要求 `authorization="user_requested"`。
 
+## Installation scope
+
+公开安装默认只面向当前工作的 Agent；只有用户明确要求为其他 Agent 安装时，才把对应宿主加入目标范围。每个目标宿主分别完成 MCP 注册、全局 Agent Contract 合并和可选 Hook 接线，安装过程不得顺带修改范围外 Agent 的配置、全局规则或 Hook。跨运行环境安装时，各环境独立维护 checkout、`.venv` 与 `keepygaga.toml`，通过各自的原生路径指向同一个物理核心记忆树，并分别验证。
+
 ## Write invariants
 
 - 每次调用重新读取整个 allowlist，任一 operation 预检失败则整批不写。
