@@ -44,7 +44,7 @@ Keepygaga 把临时状态留在当前对话或它的直接真源里，例如日�
 
 - Python 3.12+
 - 一个用于存放 `agents-memory` 记忆树的可写本地目录
-- 推荐使用 [`uv`](https://docs.astral.sh/uv/)
+- 按本文源码安装时需要 [`uv`](https://docs.astral.sh/uv/)
 
 Obsidian 是可选的，仅推荐用于方便地浏览和手工编辑 Markdown 记忆；
 Keepygaga 可以直接使用普通文件系统目录，不要求安装或运行 Obsidian。
@@ -57,12 +57,12 @@ Keepygaga 可以直接使用普通文件系统目录，不要求安装或运行 
 请为你自己安装并接入 https://github.com/TimWongUp/keepygaga。
 
 1. 读取仓库 `AGENTS.md` 和当前宿主的 MCP 文档，并确认 Agent 实际运行在原生 Windows、macOS、Linux 还是 WSL；后续路径和 Python 可执行文件必须属于同一运行环境。
-2. 运行 `uv sync`，把 `keepygaga.example.toml` 复制为本机 `keepygaga.toml`，再解析 `memory.root`：优先使用用户本轮明确提供的现有记忆树，其次复用现有 Keepygaga 配置中唯一且有效的记忆树；不要扫描整块磁盘。若没有现有记忆树，选择 Keepygaga 仓库之外、且不会公开共享或自动发布的可写新目录；只有访问范围私密且可信时才可使用同步目录。若候选不唯一或意图不清楚，先询问用户最小缺失项。
-3. 如果复用现有记忆树，把 `memory.root` 直接指向它，不复制、不移动、不改写页面，并先运行 `uv run keepygaga doctor --json`。读取 JSON 中 `id="memory_tree"` 的检查：仅当其 message 明确报告未初始化时，才运行 `uv run keepygaga memory init` 补齐缺失结构；如果报告 `invalid_source`、格式错误或具体页面无效，停止安装并把确切路径报告给用户，不运行 init，也不继续注册。init 后无论命令退出码或 payload 是 `applied` 还是 `no_op`，都重新运行 Doctor，并以新的 `memory_tree` 检查为准。如果使用新目录，运行 init 创建规范树。`memory init` 不得覆盖已有文件。
-4. 使用仓库虚拟环境中的原生 Python，以 `-m` 和 `keepygaga.server` 作为参数，把 `keepygaga.server` 注册为 key `keepygaga` 下的 stdio server，并设置绝对 `KEEPYGAGA_CONFIG`；保留宿主其他 MCP 配置，不同步 `.venv` 或 `keepygaga.toml` 到其他机器。
+2. 运行 `uv sync`，把 `keepygaga.example.toml` 复制为本机 `keepygaga.toml`，把该文件的绝对路径记为 `CONFIG_PATH`，再解析 `memory.root`：优先使用用户本轮明确提供的现有记忆树，其次复用现有 Keepygaga 配置中唯一且有效的记忆树；不要扫描整块磁盘。若没有现有记忆树，选择 Keepygaga 仓库之外、且不会公开共享或自动发布的可写新目录；只有访问范围私密且可信时才可使用同步目录。若候选不唯一或意图不清楚，先询问用户最小缺失项。后续每条 Keepygaga CLI 命令都传入 `--config CONFIG_PATH`。
+3. 如果复用现有记忆树，把 `memory.root` 直接指向它，不复制、不移动、不改写页面，并先运行 `uv run keepygaga --config CONFIG_PATH doctor --json`。读取 JSON 中 `id="memory_tree"` 的检查：仅当 `details.source_status` 为 `not_initialized` 时，才运行 `uv run keepygaga --config CONFIG_PATH memory init` 补齐缺失结构；如果报告其他 source status、格式错误或具体页面无效，停止安装并把确切路径报告给用户，不运行 init，也不继续注册。init 后重新运行 Doctor，并以新的 `memory_tree` 检查为准。如果使用新目录，运行 init 创建规范树。`memory init` 是幂等命令：无需补齐文件时以 `no_op` 成功返回，并且绝不覆盖已有文件。
+4. 先检查 key `keepygaga` 下是否已有 MCP 注册，再只注册或替换这一项：使用仓库虚拟环境中的原生 Python，以 `-m` 和 `keepygaga.server` 作为参数，把 `keepygaga.server` 注册为 stdio server，并设置绝对 `KEEPYGAGA_CONFIG=CONFIG_PATH`。删除不属于当前注册的过时 Keepygaga 启动参数或环境字段，确认可执行文件和模块存在，保留宿主全部无关 MCP 设置，不同步 `.venv` 或 `keepygaga.toml` 到其他机器。
 5. 把 `docs/agent-contract.md` 合并到宿主实际加载的全局规则入口，保留无关设置。
 6. 如果宿主支持 Hook，读取 `docs/hooks/README.md`，只选择当前 Agent 对应的专页，并且只安装该页明确支持的能力。Hook 必须使用与 Keepygaga 相同的物理记忆根，只合并该 runtime 自有条目，并保留宿主全部无关设置。若没有兼容 runtime，继续完成 MCP 安装并明确报告 Hook 未安装；不得自行编造或下载 Hook 可执行文件。
-7. 运行 `uv run keepygaga doctor --json` 和 `uv run python scripts/smoke_mcp_server.py`，再确认宿主恰好暴露 list、read、create、add、update、move、rename、delete。若安装了 Hook，再完成所选 Agent 专页中的验证。
+7. 运行 `uv run keepygaga --config CONFIG_PATH doctor --json` 和 `uv run python scripts/smoke_mcp_server.py`，再确认宿主恰好暴露 list、read、create、add、update、move、rename、delete。若安装了 Hook，再完成所选 Agent 专页中的验证。
 8. 仅在首次安装时，检查本次安装前已存在于宿主实际加载的全局规则中的内容，筛出“用户希望 Agent 如何回应和工作”的长期个人偏好候选；重装、修复或升级时跳过，也不把本次合并的 Agent Contract 或安装指令作为候选来源。排除安全边界、工具或记忆路由、项目规则、当前状态、推断和可从直接真源重取的事实。向用户展示去重后的候选，并只问一次是否导入 `preferences.md`；明确确认前不写。确认后先 `read` `preferences.md`，按 covered / refines / new / conflict 处理，并把用户确认的候选以 `stated` 写入；拒绝或无候选则不写，也不保存 onboarding 标记。
 
 最终报告修改文件、memory root、MCP 注册、验证结果和剩余缺口，绝不输出凭据。
@@ -71,13 +71,13 @@ Keepygaga 可以直接使用普通文件系统目录，不要求安装或运行 
 ## 使用
 
 ```bash
-uv run keepygaga doctor
-uv run keepygaga memory init
-uv run keepygaga-mcp
+uv run keepygaga --config /absolute/path/to/keepygaga.toml doctor --json
+uv run keepygaga --config /absolute/path/to/keepygaga.toml memory init
 ```
 
 `doctor` 只检查核心记忆并报告八个 raw Tool。`memory init` 创建规范
-Markdown 记忆树，且拒绝覆盖已有文件。不带子命令运行 CLI 时显示帮助。
+Markdown 记忆树；记忆树已完整时以 `no_op` 成功返回，且拒绝覆盖已有文件。
+不带子命令运行 CLI 时显示帮助。
 
 在 MCP 宿主中以 ID `keepygaga` 注册本服务，完整宿主工具名形如
 `mcp__keepygaga__read`：
@@ -99,7 +99,14 @@ Markdown 记忆树，且拒绝覆盖已有文件。不带子命令运行 CLI 时
 请使用虚拟环境在当前运行平台上的原生 Python 绝对路径；Windows 通常是
 `.venv\Scripts\python.exe`，而不是 `.venv/bin/python`。
 
-`KEEPYGAGA_CONFIG` 用于覆盖默认配置路径。
+配置优先级依次是显式 CLI `--config`、`KEEPYGAGA_CONFIG`、仓库中的默认
+`keepygaga.toml`。MCP 宿主应始终设置绝对 `KEEPYGAGA_CONFIG`。
+
+### 升级或修复现有注册
+
+重启宿主前先检查现有 `keepygaga` 条目，把旧脚本路径或参数替换为当前虚拟环境
+Python 加 `-m keepygaga.server`，删除过时的 Keepygaga 自有字段，保留所有无关
+MCP 条目，并重新运行 Doctor 与 smoke test。
 
 ## Hook 集成
 

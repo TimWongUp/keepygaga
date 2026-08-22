@@ -41,6 +41,29 @@ def test_doctor_reports_uninitialized_tree_as_warning(tmp_path: Path) -> None:
     path.write_text(f'[memory]\nroot = "{memory_root.as_posix()}"\n', encoding="utf-8")
     result = run_doctor(path, project_root=tmp_path)
     assert result["status"] == "warning"
+    checks = cast(list[dict[str, object]], result["checks"])
+    memory = next(item for item in checks if item["id"] == "memory_tree")
+    assert memory["details"] == {
+        "root": str(memory_root),
+        "source_status": "not_initialized",
+    }
+
+
+def test_doctor_reports_file_memory_root_as_invalid_source(tmp_path: Path) -> None:
+    path = tmp_path / "keepygaga.toml"
+    memory_root = tmp_path / "memory"
+    memory_root.write_text("not a directory\n", encoding="utf-8")
+    path.write_text(f'[memory]\nroot = "{memory_root.as_posix()}"\n', encoding="utf-8")
+
+    result = run_doctor(path, project_root=tmp_path)
+
+    assert result["status"] == "error"
+    checks = cast(list[dict[str, object]], result["checks"])
+    memory = next(item for item in checks if item["id"] == "memory_tree")
+    assert memory["details"] == {
+        "root": str(memory_root),
+        "source_status": "invalid_source",
+    }
 
 
 def test_doctor_reports_healthy_initialized_memory(

@@ -101,7 +101,7 @@ def _memory_checks(config: KeepygagaConfig, checks: list[dict[str, object]]) -> 
             check_id="memory_tree",
             status="warning" if status == "not_initialized" else "error",
             message=str(inspected.get("message", "memory tree is invalid")),
-            details={"root": str(root)},
+            details={"root": str(root), "source_status": status},
         )
         return
     split_recommended = inspected.get("split_recommended") is True

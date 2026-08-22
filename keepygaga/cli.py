@@ -5,7 +5,7 @@ import json
 from collections.abc import Mapping
 from pathlib import Path
 
-from keepygaga.config import DEFAULT_CONFIG_PATH, PROJECT_ROOT, load_config
+from keepygaga.config import PROJECT_ROOT, load_config, resolve_config_path
 from keepygaga.diagnostics import run_doctor
 from keepygaga.memory import initialize_memory_tree
 
@@ -15,7 +15,11 @@ def _parser() -> argparse.ArgumentParser:
         prog="keepygaga",
         description="Run a Keepygaga core-memory maintenance command.",
     )
-    parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH)
+    parser.add_argument(
+        "--config",
+        type=Path,
+        help="configuration path (overrides KEEPYGAGA_CONFIG)",
+    )
     commands = parser.add_subparsers(dest="command")
 
     doctor = commands.add_parser("doctor")
@@ -38,13 +42,23 @@ def main(argv: list[str] | None = None) -> int:
     if args.command is None:
         parser.print_help()
         return 0
-    config_path = args.config.expanduser().resolve()
+    explicit_config = args.config.expanduser().resolve() if args.config else None
+    config_path = resolve_config_path(explicit_config)
     if args.command == "doctor":
         payload = run_doctor(config_path, project_root=PROJECT_ROOT)
         _print(payload)
         return 1 if payload["status"] == "error" else 0
 
-    config = load_config(config_path)
+    try:
+        config = load_config(config_path)
+    except Exception as exc:
+        _print(
+            {
+                "status": "invalid_source",
+                "message": f"configuration could not be loaded: {exc}",
+            }
+        )
+        return 1
     if args.command == "memory" and args.memory_command == "init":
         if not config.memory.root.strip():
             _print(
@@ -58,7 +72,7 @@ def main(argv: list[str] | None = None) -> int:
             Path(config.memory.root).expanduser(), config.memory
         )
         _print(payload)
-        return 0 if payload["status"] == "applied" else 1
+        return 0 if payload["status"] in {"applied", "no_op"} else 1
 
     return 2
 

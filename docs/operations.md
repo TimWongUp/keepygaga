@@ -14,17 +14,28 @@
 
 普通验证不修改真实 Vault；测试使用临时 memory tree。当前配置与 live 页面状态必须从 `keepygaga.toml`、Doctor 和目标 Markdown 现场刷新，不能从本文推断。
 
+配置路径优先级固定为显式 CLI `--config`、`KEEPYGAGA_CONFIG`、仓库默认
+`keepygaga.toml`。安装与升级验证应显式传入配置绝对路径，MCP 宿主应通过
+`KEEPYGAGA_CONFIG` 传入同一文件。
+
 ## Doctor semantics
 
 - `ok`：所有适用核心记忆检查正常。
 - `warning`：存在需要关注但未阻断的检查；读取具体 check 后再下结论。
 - `error`：配置、目录、格式、身份冲突或可写性等直接检查失败。
 
+`memory_tree` 非 `ok` 时，`details.source_status` 保留底层稳定状态；安装程序只在
+该值为 `not_initialized` 时调用 `memory init`，不依赖面向用户的 message 文案。
+
 Doctor 只报告非敏感 metadata，不输出正文、凭据、API key、cookie 或 session。公开协议可用性由 MCP smoke 独立验证。
 
 ## Failure routing
 
 - 配置加载失败：核对 config path 与 `[memory].root`，示例值不代表本机状态。
+- `memory init` 返回 `no_op`：规范树已经完整，命令成功且没有覆盖文件。
+- `memory init` 返回 `invalid_source` 或 `invalid_entry`：现有树无效，按 exact path 修正后重新运行 Doctor，不继续补齐。
+- `memory init` 返回 `permission_denied`、`write_failed` 或 `partial_commit`：排除目录权限或文件系统问题，核对响应中的已创建文件与目录后重新运行 init 与 Doctor。
+- `memory init` 返回 `write_conflict` 或 `not_initialized`：重新运行 Doctor 核对 live tree，再决定是否重试。
 - 页面格式无效：停止 mutation，报告 exact path 和错误，保留原文。
 - version 冲突：重新 `read` latest，明确合并后重试。
 - name 或 alias identity 冲突：修正目标页面或输入，不绕过全库验证。

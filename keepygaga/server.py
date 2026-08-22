@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -8,7 +7,7 @@ from typing import Any
 from mcp.server.fastmcp import FastMCP
 from mcp.types import AnyFunction, Icon, ToolAnnotations
 
-from keepygaga.config import DEFAULT_CONFIG_PATH, load_config
+from keepygaga.config import load_config
 from keepygaga.memory import (
     AddOperations,
     CreateOperations,
@@ -20,11 +19,6 @@ from keepygaga.memory import (
     UpdateOperations,
 )
 
-CONFIG_PATH = (
-    Path(os.environ.get("KEEPYGAGA_CONFIG", str(DEFAULT_CONFIG_PATH)))
-    .expanduser()
-    .resolve()
-)
 
 class StrictFastMCP(FastMCP):
     """FastMCP with closed top-level argument models."""
@@ -66,7 +60,7 @@ def _with_memory_store(
     operation: Callable[[MemoryStore], dict[str, object]],
 ) -> dict[str, object]:
     try:
-        config = load_config(CONFIG_PATH)
+        config = load_config()
     except Exception as exc:
         return {
             "status": "invalid_source",

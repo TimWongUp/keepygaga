@@ -52,7 +52,7 @@ Core memory consists of `profile.md`, `preferences.md`, and direct `topics/`,
 
 - Python 3.12+
 - A writable local directory for the `agents-memory` tree
-- [`uv`](https://docs.astral.sh/uv/) is recommended
+- [`uv`](https://docs.astral.sh/uv/) for the documented source installation
 
 Obsidian is optional. It is recommended only as a convenient way to browse and
 edit the Markdown memories; Keepygaga works with an ordinary filesystem
@@ -66,12 +66,12 @@ Give the prompt below to the Agent that should use Keepygaga:
 Install and connect https://github.com/TimWongUp/keepygaga for yourself.
 
 1. Read the repository `AGENTS.md` and the current host's MCP documentation, then determine whether the Agent actually runs in native Windows, macOS, Linux, or WSL; all subsequent paths and the Python executable must belong to that same runtime.
-2. Run `uv sync`, copy `keepygaga.example.toml` to a machine-local `keepygaga.toml`, and resolve `memory.root`: prefer an existing memory tree explicitly supplied by the user in this turn, then a single valid tree from an existing Keepygaga configuration; do not scan an entire disk. If no existing tree is available, choose a new writable directory outside the Keepygaga checkout and any publicly shared or automatically published directory. A synchronized directory is acceptable only when its access is private and trusted. If candidates are ambiguous or the user's intent is unclear, ask only for the missing choice.
-3. When reusing an existing tree, point `memory.root` directly to it, do not copy, move, or rewrite its pages, and run `uv run keepygaga doctor --json` first. Inspect the JSON check whose `id` is `memory_tree`: run `uv run keepygaga memory init` to fill missing structure only when its message explicitly reports that the tree is not initialized. If it reports `invalid_source`, malformed content, or a specific invalid page, stop the installation and report the exact path to the user; do not run init or continue registration. After init, rerun Doctor regardless of the command exit code or whether the payload says `applied` or `no_op`, and treat the new `memory_tree` check as authoritative. For a new directory, run init to create the canonical tree. `memory init` must never overwrite existing files.
-4. Register `keepygaga.server` as a stdio server under the key `keepygaga`, using the virtual environment's native Python with arguments `-m` and `keepygaga.server`, plus an absolute `KEEPYGAGA_CONFIG`. Preserve unrelated host MCP settings, and do not sync `.venv` or `keepygaga.toml` between machines.
+2. Run `uv sync`, copy `keepygaga.example.toml` to a machine-local `keepygaga.toml`, record that file's absolute path as `CONFIG_PATH`, and resolve `memory.root`: prefer an existing memory tree explicitly supplied by the user in this turn, then a single valid tree from an existing Keepygaga configuration; do not scan an entire disk. If no existing tree is available, choose a new writable directory outside the Keepygaga checkout and any publicly shared or automatically published directory. A synchronized directory is acceptable only when its access is private and trusted. If candidates are ambiguous or the user's intent is unclear, ask only for the missing choice. Pass `--config CONFIG_PATH` to every Keepygaga CLI command below.
+3. When reusing an existing tree, point `memory.root` directly to it, do not copy, move, or rewrite its pages, and run `uv run keepygaga --config CONFIG_PATH doctor --json` first. Inspect the JSON check whose `id` is `memory_tree`: run `uv run keepygaga --config CONFIG_PATH memory init` to fill missing structure only when `details.source_status` is `not_initialized`. If it reports another source status, malformed content, or a specific invalid page, stop the installation and report the exact path to the user; do not run init or continue registration. After init, rerun Doctor and treat the new `memory_tree` check as authoritative. For a new directory, run init to create the canonical tree. `memory init` is idempotent: it returns success with `no_op` when no files are missing and must never overwrite existing files.
+4. Inspect any existing MCP registration under the key `keepygaga`, then register or replace only that entry with `keepygaga.server` as a stdio server, using the virtual environment's native Python with arguments `-m` and `keepygaga.server`, plus an absolute `KEEPYGAGA_CONFIG` equal to `CONFIG_PATH`. Remove stale Keepygaga-owned launch arguments or environment fields that are not part of the current registration, verify the executable and module exist, preserve every unrelated host MCP setting, and do not sync `.venv` or `keepygaga.toml` between machines.
 5. Merge `docs/agent-contract.md` into the global host rules that are actually loaded, preserving unrelated settings.
 6. If the host supports Hooks, read `docs/hooks/README.md`, select exactly the page for the current Agent host, and install only the capabilities documented on that page. Use the same physical memory root as Keepygaga, merge only Hook entries owned by that runtime, and preserve every unrelated host setting. If no compatible runtime is available, finish the MCP installation and report that Hook integration was not installed; do not invent or download Hook executables.
-7. Run `uv run keepygaga doctor --json` and `uv run python scripts/smoke_mcp_server.py`, then confirm the host exposes exactly list, read, create, add, update, move, rename, and delete. When Hooks were installed, also run the selected Agent host's verification.
+7. Run `uv run keepygaga --config CONFIG_PATH doctor --json` and `uv run python scripts/smoke_mcp_server.py`, then confirm the host exposes exactly list, read, create, add, update, move, rename, and delete. When Hooks were installed, also run the selected Agent host's verification.
 8. On a first installation only, inspect content that predated this installation in the host's actually loaded global rules and identify candidate long-term personal preferences about how the user wants the Agent to respond and work. Skip this step for reinstalls, repairs, or upgrades, and do not use the Agent Contract or installation instructions merged in this run as candidate sources. Exclude safety boundaries, tool or memory routing, project rules, current state, inference, and facts recoverable from a direct source. Show the user the deduplicated candidates and ask once whether to import them into `preferences.md`; do not write before explicit confirmation. After confirmation, first `read` `preferences.md`, classify each candidate as covered / refines / new / conflict, and write confirmed candidates as `stated`. If the user declines or there are no candidates, write nothing and do not save an onboarding marker.
 
 Report the files changed, memory root, MCP registration, validation results, and remaining gaps. Never print credentials.
@@ -80,13 +80,13 @@ Report the files changed, memory root, MCP registration, validation results, and
 ## Use
 
 ```bash
-uv run keepygaga doctor
-uv run keepygaga memory init
-uv run keepygaga-mcp
+uv run keepygaga --config /absolute/path/to/keepygaga.toml doctor --json
+uv run keepygaga --config /absolute/path/to/keepygaga.toml memory init
 ```
 
 `doctor` checks core memory and reports the eight raw tools. `memory init`
-creates the canonical Markdown tree and refuses to overwrite existing files.
+creates the canonical Markdown tree, returns success with `no_op` when the tree
+is already complete, and refuses to overwrite existing files.
 Running the CLI without a subcommand prints help.
 
 Register the server in your MCP host under the ID `keepygaga`, so the full host
@@ -109,7 +109,16 @@ tool names look like `mcp__keepygaga__read`:
 Use the virtual environment's absolute native Python path. On Windows this is
 typically `.venv\Scripts\python.exe` instead of `.venv/bin/python`.
 
-`KEEPYGAGA_CONFIG` overrides the default config path.
+Configuration precedence is an explicit CLI `--config`, then
+`KEEPYGAGA_CONFIG`, then the checkout's default `keepygaga.toml`. MCP hosts
+should always set an absolute `KEEPYGAGA_CONFIG`.
+
+### Upgrade or repair an existing registration
+
+Before restarting the host, inspect the existing `keepygaga` entry and replace
+stale script paths or arguments with the current virtual environment's Python
+plus `-m keepygaga.server`. Remove obsolete Keepygaga-owned fields, preserve
+all unrelated MCP entries, and rerun Doctor and the smoke test.
 
 ## Core capabilities (self-contained)
 
