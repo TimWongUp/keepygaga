@@ -59,13 +59,13 @@ def test_core_memory_v1_contract_matches_current_page_format() -> None:
     documents = {
         "profile.md": MemoryDocument(
             name="profile",
-            description="用户的稳定身份、背景与长期个人事实。",
+            description="用户明确陈述的稳定身份、背景与长期角色。",
             aliases=("identity",),
             facts=(fact("Contract profile fact."),),
         ),
         "preferences.md": MemoryDocument(
             name="preferences",
-            description="用户希望 Agent 如何回应和工作的长期偏好。",
+            description="用户希望 Agent 长期遵循的回应方式、工作偏好与条件检索偏好。",
             aliases=("working-style",),
             facts=(fact("Contract preference fact."),),
         ),
@@ -132,8 +132,44 @@ def test_initialize_creates_minimal_tree(memory_store: tuple[Path, MemoryStore])
     profile = parse_memory_file(profile_text, "profile.md")
     preferences = parse_memory_file(preferences_text, "preferences.md")
     assert profile.name == "profile"
-    assert profile.description == "用户的稳定身份、背景与长期个人事实。"
-    assert preferences.description == "用户希望 Agent 如何回应和工作的长期偏好。"
+    assert profile.description == "用户明确陈述的稳定身份、背景与长期角色。"
+    assert preferences.description == "用户希望 Agent 长期遵循的回应方式、工作偏好与条件检索偏好。"
+
+
+def test_initialize_returns_optional_onboarding_for_created_pages(tmp_path: Path) -> None:
+    root = tmp_path / "memory"
+    config = MemoryFilesConfig(root=str(root))
+
+    first = initialize_memory_tree(root, config)
+    second = initialize_memory_tree(root, config)
+
+    assert first["onboarding"] == {
+        "optional": True,
+        "created_pages": ["profile.md", "preferences.md"],
+    }
+    assert second["status"] == "no_op"
+    assert "onboarding" not in second
+
+
+def test_initialize_directory_only_repair_is_applied_without_onboarding(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "memory"
+    config = MemoryFilesConfig(root=str(root))
+    assert initialize_memory_tree(root, config)["status"] == "applied"
+    for directory in ("topics", "areas", "people"):
+        (root / directory).rmdir()
+
+    result = initialize_memory_tree(root, config)
+
+    assert result["status"] == "applied"
+    assert result["files"] == []
+    assert result["directories"] == [
+        str(root / "topics"),
+        str(root / "areas"),
+        str(root / "people"),
+    ]
+    assert "onboarding" not in result
 
 
 def test_initialize_never_overwrites_an_existing_page(tmp_path: Path) -> None:
@@ -152,6 +188,10 @@ def test_initialize_never_overwrites_an_existing_page(tmp_path: Path) -> None:
     profile.write_text(human_content, encoding="utf-8")
     result = initialize_memory_tree(root, MemoryFilesConfig(root=str(root)))
     assert result["status"] == "applied"
+    assert result["onboarding"] == {
+        "optional": True,
+        "created_pages": ["preferences.md"],
+    }
     assert profile.read_text(encoding="utf-8") == human_content
 
 
@@ -164,6 +204,7 @@ def test_initialize_rejects_non_file_fixed_page(tmp_path: Path) -> None:
 
     assert result["status"] == "invalid_source"
     assert "regular file" in str(result["message"])
+    assert "onboarding" not in result
 
 
 def test_initialize_reports_created_directories_on_partial_failure(
@@ -185,6 +226,27 @@ def test_initialize_reports_created_directories_on_partial_failure(
     assert result["status"] == "partial_commit"
     assert result["files"] == []
     assert result["directories"] == [str(root / "topics")]
+    assert "onboarding" not in result
+
+
+def test_initialize_partial_file_commit_does_not_offer_onboarding(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "memory"
+    original_create = memory_module._exclusive_create
+
+    def fail_preferences(target: Path, text: str) -> bool:
+        if target.name == "preferences.md":
+            raise PermissionError("simulated page failure")
+        return original_create(target, text)
+
+    monkeypatch.setattr(memory_module, "_exclusive_create", fail_preferences)
+
+    result = initialize_memory_tree(root, MemoryFilesConfig(root=str(root)))
+
+    assert result["status"] == "partial_commit"
+    assert result["files"] == [str(root / "profile.md")]
+    assert "onboarding" not in result
 
 
 def test_inspect_reports_invalid_utf8_with_exact_path(
@@ -333,6 +395,39 @@ def test_stated_fact_cannot_be_downgraded(
         ]
     )
     assert result["status"] == "invalid_entry"
+
+
+def test_observed_fact_can_be_promoted_to_stated(
+    memory_store: tuple[Path, MemoryStore],
+) -> None:
+    _, store = memory_store
+    added = store.add(
+        [
+            AddOperation(
+                path="preferences.md",
+                if_version=version(store, "preferences.md"),
+                facts=[fact("Prefers concise answers.", "observed")],
+            )
+        ]
+    )
+    assert added["status"] == "applied"
+
+    result = store.update(
+        [
+            UpdateFactOperation(
+                path="preferences.md",
+                if_version=version(store, "preferences.md"),
+                target="fact",
+                old_fact=fact("Prefers concise answers.", "observed"),
+                new_fact=fact("Prefers concise answers."),
+            )
+        ]
+    )
+
+    assert result["status"] == "applied"
+    assert read_file(store, "preferences.md")["facts"] == [
+        {"basis": "stated", "content": "Prefers concise answers."}
+    ]
 
 
 def test_batch_preflight_failure_writes_nothing(

@@ -28,10 +28,21 @@ agents-memory/
 - `contracts/core-memory-v1/` 保存 canonical 与 legacy-sources golden pages；Keepygaga 测试裁决其与当前 parser/renderer 一致，宿主注入器只读消费该版本化合同。
 - `core-memory-v1` 冻结字段顺序与 Fact 行语法；破坏性格式变化新建下一版本，并保留 v1 直到已知消费者完成迁移。fixture 的非语义样本文本可以在 v1 内调整。
 - 正文只允许单行 `- [stated|observed] ...` Fact。
-- `profile.md` 保存三个月后仍应成立的身份级背景，可包含能改善跨任务交流的稳定项目归属或长期角色；直属 `areas/` 页面可以维护持续项目的项目索引，只记录每个项目的存放位置与已完成的重大进展，并拆成不同 Fact。排除阶段快照、角色、计划、阻塞、下一步、普通提交、单次任务、测试结果和当前运行状态；项目详情、决策、计划和当前状态仍属于项目 Authority 或直接真源，二者与项目索引冲突时优先。
+- `profile.md` 与 `preferences.md` 是 Home Page：兼容宿主在任务开始时直接注入正文，未注入时 Agent 通过 MCP 主动读取两页；动态页只通过 Route Catalog 暴露并按任务需要读取。`profile.md` 保存三个月后仍应成立的身份级背景，新 Fact 只接受用户当前明确陈述并标记 `stated`；历史 `[observed]` 继续可读。`preferences.md` 保存长期回应、工作偏好与用户特有的条件检索偏好；宿主协议、Skill/MCP/Hook、启动、安全与工具路由仍属于全局规则，不进入 Memory。
+- 直属 `areas/` 页面可以维护持续项目的项目索引，只记录每个项目的存放位置与已完成的重大进展，并拆成不同 Fact。排除阶段快照、角色、计划、阻塞、下一步、普通提交、单次任务、测试结果和当前运行状态；项目详情、决策、计划和当前状态仍属于项目 Authority 或直接真源，二者与项目索引冲突时优先。Agent 只在清点项目、定位仓库或核对重大进展的任务中读取项目索引。
 - 同一项目的位置与重大进展使用不同 Fact。位置在首次登记或移动时更新；进展只在完成会改变项目整体判断的重大里程碑时更新。阶段快照、角色、计划、阻塞、下一步、普通提交、单次任务、测试结果和临时运行状态不写入核心记忆。
 - `profile.md` 的 Fact content 合计不超过 300 字符；其他页面超出 soft limit 只返回 `split_recommended`。
 - name 与 aliases 在全库规范化后不得冲突。
+
+## Agent convergence
+
+Fact Convergence 是 Agent 对已经 `read` 的目标页执行的写入前分类，不是 Store 语义能力。候选分为 covered、refines、new 或 conflict：covered 跳过，refines 精确 `update`，new 才 `add`，conflict 以用户当前明确陈述或 live direct source 裁决。Store 仍只拒绝精确重复 Fact，不执行语义搜索、近义合并或候选提升。
+
+Agent 可以在无需逐条确认的情况下，把低敏、可操作且具有跨任务价值的重复工作行为作为 `observed` 写入 `preferences.md`，但证据必须在当前可见上下文中已经充分；Keepygaga 不保存跨会话候选、计数或 provenance，也不扫描历史聊天。已有 observed 可在后续任务中依据新证据细化；重复次数本身不会把 observed 提升为 stated，只有用户明确确认时才可更新为 stated。
+
+自动 observed 永不适用于身份、人格、动机、价值观，以及健康、法律、财务、家庭冲突、政治、宗教、性或亲密行为等敏感画像。精确地址和其他高敏个人信息仍只在用户明确要求时以最低必要精度保存；凭据与完整账户或政府标识始终禁止写入。
+
+为限制自主增长，没有用户明确写入指令时，Agent 每个任务对每个 Home Page 最多发起一次 mutation：一次 `add` 可包含多个独立 new Fact，一次 `update` 只收敛一个 Fact；同时存在 refinement 与 new 时优先 refinement。用户明确要求的维护、Profile Onboarding 和用户确认的 Preference Extraction 不受该次数限制，但每次 applied mutation 后必须重新 `read` 最新 version 并重新分类。`preferences.md` 已返回 `split_recommended` 时，禁止自动 `add observed`，仍可用 `update` 收敛；用户明确要求的 stated 写入可以继续，但 Agent 必须提示首页已超出建议预算。
 
 ## MCP contract
 
@@ -39,7 +50,7 @@ agents-memory/
 
 `create` 创建页面，`add` 新增 Fact，`update` 按 `target` 更新精确 Fact 或页面元数据，`move` 在页面之间移动精确 Fact，`rename` 重命名动态页面，`delete` 删除精确 Fact 或页面。写入现有页面必须携带 `read` 返回的 version；`update target="fact"` 精确替换 Fact 且禁止把 stated 降级为 observed；`target="page"` 只更新 description/aliases。固定页不能 page rename/delete，`delete` 要求 `authorization="user_requested"`。当前 Store 拒绝同一 path 在一批 operations 中重复，不要求页面元数据与 Fact 必须在同一批提交。
 
-用户陈述标记为 `stated`；`observed` 行为模式必须有重复的直接证据，不能推断身份、偏好或无依据结论。精确地址以及健康、法律、财务、家庭等高敏信息只有用户明确要求时才以最低必要精度写入；密码、密钥、token、私钥、OTP、cookie、session 和完整账户/政府标识始终禁止写入。
+用户陈述标记为 `stated`；`observed` 只用于符合 Agent convergence 门槛的 Preference Fact。精确地址以及健康、法律、财务、家庭等高敏信息只有用户明确要求时才以最低必要精度写入；密码、密钥、token、私钥、OTP、cookie、session 和完整账户/政府标识始终禁止写入。
 
 只有 `status="applied"` mutation 原样返回服务端已渲染的 receipt，并只回显一次；读取、no-op、skip 和失败不产生 receipt。Core-memory wikilink 可使用原生 Obsidian 语法；指向普通笔记的链接只有在宿主能核验目标存在时才添加，否则延后，不让不可用的存在性核验成为硬依赖。
 
@@ -50,6 +61,8 @@ agents-memory/
 `docs/agent-contract.md` 是宿主全局规则中 Keepygaga 托管块的唯一规范源。托管块只包含 `KEEPYGAGA:START`、当前发行版本号和 `KEEPYGAGA:END`，不保存内容哈希：首次安装追加完整块，升级在原位置替换完整块，块外字节保持原位；标记损坏、嵌套或重复时 fail closed。托管块内部由当前版本完整拥有，人工修改会在下次 setup 时被替换。
 
 Codex 的安装、升级和修复统一运行幂等 `keepygaga host setup codex`：通过 Codex CLI 只协调注册 key `keepygaga`，按 Codex 实际优先级把托管块投影到生效的全局 `AGENTS.override.md` 或 `AGENTS.md`。非空 override 生效；空 override 不生效。若非生效候选已含 Keepygaga 托管块，因 stale/双入口风险 fail closed。首次宿主写入前先完成 MCP 与可选 Hook 的只读 prepare；apply 严格按 MCP、rules、hooks 顺序执行，因此 MCP apply 失败时 rules 不写。规则在其 apply 开始时以原始 UTF-8 bytes 读取，在合并后重新核验两份候选的选择状态与目标原文，并把首次读取作为 CAS 前提，托管块外字节逐字节保留；MCP 与 Hook apply 使用 prepare 捕获的 `config.toml` / `hooks.json` 原始字节拒绝并发漂移。MCP 对账保留该注册的其他环境变量，对 Codex CLI 无法无损投影的 cwd、env_vars、工具筛选或 timeout 自定义字段 fail closed，并在实际替换前保存可恢复的 Codex config 备份。Hook 预检 runtime、fragment、合并器、Python、命令路径与实际生效的 AHR 环境，拒绝符号链接写入目标、冲突的 memory root 和无效 merger 输出。Keepygaga 不复制 Hook payload，不拥有其他 Hook 条目；未选择兼容 runtime 时 Hook 明确跳过。其他宿主暂不承诺该确定性命令。
+
+`memory init` 继续是非交互幂等命令；只有成功创建固定页时才在 JSON 中返回可选 onboarding 与本轮 `created_pages`，no-op、失败或 partial commit 不返回可执行 onboarding。安装 Agent 完成 MCP、Agent Contract 与可选 Hook 的现场验证后，才可依据该信号提供 Profile Onboarding。Preference Extraction 也是安装 Agent 的按目标宿主首次安装可选流程：setup 前生效规则没有 Keepygaga 托管块的目标才进入，有块的重装、修复或升级直接跳过；它不属于 CLI、Store 或 Hook Runtime 的自动行为。
 
 ## Write invariants
 
@@ -76,4 +89,4 @@ Keepygaga 的安全边界分为三层，各自由不同主体保证：
 
 ## Non-goals
 
-Keepygaga 不负责跨文件崩溃恢复、恶意本地并发或消除 version 复核与原子替换之间不可避免的极短竞态窗口，也不负责 Vault wikilink 校验或重写、writer provenance、语义匹配、会话历史、候选池、自动删除、压缩、拆分或转移。
+Keepygaga 不负责跨文件崩溃恢复、恶意本地并发或消除 version 复核与原子替换之间不可避免的极短竞态窗口，也不负责 Vault wikilink 校验或重写、writer provenance、语义匹配、会话历史、跨会话候选累计、候选池、自动删除、压缩、拆分或转移。
