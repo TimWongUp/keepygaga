@@ -48,6 +48,8 @@ Agent 可以在无需逐条确认的情况下，把低敏、可操作且具有�
 
 客户端以 key `keepygaga` 注册服务；raw Tool 固定为 `list`、`read`、`create`、`add`、`update`、`move`、`rename`、`delete`，宿主可以为它们加命名空间。`list` 返回 canonical path，`read` 返回 opaque version，宿主将其映射为 mutation 的 `if_version`；缺少 `list` 或 `read` 时必须明确报告。每次 Tool 调用只有一个 endpoint。
 
+全局 Agent Contract 负责 Tool 选择前的语义决策：Authority、Home Page 加载、动态记忆检索触发、页面归属、Fact 准入、Convergence、主动增长限制和真实用户授权。MCP Tool descriptions 与 JSON Schema 负责已经选择 Tool 后的调用协议：canonical path、opaque version、operation 字段、target 判别和批次约束；Store 返回结构化状态，并继续强制页面格式、版本、身份冲突、固定页保护和文件写入不变量。全局合同不重复能够由 schema 或 Store 可靠裁决的实现细节，但不得把读取或写入语义隐藏到只有选择 Tool 后才可见的位置。
+
 `create` 创建页面，`add` 新增 Fact，`update` 按 `target` 更新精确 Fact 或页面元数据，`move` 在页面之间移动精确 Fact，`rename` 重命名动态页面，`delete` 删除精确 Fact 或页面。写入现有页面必须携带 `read` 返回的 version；`update target="fact"` 精确替换 Fact 且禁止把 stated 降级为 observed；`target="page"` 只更新 description/aliases。固定页不能 page rename/delete，`delete` 要求 `authorization="user_requested"`。当前 Store 拒绝同一 path 在一批 operations 中重复，不要求页面元数据与 Fact 必须在同一批提交。
 
 用户陈述标记为 `stated`；`observed` 只用于符合 Agent convergence 门槛的 Preference Fact。精确地址以及健康、法律、财务、家庭等高敏信息只有用户明确要求时才以最低必要精度写入；密码、密钥、token、私钥、OTP、cookie、session 和完整账户/政府标识始终禁止写入。

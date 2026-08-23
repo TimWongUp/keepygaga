@@ -67,7 +67,7 @@ def test_public_mcp_surface_and_exact_top_level_shapes() -> None:
     fact_content = fact_schema["properties"]["content"]
     assert fact_content["maxLength"] == 4096
     descriptions = "".join(tool.description or "" for tool in tools)
-    assert len(descriptions) < 1000
+    assert len(descriptions) < 1600
     assert "sources" not in descriptions.lower()
     assert "legacy" not in descriptions.lower()
 
@@ -136,6 +136,54 @@ def test_public_mcp_surface_and_exact_top_level_shapes() -> None:
     assert delete_fact["properties"]["authorization"]["const"] == "user_requested"
     assert delete_fact["properties"]["target"]["const"] == "fact"
     assert delete_page["properties"]["target"]["const"] == "page"
+
+
+def test_tool_protocol_is_discoverable_from_descriptions_and_schema() -> None:
+    tools = asyncio.run(mcp_server.mcp.list_tools())
+    by_name = {tool.name: tool for tool in tools}
+
+    assert "live route catalog" in (by_name["list"].description or "")
+    assert "opaque write versions" in (by_name["read"].description or "")
+    assert "explicit current-turn user authorization" in (
+        by_name["delete"].description or ""
+    )
+
+    read_paths = by_name["read"].inputSchema["properties"]["paths"]
+    assert read_paths["description"] == "Unique canonical page paths returned by list."
+
+    add_schema = by_name["add"].inputSchema
+    add = add_schema["$defs"]["AddOperation"]
+    assert "latest read" in add["properties"]["if_version"]["description"]
+    assert "exact duplicates only" in add["properties"]["facts"]["description"]
+    assert "each path must be unique" in (
+        add_schema["properties"]["operations"]["description"]
+    )
+
+    update_schema = by_name["update"].inputSchema
+    update_fact = update_schema["$defs"]["UpdateFactOperation"]
+    update_page = update_schema["$defs"]["UpdatePageOperation"]
+    assert "Fact replacement" in update_fact["properties"]["target"]["description"]
+    assert "cannot be downgraded" in (
+        update_fact["properties"]["new_fact"]["description"]
+    )
+    assert "page description or aliases" in (
+        update_page["properties"]["target"]["description"]
+    )
+
+    delete_schema = by_name["delete"].inputSchema
+    delete_fact = delete_schema["$defs"]["DeleteFactOperation"]
+    assert "current-turn user authorization" in (
+        delete_fact["properties"]["authorization"]["description"]
+    )
+
+    for name in EXPECTED_TOOLS - {"list", "read"}:
+        assert "applied results include receipts" in (by_name[name].description or "")
+
+    fact_schema = add_schema["$defs"]["Fact"]
+    assert "explicit statement" in fact_schema["properties"]["basis"]["description"]
+    assert "independently maintainable" in (
+        fact_schema["properties"]["content"]["description"]
+    )
 
 
 def test_tool_annotations_match_read_and_destructive_behavior() -> None:
