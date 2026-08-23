@@ -1,24 +1,27 @@
 # Codex Hooks
 
-Codex supports session and subagent context injection, per-turn memory routing,
-compact recovery, and write-triggered Closeout. `SessionStart` does not carry
-its injected context into internal subagents, so `SubagentStart` independently
-loads the same full core-memory bootstrap.
+Codex Hook 只通过幂等宿主 setup 投影：
 
-- Live target: `~/.codex/hooks.json`, under `hooks`.
-- `SessionStart`: run `context_hook.py codex` with a 10-second timeout and
-  `additionalContextLimit: 0`.
-- `SubagentStart`: run `context_hook.py codex SubagentStart` with a 10-second
-  timeout and `additionalContextLimit: 0`.
-- `UserPromptSubmit`: run `memory_route_hook.py codex UserPromptSubmit` with a
-  2-second timeout and `additionalContextLimit: 120`.
-- `SessionStart` with matcher `^compact$`: run
-  `memory_route_hook.py codex SessionStart compact` with a 2-second timeout and
-  `additionalContextLimit: 180`.
-- `PostToolUse` with matcher `Write|Edit`: run
-  `closeout_hook.py codex PostToolUse` with a 2-second timeout.
+```bash
+uv run keepygaga --config CONFIG_PATH host setup codex \
+  --hook-runtime RUNTIME_ROOT \
+  --hook-python PYTHON
+```
 
-Use absolute, independently quoted Python and runtime paths. Merge only these
-entries into the live `hooks` object. Verify `SessionStart`, `SubagentStart`, one
-user prompt, compact recovery, and one matching file write; confirm Closeout is
-emitted at most once for the same pending state.
+`RUNTIME_ROOT` 必须是用户已经选择并信任的兼容 Agent Hook Runtime checkout，`PYTHON`
+必须能直接运行该 runtime。setup 读取 runtime 自己的
+`config/hooks/codex.json`，使用它提供的 `merge_hook_fragment`，并把 runtime config
+的 `memory_root` 对齐 Keepygaga 配置；Keepygaga 不复制或推断事件、matcher、timeout
+和 command payload。
+
+setup 会在写入 Codex 配置前完成 runtime、fragment、合并器、命令路径和环境预检。
+`AGENT_HOOK_RUNTIME_MEMORY_ROOT` 若已设置，必须与 Keepygaga 的 `memory.root`
+一致。若显式传入 `--hook-config`，该绝对路径必须与 Agent Hook Runtime 实际加载的
+路径一致；通常应省略此参数并使用 runtime 默认配置，测试或自定义位置则同时设置
+同值的 `AGENT_HOOK_RUNTIME_CONFIG`。符号链接配置路径和可能触发 shell 展开的命令
+路径会被拒绝。
+
+投影目标是 Codex home 下的 `hooks.json#/hooks`。完成条件：runtime 的 context
+smoke 成功，AHR-owned 条目与 fragment 一致，其他 Codex Hook 和顶层字段保持不变。
+没有兼容 runtime 时省略两个 Hook 参数；MCP 与全局 Agent Contract 仍完成安装，
+结果明确返回 `hooks.status="skipped"`。

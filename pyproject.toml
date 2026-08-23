@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "keepygaga"
-version = "0.1.0"
+version = "0.1.1"
 description = "A warm, local-first keeper of memories for AI agents."
 readme = "README.md"
 license = "MIT"
@@ -44,6 +44,12 @@ Repository = "https://github.com/TimWongUp/keepygaga"
 
 [tool.setuptools.packages.find]
 include = ["keepygaga*"]
+
+[tool.setuptools.data-files]
+"share/keepygaga" = [
+  "docs/agent-contract.md",
+  "docs/legacy-agent-contract-v0.md",
+]
 
 [tool.ruff]
 target-version = "py312"
