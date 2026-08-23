@@ -56,14 +56,22 @@ def test_canonical_contract_uses_version_only() -> None:
     assert "SHA256" not in contract.upper()
 
 
-def test_canonical_contract_carries_home_page_growth_gates() -> None:
+def test_canonical_contract_carries_agent_only_memory_policy() -> None:
     contract = host_setup.load_canonical_contract()
 
+    assert "otherwise `read` both at task start" in contract
+    assert "Page paths and write versions must come from current" in contract
+    assert "Route Catalog descriptions and aliases" in contract
     assert "Add new Profile Facts only from the user's current explicit statements" in contract
     assert "current visible context already contains repeated direct evidence" in contract
     assert "project affiliations and project roles" in contract
     assert "at most one mutation per home page per task" in contract
     assert "When `preferences.md` returns `split_recommended`" in contract
+    assert "explicit current-turn user authorization" in contract
+    assert "Fixed home pages cannot be renamed or deleted as pages" in contract
+    assert "Core-memory links may use Obsidian wikilinks" in contract
+    assert "The raw tools are exactly" not in contract
+    assert "The Store rejects repeated operations" not in contract
 
 
 def test_merge_appends_first_block_without_changing_existing_bytes() -> None:

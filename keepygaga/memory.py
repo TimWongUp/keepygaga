@@ -134,25 +134,55 @@ __all__ = [
 ]
 
 
+ExistingPagePath = Annotated[
+    str,
+    Field(description="Canonical existing page path returned by list; pass unchanged."),
+]
+DynamicPagePath = Annotated[
+    str,
+    Field(
+        description=(
+            "New direct topics/, areas/, or people/ Markdown path using a canonical slug."
+        )
+    ),
+]
+CurrentPageVersion = Annotated[
+    str,
+    Field(
+        description=(
+            "Opaque version returned by the latest read of this page; pass unchanged."
+        )
+    ),
+]
+
+
 class CreateOperation(StrictModel):
-    path: str
+    path: DynamicPagePath
     description: str
     aliases: list[str] = Field(max_length=8)
     facts: list[Fact] = Field(max_length=MAX_FACTS_PER_OPERATION)
 
 
 class AddOperation(StrictModel):
-    path: str
-    if_version: str
-    facts: list[Fact] = Field(min_length=1, max_length=MAX_FACTS_PER_OPERATION)
+    path: ExistingPagePath
+    if_version: CurrentPageVersion
+    facts: list[Fact] = Field(
+        min_length=1,
+        max_length=MAX_FACTS_PER_OPERATION,
+        description="Facts to append; Store validation rejects exact duplicates only.",
+    )
 
 
 class UpdateFactOperation(StrictModel):
-    path: str
-    if_version: str
-    target: Literal["fact"]
+    path: ExistingPagePath
+    if_version: CurrentPageVersion
+    target: Literal["fact"] = Field(
+        description="Select exact Fact replacement rather than page metadata update."
+    )
     old_fact: Fact
-    new_fact: Fact
+    new_fact: Fact = Field(
+        description="Replacement Fact; a stated basis cannot be downgraded to observed."
+    )
 
     @model_validator(mode="after")
     def validate_change(self) -> UpdateFactOperation:
@@ -162,9 +192,11 @@ class UpdateFactOperation(StrictModel):
 
 
 class UpdatePageOperation(StrictModel):
-    path: str
-    if_version: str
-    target: Literal["page"]
+    path: ExistingPagePath
+    if_version: CurrentPageVersion
+    target: Literal["page"] = Field(
+        description="Select page description or aliases update rather than Fact replacement."
+    )
     description: str | None = None
     aliases: list[str] | None = Field(default=None, max_length=8)
 
@@ -183,32 +215,40 @@ class UpdatePageOperation(StrictModel):
 
 
 class MoveOperation(StrictModel):
-    source_path: str
-    source_version: str
-    destination_path: str
-    destination_version: str
+    source_path: ExistingPagePath
+    source_version: CurrentPageVersion
+    destination_path: ExistingPagePath
+    destination_version: CurrentPageVersion
     fact: Fact
 
 
 class RenameOperation(StrictModel):
-    path: str
-    if_version: str
-    new_path: str
+    path: ExistingPagePath
+    if_version: CurrentPageVersion
+    new_path: DynamicPagePath
 
 
 class DeleteFactOperation(StrictModel):
-    path: str
-    if_version: str
-    target: Literal["fact"]
+    path: ExistingPagePath
+    if_version: CurrentPageVersion
+    target: Literal["fact"] = Field(description="Delete one exact Fact.")
     fact: Fact
-    authorization: Literal["user_requested"]
+    authorization: Literal["user_requested"] = Field(
+        description=(
+            "Audit assertion; set only after explicit current-turn user authorization."
+        )
+    )
 
 
 class DeletePageOperation(StrictModel):
-    path: str
-    if_version: str
-    target: Literal["page"]
-    authorization: Literal["user_requested"]
+    path: ExistingPagePath
+    if_version: CurrentPageVersion
+    target: Literal["page"] = Field(description="Delete one dynamic page.")
+    authorization: Literal["user_requested"] = Field(
+        description=(
+            "Audit assertion; set only after explicit current-turn user authorization."
+        )
+    )
 
 
 DeleteOperation = Annotated[
@@ -221,24 +261,61 @@ UpdateOperation = Annotated[
 ]
 
 CreateOperations = Annotated[
-    list[CreateOperation], Field(min_length=1, max_length=MAX_MUTATION_OPERATIONS)
+    list[CreateOperation],
+    Field(
+        min_length=1,
+        max_length=MAX_MUTATION_OPERATIONS,
+        description="Page creations validated as one batch; repeated paths are rejected.",
+    ),
 ]
 AddOperations = Annotated[
-    list[AddOperation], Field(min_length=1, max_length=MAX_MUTATION_OPERATIONS)
+    list[AddOperation],
+    Field(
+        min_length=1,
+        max_length=MAX_MUTATION_OPERATIONS,
+        description="Fact additions validated as one batch; each path must be unique.",
+    ),
 ]
 UpdateOperations = Annotated[
-    list[UpdateOperation], Field(min_length=1, max_length=MAX_MUTATION_OPERATIONS)
+    list[UpdateOperation],
+    Field(
+        min_length=1,
+        max_length=MAX_MUTATION_OPERATIONS,
+        description="Exact updates validated as one batch; each path must be unique.",
+    ),
 ]
 MoveOperations = Annotated[
-    list[MoveOperation], Field(min_length=1, max_length=MAX_MUTATION_OPERATIONS)
+    list[MoveOperation],
+    Field(
+        min_length=1,
+        max_length=MAX_MUTATION_OPERATIONS,
+        description="Exact Fact moves; every source and destination path must be unique.",
+    ),
 ]
 RenameOperations = Annotated[
-    list[RenameOperation], Field(min_length=1, max_length=MAX_MUTATION_OPERATIONS)
+    list[RenameOperation],
+    Field(
+        min_length=1,
+        max_length=MAX_MUTATION_OPERATIONS,
+        description="Dynamic page renames; every old and new path must be unique.",
+    ),
 ]
 DeleteOperations = Annotated[
-    list[DeleteOperation], Field(min_length=1, max_length=MAX_MUTATION_OPERATIONS)
+    list[DeleteOperation],
+    Field(
+        min_length=1,
+        max_length=MAX_MUTATION_OPERATIONS,
+        description="Authorized exact deletions; each path must be unique.",
+    ),
 ]
-ReadPaths = Annotated[list[str], Field(min_length=1, max_length=MAX_READ_PATHS)]
+ReadPaths = Annotated[
+    list[ExistingPagePath],
+    Field(
+        min_length=1,
+        max_length=MAX_READ_PATHS,
+        description="Unique canonical page paths returned by list.",
+    ),
+]
 
 
 @dataclass(frozen=True)

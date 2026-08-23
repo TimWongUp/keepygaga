@@ -41,8 +41,16 @@ class StrictModel(BaseModel):
 
 
 class Fact(StrictModel):
-    basis: Basis
-    content: str = Field(max_length=MAX_FACT_CONTENT_CHARS)
+    basis: Basis = Field(
+        description=(
+            "Evidence basis: stated for the user's explicit statement; observed only "
+            "where the Agent Contract permits a repeated behavioral observation."
+        )
+    )
+    content: str = Field(
+        max_length=MAX_FACT_CONTENT_CHARS,
+        description="One complete, independently maintainable, single-line assertion.",
+    )
 
     @field_validator("content")
     @classmethod

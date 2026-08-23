@@ -77,49 +77,49 @@ def _with_memory_store(
 
 @mcp.tool(name="list", annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False))
 def list_memory() -> dict[str, object]:
-    """List canonical paths, descriptions, and optional routing aliases."""
+    """List the live route catalog: canonical paths, descriptions, and aliases."""
     return _with_memory_store(MemoryStore.list_files)
 
 
 @mcp.tool(name="read", annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False))
 def read_memory(paths: ReadPaths) -> dict[str, object]:
-    """Read 1–20 canonical pages and return facts plus write versions."""
+    """Read listed canonical pages; returns Facts, opaque write versions, and capacity signals."""
     return _with_memory_store(lambda store: store.read(paths))
 
 
 @mcp.tool(name="create", annotations=ToolAnnotations(readOnlyHint=False))
 def create_pages(operations: CreateOperations) -> dict[str, object]:
-    """Create dynamic topics, areas, or people pages after full-batch validation."""
+    """Create dynamic pages after full-batch validation; applied results include receipts."""
     return _with_memory_store(lambda store: store.create(operations))
 
 
 @mcp.tool(name="add", annotations=ToolAnnotations(readOnlyHint=False))
 def add_facts(operations: AddOperations) -> dict[str, object]:
-    """Add independent facts using the current page version."""
+    """Add independent Facts using each page's latest read version; applied results include receipts."""
     return _with_memory_store(lambda store: store.add(operations))
 
 
 @mcp.tool(name="update", annotations=ToolAnnotations(readOnlyHint=False))
 def update_memory(operations: UpdateOperations) -> dict[str, object]:
-    """Update an exact fact or page metadata using the current version."""
+    """Replace an exact Fact or page metadata; applied results include receipts."""
     return _with_memory_store(lambda store: store.update(operations))
 
 
 @mcp.tool(name="move", annotations=ToolAnnotations(readOnlyHint=False))
 def move_fact(operations: MoveOperations) -> dict[str, object]:
-    """Move exact facts between current-version pages."""
+    """Move exact Facts using both latest read versions; applied results include receipts."""
     return _with_memory_store(lambda store: store.move(operations))
 
 
 @mcp.tool(name="rename", annotations=ToolAnnotations(readOnlyHint=False))
 def rename_page(operations: RenameOperations) -> dict[str, object]:
-    """Rename dynamic pages and preserve the previous name as an alias."""
+    """Rename dynamic pages using latest read versions; applied results include receipts."""
     return _with_memory_store(lambda store: store.rename(operations))
 
 
 @mcp.tool(name="delete", annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True))
 def delete_memory(operations: DeleteOperations) -> dict[str, object]:
-    """Delete exact facts or dynamic pages with explicit user authorization."""
+    """Delete exact Facts or dynamic pages after explicit current-turn user authorization; applied results include receipts."""
     return _with_memory_store(lambda store: store.delete(operations))
 
 

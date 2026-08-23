@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "keepygaga"
-version = "0.2.0"
+version = "0.2.1"
 description = "A warm, local-first keeper of memories for AI agents."
 readme = "README.md"
 license = "MIT"
