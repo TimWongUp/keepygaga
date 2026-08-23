@@ -19,6 +19,20 @@
 `keepygaga.toml`。安装与升级验证应显式传入配置绝对路径，MCP 宿主应通过
 `KEEPYGAGA_CONFIG` 传入同一文件。
 
+## First-install onboarding
+
+安装 Agent 在运行 `memory init` 时保存完整 JSON，但要等 MCP、Agent Contract 与可选 Hook 验证成功后才处理 `onboarding`。只有 `status="applied"` 且 `onboarding.created_pages` 包含 `profile.md`，并经 `read` 确认该页为空时，才提供一次可整体跳过的 Profile Onboarding；`no_op`、失败、partial commit，或只新建 `preferences.md` 时不启动 Profile 问答。
+
+开始前告知用户：Profile 是共享该 Memory Root 的目标 Agent 都会加载的 Home Page；兼容宿主直接注入，其他宿主按 Agent Contract 主动读取。用户愿意继续时，一次性询问最多四个可选项：希望的称呼、城市级常住地、职业，以及有长期交流价值的稳定角色；不询问精确地址，每项都可跳过。把回答整理为彼此独立的 `stated` Fact，写入前预览并核对 Profile Fact content 合计不超过 300 字符，再通过 raw `list`、`read` 与一次 `add` 写入。跳过时不写标记，不在后续 `memory init no_op` 时重复触发。
+
+## Preference extraction
+
+Preference Extraction 按目标宿主判断首次安装。任何 setup 写入前先只读保存各目标宿主实际生效的原有全局规则，并记录其中是否已有完整 Keepygaga 托管块；只有没有托管块的目标进入 Extraction，有块的重装、修复或升级直接跳过。候选只来自这些 setup 前原文，不来自本轮合并的托管块或安装指令。逐条分类为共享软偏好、宿主专属规则、安全/权限/启动/Keepygaga 协议或工具路由规则、项目规则或不写；只有遗漏会持续改变 Agent 回应、工作方式或用户希望考虑哪类长期记忆的共享软偏好可进入 `preferences.md`。
+
+先展示去重后的候选及写入预览，让用户选择跳过、复制并保留原文，或移动符合条件的候选。默认是复制并保留原文。用户特有的条件检索偏好可以复制为证据，但凡原文被宿主当作检索或路由指令使用就不得移动。移动只适用于不承担安全、权限、Skill、Hook、MCP、检索、路由或启动职责的普通跨宿主回应/工作偏好，并要求当前目标宿主已现场验证 Home Page 加载、用户看过 Authority 降级说明并再次确认。删除只针对当前生效规则文件中托管块外的精确原文；修改后重新验证 Keepygaga 标记、版本行和其他字节。条件不满足、规则混合承载职责或无法精确定位时只复制或保留，不猜测删除。
+
+确认写入后先 `read preferences.md`，按 Fact Convergence 分类；用户确认的候选以 `stated` 写入。已有页面返回 `split_recommended` 时仍允许用户明确要求的 stated 写入，但必须先提示首页预算。该流程不写 onboarding 标记，也不由 `host setup`、Store 或 Hook 自动执行。
+
 ## Doctor semantics
 
 - `ok`：所有适用核心记忆检查正常。

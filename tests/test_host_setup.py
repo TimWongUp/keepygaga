@@ -56,6 +56,16 @@ def test_canonical_contract_uses_version_only() -> None:
     assert "SHA256" not in contract.upper()
 
 
+def test_canonical_contract_carries_home_page_growth_gates() -> None:
+    contract = host_setup.load_canonical_contract()
+
+    assert "Add new Profile Facts only from the user's current explicit statements" in contract
+    assert "current visible context already contains repeated direct evidence" in contract
+    assert "project affiliations and project roles" in contract
+    assert "at most one mutation per home page per task" in contract
+    assert "When `preferences.md` returns `split_recommended`" in contract
+
+
 def test_merge_appends_first_block_without_changing_existing_bytes() -> None:
     existing = "# Personal\r\nkeep this\r\n"
 

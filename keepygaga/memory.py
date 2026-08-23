@@ -81,8 +81,8 @@ MAX_FACTS_PER_OPERATION = 50
 VERSION_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 DEFAULT_DESCRIPTIONS = {
-    "profile.md": "用户的稳定身份、背景与长期个人事实。",
-    "preferences.md": "用户希望 Agent 如何回应和工作的长期偏好。",
+    "profile.md": "用户明确陈述的稳定身份、背景与长期角色。",
+    "preferences.md": "用户希望 Agent 长期遵循的回应方式、工作偏好与条件检索偏好。",
 }
 
 __all__ = [
@@ -355,11 +355,17 @@ def initialize_memory_tree(
             "files": [str(path) for path in rendered],
             "directories": [str(path) for path in created_directories],
         }
-    return {
-        "status": "applied" if rendered else "no_op",
+    payload: dict[str, object] = {
+        "status": "applied" if rendered or created_directories else "no_op",
         "files": [str(path) for path in rendered],
         "directories": [str(path) for path in created_directories],
     }
+    if rendered:
+        payload["onboarding"] = {
+            "optional": True,
+            "created_pages": [path.relative_to(root).as_posix() for path in rendered],
+        }
+    return payload
 
 
 def _exclusive_create(target: Path, text: str) -> bool:
