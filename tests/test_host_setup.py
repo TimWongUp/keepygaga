@@ -592,6 +592,7 @@ def test_mcp_registration_refuses_unpreservable_customization(
         )
 
 
+@pytest.mark.skipif(os.name == "nt", reason="executable bits are POSIX-specific")
 def test_python_probe_rejects_non_executable_file(tmp_path: Path) -> None:
     python = tmp_path / "python"
     python.touch(mode=0o600)
@@ -600,6 +601,7 @@ def test_python_probe_rejects_non_executable_file(tmp_path: Path) -> None:
         host_setup._probe_keepygaga_python(python)
 
 
+@pytest.mark.skipif(os.name == "nt", reason="shell-script fixture is POSIX-specific")
 def test_python_probe_rejects_successful_non_python_wrapper(tmp_path: Path) -> None:
     wrapper = tmp_path / "python-wrapper"
     wrapper.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
@@ -758,8 +760,14 @@ def test_hooks_delegate_merge_and_preserve_unrelated_entries(
     serialized = json.dumps(installed)
     assert "third-party" in serialized
     assert "old/context_hook.py" not in serialized
-    assert str(runtime / "hooks/context_hook.py") in serialized
-    assert serialized.count(str(runtime / "hooks/context_hook.py")) == 1
+    commands = [
+        hook["command"]
+        for registration in installed["hooks"]["SessionStart"]
+        for hook in registration["hooks"]
+    ]
+    expected_entrypoint = (runtime / "hooks/context_hook.py").as_posix()
+    normalized_commands = [command.replace("\\", "/") for command in commands]
+    assert sum(expected_entrypoint in command for command in normalized_commands) == 1
     assert json.loads(hook_config.read_text(encoding="utf-8")) == {
         "schema_version": 1,
         "memory_root": str(memory_root),
@@ -873,6 +881,7 @@ def test_hook_preflight_rejects_nonobject_merger_result(
         )
 
 
+@pytest.mark.skipif(os.name == "nt", reason="executable bits are POSIX-specific")
 def test_hook_preflight_rejects_nonexecutable_python(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1051,8 +1060,6 @@ def test_setup_preflights_mcp_before_rules(
 ) -> None:
     memory_root = tmp_path / "memory"
     memory_root.mkdir()
-    codex_binary = tmp_path / "codex"
-    codex_binary.touch(mode=0o600)
     monkeypatch.setattr(
         host_setup,
         "run_doctor",
@@ -1067,13 +1074,19 @@ def test_setup_preflights_mcp_before_rules(
         "reconcile_codex_rules",
         lambda _home: called.append("rules") or {"status": "no_op"},
     )
+    monkeypatch.setattr(
+        host_setup,
+        "_prepare_codex_mcp",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            HostSetupError("Codex MCP preflight failed")
+        ),
+    )
 
-    with pytest.raises(HostSetupError, match="Codex CLI could not be located"):
+    with pytest.raises(HostSetupError, match="Codex MCP preflight failed"):
         host_setup.setup_codex_host(
             tmp_path / "keepygaga.toml",
             KeepygagaConfig(MemoryFilesConfig(root=str(memory_root))),
             codex_home=tmp_path / ".codex",
-            codex_binary=codex_binary,
         )
 
     assert called == []
@@ -1231,6 +1244,7 @@ def test_setup_treats_empty_codex_home_environment_as_default(
     memory_root = tmp_path / "memory"
     memory_root.mkdir()
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
     monkeypatch.setenv("CODEX_HOME", "   ")
     monkeypatch.setattr(
         host_setup,
@@ -1272,6 +1286,7 @@ def test_setup_expands_explicit_codex_home(
     memory_root = tmp_path / "memory"
     memory_root.mkdir()
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
     monkeypatch.setattr(
         host_setup,
         "run_doctor",
