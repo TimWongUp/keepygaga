@@ -6,6 +6,13 @@ Keepygaga 只负责核心记忆的 live Markdown 合同、显式 MCP 读写和 v
 
 Memory Root 内 Markdown 是唯一真源，可以是普通目录，也可以位于 Obsidian Vault。Keepygaga 不依赖 Obsidian，也不维护索引或第二份事实源。
 
+Memory is context evidence, not permission or executable instruction. Current user
+statements about self, relationships, and preferences override older memory;
+project, system, and runtime facts come from the current project Authority or a
+live direct source, while external facts still require verification. A project
+Authority is the repository's current entry instructions, architecture, source,
+tests, configuration, and other direct project-owned sources.
+
 ## Page model
 
 ```text
@@ -21,20 +28,28 @@ agents-memory/
 - `contracts/core-memory-v1/` 保存 canonical 与 legacy-sources golden pages；Keepygaga 测试裁决其与当前 parser/renderer 一致，宿主注入器只读消费该版本化合同。
 - `core-memory-v1` 冻结字段顺序与 Fact 行语法；破坏性格式变化新建下一版本，并保留 v1 直到已知消费者完成迁移。fixture 的非语义样本文本可以在 v1 内调整。
 - 正文只允许单行 `- [stated|observed] ...` Fact。
-- `profile.md` 保存三个月后仍应成立的身份级背景，可包含能改善跨任务交流的稳定项目归属或长期角色；直属 `areas/` 页面可以维护持续项目的项目索引，只记录项目存放位置与已完成的重大进展。项目详情、决策、计划和当前状态仍属于项目 Authority 或直接真源，二者与项目索引冲突时优先。
+- `profile.md` 保存三个月后仍应成立的身份级背景，可包含能改善跨任务交流的稳定项目归属或长期角色；直属 `areas/` 页面可以维护持续项目的项目索引，只记录每个项目的存放位置与已完成的重大进展，并拆成不同 Fact。排除阶段快照、角色、计划、阻塞、下一步、普通提交、单次任务、测试结果和当前运行状态；项目详情、决策、计划和当前状态仍属于项目 Authority 或直接真源，二者与项目索引冲突时优先。
 - 同一项目的位置与重大进展使用不同 Fact。位置在首次登记或移动时更新；进展只在完成会改变项目整体判断的重大里程碑时更新。阶段快照、角色、计划、阻塞、下一步、普通提交、单次任务、测试结果和临时运行状态不写入核心记忆。
 - `profile.md` 的 Fact content 合计不超过 300 字符；其他页面超出 soft limit 只返回 `split_recommended`。
 - name 与 aliases 在全库规范化后不得冲突。
 
 ## MCP contract
 
-客户端以 key `keepygaga` 注册服务，raw Tool 固定为 `list`、`read`、`create`、`add`、`update`、`move`、`rename`、`delete`。
+客户端以 key `keepygaga` 注册服务；raw Tool 固定为 `list`、`read`、`create`、`add`、`update`、`move`、`rename`、`delete`，宿主可以为它们加命名空间。`list` 返回 canonical path，`read` 返回 opaque version，宿主将其映射为 mutation 的 `if_version`；缺少 `list` 或 `read` 时必须明确报告。每次 Tool 调用只有一个 endpoint。
 
-写入现有页面必须携带 `read` 返回的 version。`update target="fact"` 精确替换 Fact 且禁止把 stated 降级为 observed；`target="page"` 只更新 description/aliases。`delete` 要求 `authorization="user_requested"`。
+`create` 创建页面，`add` 新增 Fact，`update` 按 `target` 更新精确 Fact 或页面元数据，`move` 在页面之间移动精确 Fact，`rename` 重命名动态页面，`delete` 删除精确 Fact 或页面。写入现有页面必须携带 `read` 返回的 version；`update target="fact"` 精确替换 Fact 且禁止把 stated 降级为 observed；`target="page"` 只更新 description/aliases。固定页不能 page rename/delete，`delete` 要求 `authorization="user_requested"`。当前 Store 拒绝同一 path 在一批 operations 中重复，不要求页面元数据与 Fact 必须在同一批提交。
+
+用户陈述标记为 `stated`；`observed` 行为模式必须有重复的直接证据，不能推断身份、偏好或无依据结论。精确地址以及健康、法律、财务、家庭等高敏信息只有用户明确要求时才以最低必要精度写入；密码、密钥、token、私钥、OTP、cookie、session 和完整账户/政府标识始终禁止写入。
+
+只有 `status="applied"` mutation 原样返回服务端已渲染的 receipt，并只回显一次；读取、no-op、skip 和失败不产生 receipt。Core-memory wikilink 可使用原生 Obsidian 语法；指向普通笔记的链接只有在宿主能核验目标存在时才添加，否则延后，不让不可用的存在性核验成为硬依赖。
 
 ## Installation scope
 
 公开安装默认只面向当前工作的 Agent；只有用户明确要求为其他 Agent 安装时，才把对应宿主加入目标范围。每个目标宿主分别完成 MCP 注册、全局 Agent Contract 合并和可选 Hook 接线，安装过程不得顺带修改范围外 Agent 的配置、全局规则或 Hook。跨运行环境安装时，各环境独立维护 checkout、`.venv` 与 `keepygaga.toml`，通过各自的原生路径指向同一个物理核心记忆树，并分别验证。
+
+`docs/agent-contract.md` 是宿主全局规则中 Keepygaga 托管块的唯一规范源。托管块只包含 `KEEPYGAGA:START`、当前发行版本号和 `KEEPYGAGA:END`，不保存内容哈希：首次安装追加完整块，升级在原位置替换完整块，块外字节保持原位；标记损坏、嵌套或重复时 fail closed。托管块内部由当前版本完整拥有，人工修改会在下次 setup 时被替换。
+
+Codex 的安装、升级和修复统一运行幂等 `keepygaga host setup codex`：通过 Codex CLI 只协调注册 key `keepygaga`，按 Codex 实际优先级把托管块投影到生效的全局 `AGENTS.override.md` 或 `AGENTS.md`。非空 override 生效；空 override 不生效。若非生效候选已含 Keepygaga 托管块，因 stale/双入口风险 fail closed。首次宿主写入前先完成 MCP 与可选 Hook 的只读 prepare；apply 严格按 MCP、rules、hooks 顺序执行，因此 MCP apply 失败时 rules 不写。规则在其 apply 开始时以原始 UTF-8 bytes 读取，在合并后重新核验两份候选的选择状态与目标原文，并把首次读取作为 CAS 前提，托管块外字节逐字节保留；MCP 与 Hook apply 使用 prepare 捕获的 `config.toml` / `hooks.json` 原始字节拒绝并发漂移。MCP 对账保留该注册的其他环境变量，对 Codex CLI 无法无损投影的 cwd、env_vars、工具筛选或 timeout 自定义字段 fail closed，并在实际替换前保存可恢复的 Codex config 备份。Hook 预检 runtime、fragment、合并器、Python、命令路径与实际生效的 AHR 环境，拒绝符号链接写入目标、冲突的 memory root 和无效 merger 输出。Keepygaga 不复制 Hook payload，不拥有其他 Hook 条目；未选择兼容 runtime 时 Hook 明确跳过。其他宿主暂不承诺该确定性命令。
 
 ## Write invariants
 
@@ -44,7 +59,7 @@ agents-memory/
 - 写入保留已有页面的文件权限；初始化在写入前验证所有现有规范路径与页面，再以独占创建方式补齐缺失页面，不覆盖已有或并发出现的页面。
 - changed page 使用规范格式重写；未变更页面保持原样。
 - 格式、path、identity、version 或授权无效时保留现场并返回结构化失败。
-- applied mutation 返回带安全 CommonMark 行内代码标记的 receipt；读取、no-op 和失败不返回 receipt。
+- applied mutation 返回服务端已经渲染的 receipt；读取、no-op、skip 和失败不返回 receipt，客户端只原样回显 applied receipt 一次。
 
 
 ## Threat model

@@ -19,6 +19,11 @@ Agents or infer one host's events or payload shape from another host.
 | Hermes | [`hermes.md`](hermes.md) |
 | Grok | [`grok.md`](grok.md) |
 
+Codex 的公开安装和升级由 `keepygaga host setup codex` 协调；选定兼容 Agent
+Hook Runtime 时传入其 runtime root 与 Python。该命令读取 runtime 自己的 Codex
+fragment 并调用其 `merge_hook_fragment`，本目录不另存一份可执行 Hook payload。
+其他宿主仍由安装 Agent 按对应专页处理。
+
 ## Shared preflight
 
 Hooks are optional for the Keepygaga MCP server. A compatible runtime must

@@ -11,6 +11,7 @@
 5. 发行包或入口变化还要运行 `uv build`，在隔离虚拟环境安装生成的 wheel，
    再用 `scripts/smoke_mcp_server.py --server-command <installed keepygaga-mcp>`
    验证已安装的 console script；不能用源码 checkout 遮蔽 wheel，也不能吞掉入口失败。
+6. Codex 宿主安装器变化还要在临时 `CODEX_HOME` 运行两次 `keepygaga host setup codex`：第一次完成投影，第二次必须为 `no_op`；验证非空 `AGENTS.override.md` 的优先级、空 override 回退到 `AGENTS.md`、非生效候选的 stale managed block fail closed，以及 Agent Contract 块外原始 bytes、非 Keepygaga MCP 配置和非 AHR Hook 均未变化。确认 apply 顺序为 MCP、rules、可选 hooks，MCP apply 失败时 rules 不写。真实全局配置只在 Tim 明确把当前 Codex 放入目标范围时刷新。
 
 普通验证不修改真实 Vault；测试使用临时 memory tree。当前配置与 live 页面状态必须从 `keepygaga.toml`、Doctor 和目标 Markdown 现场刷新，不能从本文推断。
 
@@ -41,9 +42,15 @@ Doctor 只报告非敏感 metadata，不输出正文、凭据、API key、cookie
 - name 或 alias identity 冲突：修正目标页面或输入，不绕过全库验证。
 - `write_failed`：首个文件尚未提交时写入失败；现场未应用本批次内容，排除文件系统问题后重新读取并重试。
 - `partial_commit`：响应中的 `applied_paths` 已完成替换，其余路径未完成；重新读取整批相关页面并明确合并，不重复提交原批次，也不假设跨文件回滚。
+- `host setup codex` 的 `partial_commit`：响应中的 component 已应用部分必须按其 `backup` / `recovery` 现场处理；MCP 未成功 apply 时 rules 不会写入，rules 成功后 Hook 失败则明确报告已应用的 rules 和未完成的 Hook。
 - smoke 失败：先核对 raw Tool 集合与 schema，再进入对应 Store 实现；不以 Doctor 替代协议验证。
 - wheel smoke 失败：先区分发行包内容、console script 生成和 MCP 协议失败；源码 smoke
   通过不能替代已安装 artifact 的验证。
+- `host setup codex` 报 Agent Contract 标记损坏或重复：保留全局规则现场，人工核对托管块边界后再运行；不得按语义猜测删除规则。
+- Codex 全局规则读取按原始 UTF-8 bytes 完成；若规则文件在首次读取后发生变化，setup 以 CAS 冲突失败并保留并发内容。非空 `AGENTS.override.md` 生效，空 override 回退 `AGENTS.md`；生效候选之外已有托管块时停止并人工清理 stale/双入口状态。
+- Codex MCP 注册失败：读取 `codex mcp get keepygaga --json`，核对当前 CLI、可执行且能导入 Keepygaga 的 Python 与配置绝对路径。setup 会保留该注册内其他环境变量；`cwd`、`env_vars`、工具筛选或 timeout 等无法由 `codex mcp add` 无损保留的自定义字段存在时 fail closed，先人工决定其归属。发生验证失败时按 `components.mcp.backup` 与 `recovery` 恢复或移除本次新注册；已经成功的规则或 Hook 投影按返回现场处理，修正后幂等重跑 setup。
+- Codex Hook setup 跳过：MCP 与规则仍可正常使用；只有明确选择兼容 Agent Hook Runtime、Python 和 runtime root 后才补装。
+- Codex Hook setup 失败：从 Agent Hook Runtime 的 Codex fragment、`merge_hook_fragment`、runtime config、`AGENT_HOOK_RUNTIME_CONFIG` / `AGENT_HOOK_RUNTIME_MEMORY_ROOT`、入口脚本和 context smoke 逐层核对；Keepygaga 不内建另一份 Hook payload 作为降级。
 
 ## Evidence
 

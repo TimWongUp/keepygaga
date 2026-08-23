@@ -49,7 +49,7 @@ body:
       label: Environment
       description: Include Keepygaga version or commit, OS, Python version, and MCP host.
       placeholder: |
-        Keepygaga: 0.1.0
+        Keepygaga: 0.1.1
         OS: Ubuntu 24.04
         Python: 3.12.x
         MCP host: ...
