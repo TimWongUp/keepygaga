@@ -12,6 +12,7 @@
    再用 `scripts/smoke_mcp_server.py --server-command <installed keepygaga-mcp>`
    验证已安装的 console script；不能用源码 checkout 遮蔽 wheel，也不能吞掉入口失败。
 6. Codex 宿主安装器变化还要在临时 `CODEX_HOME` 运行两次 `keepygaga host setup codex`：第一次完成投影，第二次必须为 `no_op`；验证非空 `AGENTS.override.md` 的优先级、空 override 回退到 `AGENTS.md`、非生效候选的 stale managed block fail closed，以及 Agent Contract 块外原始 bytes、非 Keepygaga MCP 配置和非 AHR Hook 均未变化。确认 apply 顺序为 MCP、rules、可选 hooks，MCP apply 失败时 rules 不写。真实全局配置只在 Tim 明确把当前 Codex 放入目标范围时刷新。
+7. 非 Codex 宿主适配器变化在临时 host home 分别运行两次对应 `host setup`：第一次只更新 `keepygaga` MCP、Agent Contract 托管块和选中的 AHR-owned Hook，第二次必须为 `no_op`；核对无关 MCP、全局规则块外内容和其他 Hook 仍在。Grok 额外用 `grok mcp list --json` / `grok mcp doctor keepygaga` 核对用户层注册；Hermes 额外用 `hermes mcp test keepygaga` 与 `hermes hooks doctor` 核对 YAML 投影和 Hook allowlist；Antigravity 只使用 `antigravity` 适配器与 `agy` 现场验证，不把 `~/.gemini/settings.json` 当作 Gemini CLI 接线。
 
 普通验证不修改真实 Vault；测试使用临时 memory tree。当前配置与 live 页面状态必须从 `keepygaga.toml`、Doctor 和目标 Markdown 现场刷新，不能从本文推断。
 
@@ -57,6 +58,7 @@ Doctor 只报告非敏感 metadata，不输出正文、凭据、API key、cookie
 - `write_failed`：首个文件尚未提交时写入失败；现场未应用本批次内容，排除文件系统问题后重新读取并重试。
 - `partial_commit`：响应中的 `applied_paths` 已完成替换，其余路径未完成；重新读取整批相关页面并明确合并，不重复提交原批次，也不假设跨文件回滚。
 - `host setup codex` 的 `partial_commit`：响应中的 component 已应用部分必须按其 `backup` / `recovery` 现场处理；MCP 未成功 apply 时 rules 不会写入，rules 成功后 Hook 失败则明确报告已应用的 rules 和未完成的 Hook。
+- 任一非 Codex `host setup` 的 `partial_commit`：以返回的 `components`、`path` 与 `backup` 为现场，不假设不同宿主配置能够统一回滚；核对后幂等重跑同一个宿主。Hermes 首次写入 AHR Hook 后若 `approval_required=true`，由用户明确选择的 runtime 仍需通过 Hermes 自身 Hook allowlist，再用 `hermes hooks doctor` 验证。
 - smoke 失败：先核对 raw Tool 集合与 schema，再进入对应 Store 实现；不以 Doctor 替代协议验证。
 - wheel smoke 失败：先区分发行包内容、console script 生成和 MCP 协议失败；源码 smoke
   通过不能替代已安装 artifact 的验证。
