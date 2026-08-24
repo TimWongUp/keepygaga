@@ -7,6 +7,13 @@ from pathlib import Path
 
 from keepygaga.config import PROJECT_ROOT, load_config, resolve_config_path
 from keepygaga.diagnostics import run_doctor
+from keepygaga.host_adapters import (
+    setup_antigravity_host,
+    setup_claude_code_host,
+    setup_grok_host,
+    setup_hermes_host,
+    setup_workbuddy_host,
+)
 from keepygaga.host_setup import (
     HostSetupError,
     HostSetupPartialError,
@@ -37,9 +44,21 @@ def _parser() -> argparse.ArgumentParser:
     host = commands.add_parser("host")
     host_commands = host.add_subparsers(dest="host_command", required=True)
     setup = host_commands.add_parser("setup")
-    setup.add_argument("host", choices=("codex",))
+    setup.add_argument(
+        "host",
+        choices=(
+            "codex",
+            "claude-code",
+            "workbuddy",
+            "grok",
+            "hermes",
+            "antigravity",
+        ),
+    )
     setup.add_argument("--codex-home", type=Path)
     setup.add_argument("--codex-binary", type=Path)
+    setup.add_argument("--host-home", type=Path)
+    setup.add_argument("--grok-binary", type=Path)
     setup.add_argument("--hook-runtime", type=Path)
     setup.add_argument("--hook-python", type=Path)
     setup.add_argument("--hook-config", type=Path)
@@ -91,15 +110,34 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "host" and args.host_command == "setup":
         try:
-            payload = setup_codex_host(
-                config_path,
-                config,
-                codex_home=args.codex_home,
-                codex_binary=args.codex_binary,
-                hook_runtime=args.hook_runtime,
-                hook_python=args.hook_python,
-                hook_config_path=args.hook_config,
-            )
+            if args.host == "codex":
+                payload = setup_codex_host(
+                    config_path,
+                    config,
+                    codex_home=args.codex_home,
+                    codex_binary=args.codex_binary,
+                    hook_runtime=args.hook_runtime,
+                    hook_python=args.hook_python,
+                    hook_config_path=args.hook_config,
+                )
+            else:
+                setup_functions = {
+                    "claude-code": setup_claude_code_host,
+                    "workbuddy": setup_workbuddy_host,
+                    "grok": setup_grok_host,
+                    "hermes": setup_hermes_host,
+                    "antigravity": setup_antigravity_host,
+                }
+                selected_setup = setup_functions[args.host]
+                options = {
+                    "host_home": args.host_home,
+                    "hook_runtime": args.hook_runtime,
+                    "hook_python": args.hook_python,
+                    "hook_config_path": args.hook_config,
+                }
+                if args.host == "grok":
+                    options["grok_binary"] = args.grok_binary
+                payload = selected_setup(config_path, config, **options)
         except HostSetupPartialError as exc:
             _print(
                 {

@@ -23,6 +23,7 @@ dependencies = [
   "mcp>=1.0.0,<2",
   "pydantic>=2.7,<3",
   "python-frontmatter>=1.1,<2",
+  "ruamel.yaml>=0.18,<0.19",
 ]
 
 [dependency-groups]

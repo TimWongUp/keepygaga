@@ -18,6 +18,40 @@ def test_unknown_subcommand_is_a_usage_error() -> None:
         cli.main(["unknown"])
 
 
+def test_host_setup_dispatches_antigravity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    config_path = tmp_path / "keepygaga.toml"
+    config_path.write_text("", encoding="utf-8")
+    host_home = tmp_path / ".gemini"
+    called: dict[str, object] = {}
+
+    def fake_setup(config_path: Path, config, **options) -> dict[str, object]:
+        del config
+        called.update({"config_path": config_path, **options})
+        return {"status": "no_op", "host": "antigravity"}
+
+    monkeypatch.setattr(cli, "setup_antigravity_host", fake_setup)
+
+    assert (
+        cli.main(
+            [
+                "--config",
+                str(config_path),
+                "host",
+                "setup",
+                "antigravity",
+                "--host-home",
+                str(host_home),
+            ]
+        )
+        == 0
+    )
+    assert called["config_path"] == config_path.resolve()
+    assert called["host_home"] == host_home
+    assert '"host": "antigravity"' in capsys.readouterr().out
+
+
 def test_memory_init_initializes_fixed_pages(
     tmp_path: Path,
 ) -> None:
@@ -34,7 +68,8 @@ def test_memory_init_initializes_fixed_pages(
 
 
 def test_memory_init_is_successful_when_tree_is_already_initialized(
-    tmp_path: Path, capsys,
+    tmp_path: Path,
+    capsys,
 ) -> None:
     config_path = tmp_path / "keepygaga.toml"
     memory_root = tmp_path / "memory"
@@ -63,7 +98,9 @@ def test_cli_uses_environment_config_path(tmp_path: Path, monkeypatch) -> None:
 
 
 def test_memory_init_reports_permission_error_as_json(
-    tmp_path: Path, monkeypatch, capsys,
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
 ) -> None:
     config_path = tmp_path / "keepygaga.toml"
     memory_root = tmp_path / "memory"
@@ -96,7 +133,8 @@ def test_memory_init_refuses_unconfigured_root(tmp_path: Path, capsys) -> None:
 
 
 def test_memory_init_reports_invalid_config_as_json(
-    tmp_path: Path, capsys,
+    tmp_path: Path,
+    capsys,
 ) -> None:
     config_path = tmp_path / "keepygaga.toml"
     config_path.write_text("not toml [", encoding="utf-8")
@@ -108,7 +146,8 @@ def test_memory_init_reports_invalid_config_as_json(
 
 
 def test_memory_init_rejects_malformed_existing_pages(
-    tmp_path: Path, capsys,
+    tmp_path: Path,
+    capsys,
 ) -> None:
     config_path = tmp_path / "keepygaga.toml"
     memory_root = tmp_path / "memory"
@@ -125,7 +164,10 @@ def test_memory_init_rejects_malformed_existing_pages(
     assert '"status": "no_op"' not in output
     assert not (memory_root / "preferences.md").exists()
     assert not (memory_root / ".keepygaga.lock").exists()
-    assert not any((memory_root / directory).exists() for directory in ("topics", "areas", "people"))
+    assert not any(
+        (memory_root / directory).exists()
+        for directory in ("topics", "areas", "people")
+    )
 
 
 def test_doctor_prints_json_and_reports_eight_tools(
