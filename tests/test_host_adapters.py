@@ -40,7 +40,7 @@ def setup_source(tmp_path: Path) -> tuple[Path, KeepygagaConfig]:
     ("setup", "home_name", "mcp_relative", "rules_relative"),
     [
         (setup_claude_code_host, ".claude", "../.claude.json", "CLAUDE.md"),
-        (setup_workbuddy_host, ".workbuddy", ".mcp.json", "CODEBUDDY.md"),
+        (setup_workbuddy_host, ".workbuddy", "mcp.json", "CODEBUDDY.md"),
         (
             setup_antigravity_host,
             ".gemini",
