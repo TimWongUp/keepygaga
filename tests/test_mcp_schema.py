@@ -149,11 +149,13 @@ def test_tool_protocol_is_discoverable_from_descriptions_and_schema() -> None:
     )
 
     read_paths = by_name["read"].inputSchema["properties"]["paths"]
-    assert read_paths["description"] == "Unique canonical page paths returned by list."
+    assert read_paths["description"] == (
+        "Unique canonical page paths from the current Route Catalog."
+    )
 
     add_schema = by_name["add"].inputSchema
     add = add_schema["$defs"]["AddOperation"]
-    assert "latest read" in add["properties"]["if_version"]["description"]
+    assert "latest Page Snapshot" in add["properties"]["if_version"]["description"]
     assert "exact duplicates only" in add["properties"]["facts"]["description"]
     assert "each path must be unique" in (
         add_schema["properties"]["operations"]["description"]
@@ -177,7 +179,9 @@ def test_tool_protocol_is_discoverable_from_descriptions_and_schema() -> None:
     )
 
     for name in EXPECTED_TOOLS - {"list", "read"}:
-        assert "applied results include receipts" in (by_name[name].description or "")
+        description = by_name[name].description or ""
+        assert "Page Snapshots" in description
+        assert "receipts" in description
 
     fact_schema = add_schema["$defs"]["Fact"]
     assert "explicit statement" in fact_schema["properties"]["basis"]["description"]

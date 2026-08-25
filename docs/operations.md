@@ -54,7 +54,7 @@ Doctor 只报告非敏感 metadata，不输出正文、凭据、API key、cookie
 - `memory init` 返回 `permission_denied`、`write_failed` 或 `partial_commit`：排除目录权限或文件系统问题，核对响应中的已创建文件与目录后重新运行 init 与 Doctor。
 - `memory init` 返回 `write_conflict` 或 `not_initialized`：重新运行 Doctor 核对 live tree，再决定是否重试。
 - 页面格式无效：停止 mutation，报告 exact path 和错误，保留原文。
-- version 冲突：重新 `read` latest，明确合并后重试。
+- version 冲突：响应含 `latest` 时直接将其作为 Page Snapshot 重新分类；缺少 `latest` 时才重新 `read`，明确合并后使用新 version 重试，不原样重试旧 operation。
 - name 或 alias identity 冲突：修正目标页面或输入，不绕过全库验证。
 - `write_failed`：首个文件尚未提交时写入失败；现场未应用本批次内容，排除文件系统问题后重新读取并重试。
 - `partial_commit`：响应中的 `applied_paths` 已完成替换，其余路径未完成；重新读取整批相关页面并明确合并，不重复提交原批次，也不假设跨文件回滚。

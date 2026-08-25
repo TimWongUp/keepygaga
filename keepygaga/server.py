@@ -89,37 +89,37 @@ def read_memory(paths: ReadPaths) -> dict[str, object]:
 
 @mcp.tool(name="create", annotations=ToolAnnotations(readOnlyHint=False))
 def create_pages(operations: CreateOperations) -> dict[str, object]:
-    """Create dynamic pages after full-batch validation; applied results include receipts."""
+    """Create dynamic pages after full-batch validation; applied results include Page Snapshots and receipts."""
     return _with_memory_store(lambda store: store.create(operations))
 
 
 @mcp.tool(name="add", annotations=ToolAnnotations(readOnlyHint=False))
 def add_facts(operations: AddOperations) -> dict[str, object]:
-    """Add independent Facts using each page's latest read version; applied results include receipts."""
+    """Add independent Facts using each page's latest Page Snapshot; applied results include current Page Snapshots and receipts."""
     return _with_memory_store(lambda store: store.add(operations))
 
 
 @mcp.tool(name="update", annotations=ToolAnnotations(readOnlyHint=False))
 def update_memory(operations: UpdateOperations) -> dict[str, object]:
-    """Replace an exact Fact or page metadata; applied results include receipts."""
+    """Replace an exact Fact or page metadata; applied results include current Page Snapshots and receipts."""
     return _with_memory_store(lambda store: store.update(operations))
 
 
 @mcp.tool(name="move", annotations=ToolAnnotations(readOnlyHint=False))
 def move_fact(operations: MoveOperations) -> dict[str, object]:
-    """Move exact Facts using both latest read versions; applied results include receipts."""
+    """Move exact Facts using both latest Page Snapshots; applied results include current Page Snapshots and receipts."""
     return _with_memory_store(lambda store: store.move(operations))
 
 
 @mcp.tool(name="rename", annotations=ToolAnnotations(readOnlyHint=False))
 def rename_page(operations: RenameOperations) -> dict[str, object]:
-    """Rename dynamic pages using latest read versions; applied results include receipts."""
+    """Rename dynamic pages using latest Page Snapshots; applied results include current Page Snapshots and receipts."""
     return _with_memory_store(lambda store: store.rename(operations))
 
 
 @mcp.tool(name="delete", annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True))
 def delete_memory(operations: DeleteOperations) -> dict[str, object]:
-    """Delete exact Facts or dynamic pages after explicit current-turn user authorization; applied results include receipts."""
+    """Delete exact Facts or dynamic pages after explicit current-turn user authorization; applied results include surviving Page Snapshots and receipts."""
     return _with_memory_store(lambda store: store.delete(operations))
 
 
