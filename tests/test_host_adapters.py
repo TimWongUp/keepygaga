@@ -122,6 +122,333 @@ def test_json_host_setup_is_idempotent_and_preserves_unrelated_config(
     assert second["rules"]["status"] == "no_op"  # type: ignore[index]
 
 
+def test_workbuddy_migrates_existing_legacy_codebuddy_registration(
+    tmp_path: Path,
+) -> None:
+    config_path, config = setup_source(tmp_path)
+    home = tmp_path / ".workbuddy"
+    home.mkdir()
+    legacy_home = tmp_path / ".codebuddy"
+    legacy_home.mkdir()
+    legacy_path = legacy_home / ".mcp.json"
+    legacy_path.write_text(
+        json.dumps(
+            {
+                "unrelated": {"keep": True},
+                "disabledMcpServers": ["other", "Keepygaga", "keepygaga"],
+                "mcpServers": {
+                    "other": {"command": "other"},
+                    "Keepygaga": {
+                        "type": "http",
+                        "command": "/old/python",
+                        "args": ["/old/mcp_server.py"],
+                        "cwd": "/untrusted/project",
+                        "url": "https://old.invalid/mcp",
+                        "print": True,
+                        "env": {
+                            "CUSTOM": "preserved",
+                            "PYTHONPATH": "/untrusted/project",
+                            "KEEPYGAGA_WRITER": "codebuddy",
+                        },
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    first = setup_workbuddy_host(
+        config_path,
+        config,
+        host_home=home,
+        python=Path(sys.executable),
+    )
+
+    assert first["status"] == "applied"
+    assert first["legacy_mcp"]["status"] == "applied"  # type: ignore[index]
+    loaded = json.loads(legacy_path.read_text(encoding="utf-8"))
+    assert loaded["unrelated"] == {"keep": True}
+    assert loaded["disabledMcpServers"] == ["other", "keepygaga"]
+    assert loaded["mcpServers"]["other"] == {"command": "other"}
+    assert "Keepygaga" not in loaded["mcpServers"]
+    registration = loaded["mcpServers"]["keepygaga"]
+    assert registration == {
+        "type": "stdio",
+        "command": str(Path(sys.executable)),
+        "args": ["-I", "-m", "keepygaga.server"],
+        "print": True,
+        "env": {
+            "KEEPYGAGA_WRITER": "codebuddy",
+            "KEEPYGAGA_CONFIG": str(config_path),
+        },
+    }
+
+    second = setup_workbuddy_host(
+        config_path,
+        config,
+        host_home=home,
+        python=Path(sys.executable),
+    )
+
+    assert second["status"] == "no_op"
+    assert second["legacy_mcp"]["status"] == "no_op"  # type: ignore[index]
+
+
+def test_workbuddy_does_not_create_absent_legacy_config(tmp_path: Path) -> None:
+    config_path, config = setup_source(tmp_path)
+    home = tmp_path / ".workbuddy"
+    home.mkdir()
+
+    result = setup_workbuddy_host(
+        config_path,
+        config,
+        host_home=home,
+        python=Path(sys.executable),
+    )
+
+    assert result["legacy_mcp"] == {
+        "status": "skipped",
+        "path": str(tmp_path / ".codebuddy/.mcp.json"),
+        "reason": "legacy Keepygaga registration was not found",
+    }
+    assert not (tmp_path / ".codebuddy").exists()
+
+
+def test_workbuddy_rejects_duplicate_legacy_registration_before_writes(
+    tmp_path: Path,
+) -> None:
+    config_path, config = setup_source(tmp_path)
+    home = tmp_path / ".workbuddy"
+    home.mkdir()
+    legacy_home = tmp_path / ".codebuddy"
+    legacy_home.mkdir()
+    (legacy_home / ".mcp.json").write_text(
+        json.dumps(
+            {
+                "mcpServers": {
+                    "Keepygaga": {"command": "old"},
+                    "keepygaga": {"command": "new"},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(HostSetupError, match="multiple case-insensitive"):
+        setup_workbuddy_host(
+            config_path,
+            config,
+            host_home=home,
+            python=Path(sys.executable),
+        )
+
+    assert not (home / "mcp.json").exists()
+    assert not (home / "CODEBUDDY.md").exists()
+
+
+def test_workbuddy_rejects_malformed_legacy_config_before_writes(
+    tmp_path: Path,
+) -> None:
+    config_path, config = setup_source(tmp_path)
+    home = tmp_path / ".workbuddy"
+    home.mkdir()
+    legacy_home = tmp_path / ".codebuddy"
+    legacy_home.mkdir()
+    legacy_path = legacy_home / ".mcp.json"
+    original = b"{malformed"
+    legacy_path.write_bytes(original)
+
+    with pytest.raises(HostSetupError, match="invalid JSON"):
+        setup_workbuddy_host(
+            config_path,
+            config,
+            host_home=home,
+            python=Path(sys.executable),
+        )
+
+    assert legacy_path.read_bytes() == original
+    assert not (home / "mcp.json").exists()
+    assert not (home / "CODEBUDDY.md").exists()
+
+
+def test_workbuddy_rejects_raw_duplicate_legacy_keys_before_writes(
+    tmp_path: Path,
+) -> None:
+    config_path, config = setup_source(tmp_path)
+    home = tmp_path / ".workbuddy"
+    home.mkdir()
+    legacy_home = tmp_path / ".codebuddy"
+    legacy_home.mkdir()
+    legacy_path = legacy_home / ".mcp.json"
+    legacy_path.write_text(
+        '{"mcpServers":{"Keepygaga":{"command":"one"},'
+        '"Keepygaga":{"command":"two"}}}\n',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(HostSetupError, match="duplicate JSON key"):
+        setup_workbuddy_host(
+            config_path,
+            config,
+            host_home=home,
+            python=Path(sys.executable),
+        )
+
+    assert not (home / "mcp.json").exists()
+    assert not (home / "CODEBUDDY.md").exists()
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="symlink semantics differ on Windows"
+)
+def test_workbuddy_rejects_symlink_legacy_home_before_writes(
+    tmp_path: Path,
+) -> None:
+    config_path, config = setup_source(tmp_path)
+    home = tmp_path / ".workbuddy"
+    home.mkdir()
+    actual = tmp_path / "actual-codebuddy"
+    actual.mkdir()
+    (tmp_path / ".codebuddy").symlink_to(actual, target_is_directory=True)
+
+    with pytest.raises(HostSetupError, match="legacy home must not be a link"):
+        setup_workbuddy_host(
+            config_path,
+            config,
+            host_home=home,
+            python=Path(sys.executable),
+        )
+
+    assert not (home / "mcp.json").exists()
+    assert not (home / "CODEBUDDY.md").exists()
+
+
+def test_workbuddy_rejects_junction_like_legacy_home_before_writes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_path, config = setup_source(tmp_path)
+    home = tmp_path / ".workbuddy"
+    home.mkdir()
+    legacy_home = tmp_path / ".codebuddy"
+    legacy_home.mkdir()
+    original_is_junction = Path.is_junction
+
+    def is_junction(path: Path) -> bool:
+        return path == legacy_home or original_is_junction(path)
+
+    monkeypatch.setattr(Path, "is_junction", is_junction)
+
+    with pytest.raises(HostSetupError, match="legacy home must not be a link"):
+        setup_workbuddy_host(
+            config_path,
+            config,
+            host_home=home,
+            python=Path(sys.executable),
+        )
+
+    assert not (home / "mcp.json").exists()
+    assert not (home / "CODEBUDDY.md").exists()
+
+
+def test_workbuddy_wraps_legacy_home_permission_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_path, config = setup_source(tmp_path)
+    home = tmp_path / ".workbuddy"
+    home.mkdir()
+    legacy_home = tmp_path / ".codebuddy"
+    original_is_symlink = Path.is_symlink
+
+    def is_symlink(path: Path) -> bool:
+        if path == legacy_home:
+            raise PermissionError("simulated permission error")
+        return original_is_symlink(path)
+
+    monkeypatch.setattr(Path, "is_symlink", is_symlink)
+
+    with pytest.raises(HostSetupError, match="legacy home could not be inspected"):
+        setup_workbuddy_host(
+            config_path,
+            config,
+            host_home=home,
+            python=Path(sys.executable),
+        )
+
+    assert not (home / "mcp.json").exists()
+    assert not (home / "CODEBUDDY.md").exists()
+
+
+def test_workbuddy_detects_legacy_file_appearing_after_preflight(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_path, config = setup_source(tmp_path)
+    home = tmp_path / ".workbuddy"
+    home.mkdir()
+    legacy_path = tmp_path / ".codebuddy/.mcp.json"
+    original_apply = host_adapters._apply_file
+
+    def create_legacy_after_preflight(
+        plan: host_adapters.FilePlan,
+    ) -> dict[str, object]:
+        result = original_apply(plan)
+        if plan.path == home / "mcp.json":
+            legacy_path.parent.mkdir()
+            legacy_path.write_text(
+                json.dumps({"mcpServers": {"Keepygaga": {"command": "old"}}}),
+                encoding="utf-8",
+            )
+        return result
+
+    monkeypatch.setattr(host_adapters, "_apply_file", create_legacy_after_preflight)
+
+    with pytest.raises(HostSetupPartialError, match="write conflict") as caught:
+        setup_workbuddy_host(
+            config_path,
+            config,
+            host_home=home,
+            python=Path(sys.executable),
+        )
+
+    assert caught.value.components["mcp"]["status"] == "applied"  # type: ignore[index]
+    assert not (home / "CODEBUDDY.md").exists()
+
+
+def test_workbuddy_reports_partial_commit_when_legacy_migration_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_path, config = setup_source(tmp_path)
+    home = tmp_path / ".workbuddy"
+    home.mkdir()
+    legacy_home = tmp_path / ".codebuddy"
+    legacy_home.mkdir()
+    legacy_path = legacy_home / ".mcp.json"
+    legacy_path.write_text(
+        json.dumps({"mcpServers": {"Keepygaga": {"command": "old"}}}),
+        encoding="utf-8",
+    )
+    original_apply = host_adapters._apply_file
+
+    def fail_legacy(plan: host_adapters.FilePlan) -> dict[str, object]:
+        if plan.path == legacy_path:
+            raise HostSetupError("simulated legacy migration failure")
+        return original_apply(plan)
+
+    monkeypatch.setattr(host_adapters, "_apply_file", fail_legacy)
+
+    with pytest.raises(HostSetupPartialError) as caught:
+        setup_workbuddy_host(
+            config_path,
+            config,
+            host_home=home,
+            python=Path(sys.executable),
+        )
+
+    assert caught.value.components["mcp"]["status"] == "applied"  # type: ignore[index]
+    assert "keepygaga" in (home / "mcp.json").read_text(encoding="utf-8")
+    assert "Keepygaga" in legacy_path.read_text(encoding="utf-8")
+    assert not (home / "CODEBUDDY.md").exists()
+
+
 def test_json_host_rejects_malformed_config_before_writing_rules(
     tmp_path: Path,
 ) -> None:

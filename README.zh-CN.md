@@ -57,14 +57,14 @@ Keepygaga 可以直接使用普通文件系统目录，不要求安装或运行 
 真实客户端或官方诊断命令中确认 `keepygaga` 注册和全部八个 raw Tool 后，该次安装
 才属于**现场验证**。
 
-| 宿主 | 配置级验证范围 | 必需现场检查 |
-| --- | --- | --- |
-| Codex | Codex CLI、实际生效的 `AGENTS.override.md` / `AGENTS.md` | 检查真实 MCP 注册与 Tool 清单 |
-| Claude Code | `~/.claude.json`、`CLAUDE.md` | 检查真实 MCP 服务与 Tool 清单 |
-| WorkBuddy | `mcp.json`、`CODEBUDDY.md`、可选 Hook 合并 | 重连 `keepygaga`，确认 Tool 清单且没有 `Connection closed` |
-| Grok | 用户级 Grok CLI 注册与全局规则 | 运行 `grok mcp list --json` 和 `grok mcp doctor keepygaga` |
-| Hermes | 保真合并 `config.yaml`、`SOUL.md`、可选 Hook | 运行 `hermes mcp test keepygaga`，适用时再运行 `hermes hooks doctor` |
-| Antigravity CLI | `mcp_config.json`、`AGENTS.md` | 检查真实 `agy` MCP 注册与 Tool 清单 |
+| 宿主 | 配置级验证范围 | 必需现场检查 | macOS 维护者证据（2026-08-25） |
+| --- | --- | --- | --- |
+| Codex | Codex CLI、实际生效的 `AGENTS.override.md` / `AGENTS.md` | 检查真实 MCP 注册与 Tool 清单 | 已现场验证：真实会话调用 `list` 并发现全部八个 Tool |
+| Claude Code | `~/.claude.json`、`CLAUDE.md` | 检查真实 MCP 服务与 Tool 清单 | 已现场验证：真实会话调用 `list` 并发现全部八个 Tool |
+| WorkBuddy | `mcp.json`、已有旧 `.codebuddy/.mcp.json` 注册、`CODEBUDDY.md`、可选 Hook 合并 | 重连 `keepygaga`，确认 Tool 清单且没有 `Connection closed` | WorkBuddy 5.3.14 完成旧注册迁移后已现场验证 |
+| Grok | 用户级 Grok CLI 注册与全局规则 | 运行 `grok mcp list --json` 和 `grok mcp doctor keepygaga` | 已现场验证：官方 Doctor 完成握手并发现八个 Tool |
+| Hermes | 保真合并 `config.yaml`、`SOUL.md`、可选 Hook | 运行 `hermes mcp test keepygaga`，适用时再运行 `hermes hooks doctor` | 已现场验证：MCP test 发现八个 Tool，Hook doctor 通过 |
+| Antigravity CLI | `mcp_config.json`、`AGENTS.md` | 检查真实 `agy` MCP 注册与 Tool 清单 | 已验证注册；模型会话验证受账号区域资格限制 |
 
 ## 安装
 
@@ -77,7 +77,7 @@ Keepygaga 可以直接使用普通文件系统目录，不要求安装或运行 
 2. 对每个不同的目标运行环境，使用该环境可访问的 Keepygaga checkout，在其中运行 `uv sync`，把 `keepygaga.example.toml` 复制为本机 `keepygaga.toml`，并把该运行环境原生的绝对路径记为其 `CONFIG_PATH`。为所有目标解析同一个物理记忆树：优先使用用户本轮明确提供的现有记忆树，其次复用现有 Keepygaga 配置中唯一且有效的记忆树；不要扫描整块磁盘。若没有现有记忆树，选择所有 Keepygaga checkout 之外、且不会公开共享或自动发布的可写新目录；只有访问范围私密且可信时才可使用同步目录。使用各运行环境的原生绝对路径，把每个配置的 `memory.root` 指向同一个物理记忆树。若候选不唯一、某个目标运行环境无法访问同一记忆树、路径映射无法核验或用户意图不清楚，先询问用户最小缺失项。不要在不同运行环境间复制或同步 `.venv`、`keepygaga.toml` 或记忆树。后续每条 Keepygaga CLI 命令都传入对应运行环境的 `--config CONFIG_PATH`。
 3. 注册宿主前，在每个目标运行环境中运行 `uv run keepygaga --config CONFIG_PATH doctor --json`，检查各自 JSON 中 `id="memory_tree"` 的项目。检查为 `ok` 表示该运行环境看到的是有效记忆树；若 `warning` 的 `details.split_recommended` 为 `true`，记忆树同样有效且不阻止 setup。其他失败检查只有 `details.source_status` 为 `not_initialized` 时才允许 init。若出现其余失败状态、格式错误或具体页面无效，停止安装并报告确切运行环境和路径，不继续注册。共享记忆树是新目录或报告 `not_initialized` 时，只从一个目标运行环境运行一次 `uv run keepygaga --config CONFIG_PATH memory init`，创建或补齐规范结构，保存完整 JSON 供第 7 步使用，然后在每个目标运行环境中重新运行 Doctor，并以新的 `memory_tree` 检查为准。完成宿主 setup 和验证前不处理 `onboarding`。复用有效记忆树时，让每个配置直接指向它，不复制、不移动、不改写页面。`memory init` 是幂等命令：无需补齐文件时以 `no_op` 成功返回，并且绝不覆盖已有文件。
 4. 每个已选择目标分别运行一条确定性 setup 命令：`host setup codex`、`host setup claude-code`、`host setup workbuddy`、`host setup grok`、`host setup hermes` 或 `host setup antigravity`。`antigravity` 指 Antigravity CLI（`agy`），不是 Gemini CLI；不能因为 Antigravity 把配置放在 `~/.gemini` 就虚构一个 Gemini 目标。项目有意不提供 `setup all`：明确的多 Agent 安装应使用相同运行环境 `CONFIG_PATH`，逐个调用目标命令。
-5. 每条命令只对齐目标宿主的 `keepygaga` MCP 注册和带版本号的 `docs/agent-contract.md` 托管块，并保留无关宿主配置和块外文字。Codex 使用实际生效的 `AGENTS.override.md` / `AGENTS.md`；Claude Code 使用 `~/.claude/CLAUDE.md`；WorkBuddy 使用 `~/.workbuddy/CODEBUDDY.md`；Grok 复用已有的 `~/.grok/AGENTS.md` 或 `Agents.md`，两者都不存在时才新建 `Agents.md`；Antigravity 使用 `~/.gemini/AGENTS.md`；Hermes 在唯一全局 system-prompt 文件 `~/.hermes/SOUL.md` 内管理托管块，块外人格内容保持不变。不要修改范围外 Agent 或其他位置发现的旧兼容配置。
+5. 每条命令只对齐目标宿主的 `keepygaga` MCP 注册和带版本号的 `docs/agent-contract.md` 托管块，并保留无关宿主配置和块外文字。Codex 使用实际生效的 `AGENTS.override.md` / `AGENTS.md`；Claude Code 使用 `~/.claude/CLAUDE.md`；WorkBuddy 使用 `~/.workbuddy/CODEBUDDY.md`，并在 `~/.codebuddy/.mcp.json` 已存在大小写不敏感的 Keepygaga 注册时升级它，缺失时不创建该旧文件；该旧注册会切换到 Python isolated mode，移除旧 `cwd`，环境变量只保留 `KEEPYGAGA_CONFIG` 和已有的 `KEEPYGAGA_WRITER`。Grok 复用已有的 `~/.grok/AGENTS.md` 或 `Agents.md`，两者都不存在时才新建 `Agents.md`；Antigravity 使用 `~/.gemini/AGENTS.md`；Hermes 在唯一全局 system-prompt 文件 `~/.hermes/SOUL.md` 内管理托管块，块外人格内容保持不变。不要修改范围外 Agent 或其他位置发现的旧兼容配置。
 6. 若用户已经为本机选择并信任兼容 Agent Hook Runtime，读取 `docs/hooks/README.md` 与目标专页，再追加 `--hook-runtime RUNTIME_ROOT --hook-python PYTHON`。命令读取 runtime 自己的宿主 fragment 和 merger，只更新 AHR-owned 条目，并让 runtime 使用同一物理记忆根。否则省略两个参数：MCP 和 Agent Contract 仍完成安装，Hook 返回 `skipped`。Hermes 还可能返回 `approval_required=true`；此时完成 Hermes 自身 Hook allowlist 流程并用 `hermes hooks doctor` 验证。不得自行编造或下载 Hook 可执行文件。
 7. 在每个目标运行环境中重新运行 `uv run keepygaga --config CONFIG_PATH doctor --json` 和对应 checkout 中的 `uv run python scripts/smoke_mcp_server.py`。然后检查每个目标宿主实际显示的 MCP Tool 清单，确认各自都恰好暴露 list、read、create、add、update、move、rename、delete。若安装了 Hook，再完成各目标 Agent 专页中的验证。全部通过后才检查保存的 init JSON：只有 `status="applied"` 且 `onboarding.created_pages` 包含 `profile.md` 时，才 `read` 该页；若仍为空，提供一次可整体跳过的 Profile Onboarding。先说明 Profile 是共享该 Memory Root 的所有 Agent 都会加载的 Home Page——支持时直接注入，否则按 Agent Contract 主动读取。用户愿意继续时，一次询问最多四个可选项——希望的称呼、城市级常住地、职业和稳定长期角色，不询问精确地址。预览彼此独立的 `stated` Fact，核对 Profile Fact content 合计不超过 300 字符后通过 raw memory Tool 写入；跳过时不写任何标记。
 8. 对 setup 前生效全局规则中没有完整 Keepygaga 托管块的每个目标，使用第 1 步保存的原文进行可选 Preference Extraction；已有托管块的目标视为重装、修复或升级并跳过。排除 Keepygaga 托管块、安全、权限、Skill、Hook、MCP、启动、Keepygaga 协议或工具路由规则、宿主专属与项目规则、当前状态、无依据推断和可从直接真源重取的事实。用户特有的条件检索偏好可以复制为证据，但凡原文被宿主当作检索或路由指令使用就绝不允许移动。对剩余共享软偏好跨目标去重，展示目标页预览，让用户选择跳过、复制并保留原文，或移动符合条件的条目；默认复制并保留。确认后先 `read preferences.md`，按 covered / refines / new / conflict 分类，并把候选作为 `stated` 写入。只有普通、宿主无关的回应或工作偏好且 Home Page 加载已验证时才提供移动；说明 Authority 降级并二次确认后，只删除托管块外精确匹配的原文，再复核标记、版本行和其他字节。无法验证资格或精确删除时只复制或保留。用户拒绝或无候选时不写，也不保存 onboarding 标记。

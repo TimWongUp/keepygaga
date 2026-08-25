@@ -266,10 +266,13 @@ def merge_managed_contract(
 
 
 def ensure_regular_target(path: Path) -> None:
-    if path.is_symlink():
-        raise HostSetupError(f"refusing symlink target: {path}")
-    if path.exists() and not path.is_file():
-        raise HostSetupError(f"target is not a regular file: {path}")
+    try:
+        if path.is_symlink():
+            raise HostSetupError(f"refusing symlink target: {path}")
+        if path.exists() and not path.is_file():
+            raise HostSetupError(f"target is not a regular file: {path}")
+    except OSError as exc:
+        raise HostSetupError(f"target could not be inspected: {path}") from exc
 
 
 def exclusive_backup(path: Path, original: bytes) -> Path:
