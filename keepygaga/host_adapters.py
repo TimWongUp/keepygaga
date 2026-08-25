@@ -67,6 +67,13 @@ class FilePlan:
 
 
 @dataclass(frozen=True)
+class ExistingJsonMcpPlan:
+    path: Path
+    original: bytes | None
+    update: FilePlan | None
+
+
+@dataclass(frozen=True)
 class JsonHostSpec:
     host: str
     default_home: str
@@ -75,6 +82,7 @@ class JsonHostSpec:
     hook_relative: Path
     hook_fragment: str
     mcp_fields: Mapping[str, object]
+    legacy_mcp_path: Callable[[Path], Path] | None = None
 
 
 @dataclass(frozen=True)
@@ -104,6 +112,41 @@ class HermesConfigPlan:
     hooks_changed: bool
 
 
+class _DuplicateJsonKeyError(ValueError):
+    pass
+
+
+def _unique_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    loaded: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in loaded:
+            raise _DuplicateJsonKeyError(key)
+        loaded[key] = value
+    return loaded
+
+
+def _ensure_workbuddy_legacy_home(legacy_home: Path) -> None:
+    try:
+        if legacy_home.is_symlink() or legacy_home.is_junction():
+            raise HostSetupError(
+                f"workbuddy legacy home must not be a link: {legacy_home}"
+            )
+        if legacy_home.exists() and not legacy_home.is_dir():
+            raise HostSetupError(
+                f"workbuddy legacy home is not a directory: {legacy_home}"
+            )
+    except OSError as exc:
+        raise HostSetupError(
+            f"workbuddy legacy home could not be inspected: {legacy_home}"
+        ) from exc
+
+
+def _workbuddy_legacy_mcp_path(home: Path) -> Path:
+    legacy_home = home.parent / ".codebuddy"
+    _ensure_workbuddy_legacy_home(legacy_home)
+    return legacy_home / ".mcp.json"
+
+
 CLAUDE_CODE = JsonHostSpec(
     host="claude-code",
     default_home=".claude",
@@ -122,6 +165,7 @@ WORKBUDDY = JsonHostSpec(
     hook_relative=Path("settings.json"),
     hook_fragment="workbuddy",
     mcp_fields={"type": "stdio"},
+    legacy_mcp_path=_workbuddy_legacy_mcp_path,
 )
 
 ANTIGRAVITY = JsonHostSpec(
@@ -168,7 +212,13 @@ def _load_json_object(path: Path) -> tuple[bytes | None, dict[str, Any]]:
         return None, {}
     try:
         original = path.read_bytes()
-        loaded = json.loads(original.decode("utf-8"))
+        loaded = json.loads(
+            original.decode("utf-8"), object_pairs_hook=_unique_json_object
+        )
+    except _DuplicateJsonKeyError as exc:
+        raise HostSetupError(
+            f"host config contains duplicate JSON key {exc.args[0]!r}: {path}"
+        ) from exc
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise HostSetupError(f"host config is invalid JSON: {path}") from exc
     if not isinstance(loaded, dict):
@@ -311,6 +361,91 @@ def _prepare_json_mcp(
     return FilePlan(path, original, content)
 
 
+def _prepare_existing_json_mcp(
+    path: Path,
+    *,
+    python: Path,
+    config_path: Path,
+    fixed_fields: Mapping[str, object],
+) -> ExistingJsonMcpPlan:
+    original, loaded = _load_json_object(path)
+    if original is None:
+        return ExistingJsonMcpPlan(path, None, None)
+    servers = loaded.get("mcpServers")
+    if servers is None:
+        return ExistingJsonMcpPlan(path, original, None)
+    if not isinstance(servers, Mapping):
+        raise HostSetupError(f"mcpServers must be an object: {path}")
+    server_map = dict(servers)
+    matching_keys = [
+        key
+        for key in server_map
+        if isinstance(key, str) and key.casefold() == "keepygaga"
+    ]
+    if not matching_keys:
+        return ExistingJsonMcpPlan(path, original, None)
+    if len(matching_keys) != 1:
+        raise HostSetupError(
+            f"multiple case-insensitive Keepygaga MCP registrations: {path}"
+        )
+    current_key = matching_keys[0]
+    updated = _updated_mcp_entry(
+        server_map[current_key],
+        python=python,
+        config_path=config_path,
+        fixed_fields=fixed_fields,
+    )
+    raw_environment = updated["env"]
+    assert isinstance(raw_environment, dict)
+    environment = {"KEEPYGAGA_CONFIG": raw_environment["KEEPYGAGA_CONFIG"]}
+    writer = raw_environment.get("KEEPYGAGA_WRITER")
+    if isinstance(writer, str):
+        environment["KEEPYGAGA_WRITER"] = writer
+    updated["env"] = environment
+    updated["args"] = ["-I", "-m", "keepygaga.server"]
+    updated.pop("cwd", None)
+    if current_key == "keepygaga":
+        server_map[current_key] = updated
+    else:
+        server_map.pop(current_key)
+        server_map["keepygaga"] = updated
+    merged = {**loaded, "mcpServers": server_map}
+    disabled_servers = loaded.get("disabledMcpServers")
+    if disabled_servers is not None:
+        if not isinstance(disabled_servers, list) or not all(
+            isinstance(key, str) for key in disabled_servers
+        ):
+            raise HostSetupError(f"disabledMcpServers must be a string list: {path}")
+        normalized_disabled: list[str] = []
+        for key in disabled_servers:
+            normalized = "keepygaga" if key.casefold() == "keepygaga" else key
+            if normalized not in normalized_disabled:
+                normalized_disabled.append(normalized)
+        merged["disabledMcpServers"] = normalized_disabled
+    content = _json_bytes(merged)
+    if merged == loaded and original is not None:
+        content = original
+    return ExistingJsonMcpPlan(path, original, FilePlan(path, original, content))
+
+
+def _apply_existing_json_mcp(plan: ExistingJsonMcpPlan) -> dict[str, object]:
+    _ensure_workbuddy_legacy_home(plan.path.parent)
+    _ensure_regular_target(plan.path)
+    try:
+        live = plan.path.read_bytes() if plan.path.exists() else None
+    except OSError as exc:
+        raise HostSetupError(f"host config could not be read: {plan.path}") from exc
+    if live != plan.original:
+        raise HostSetupError(f"write conflict while updating {plan.path}")
+    if plan.update is None:
+        return _json_result(
+            "skipped",
+            path=str(plan.path),
+            reason="legacy Keepygaga registration was not found",
+        )
+    return _apply_file(plan.update)
+
+
 def _prepare_hook_selection(
     host: str,
     memory_root: Path,
@@ -451,10 +586,13 @@ def _run_components(
     rules_plan: FilePlan,
     hooks_plan: FilePlan | None,
     hook_selection: HookSelection | None,
+    legacy_mcp_plan: ExistingJsonMcpPlan | None = None,
 ) -> dict[str, object]:
     components: dict[str, object] = {}
     try:
         components["mcp"] = _apply_file(mcp_plan)
+        if legacy_mcp_plan is not None:
+            components["legacy_mcp"] = _apply_existing_json_mcp(legacy_mcp_plan)
         components["rules"] = _apply_file(rules_plan)
         components["hooks"] = (
             _apply_hooks(hooks_plan, hook_selection)
@@ -531,6 +669,16 @@ def _setup_json_host(
             config_path=config_path,
             fixed_fields=spec.mcp_fields,
         )
+        legacy_mcp = (
+            _prepare_existing_json_mcp(
+                spec.legacy_mcp_path(home),
+                python=selected_python,
+                config_path=config_path,
+                fixed_fields=spec.mcp_fields,
+            )
+            if spec.legacy_mcp_path is not None
+            else None
+        )
         rules = _prepare_rules(home / spec.rules_relative)
         hooks = (
             _prepare_json_hooks(home / spec.hook_relative, selection)
@@ -544,6 +692,7 @@ def _setup_json_host(
             rules_plan=rules,
             hooks_plan=hooks,
             hook_selection=selection,
+            legacy_mcp_plan=legacy_mcp,
         )
     finally:
         lock.release()
