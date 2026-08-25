@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import sys
 from pathlib import Path
@@ -78,6 +79,37 @@ def test_core_memory_v1_contract_matches_current_page_format() -> None:
         assert canonical == render_memory_file(document, path)
         assert parse_memory_file(canonical, path) == document
         assert parse_memory_file(legacy, path) == document
+
+    manifest = json.loads((CONTRACT_ROOT / "contract.json").read_text(encoding="utf-8"))
+    assert manifest["schema_version"] == 1
+    assert manifest["page_version"] == {
+        "normalization": "crlf-and-cr-to-lf",
+        "encoding": "utf-8",
+        "algorithm": "sha256",
+        "prefix": "sha256:",
+    }
+    assert manifest["fact_normalization"] == {
+        "line_pattern": codec.FACT_LINE_RE.pattern,
+        "blank_lines": "ignored",
+        "content_trim": "unicode-strip",
+        "max_content_chars": codec.MAX_FACT_CONTENT_CHARS,
+        "length_checked": "before-trim",
+        "duplicate_key": ["basis", "trimmed-content"],
+        "profile_path": "profile.md",
+        "profile_content_limit_chars": codec.PROFILE_FACT_CONTENT_LIMIT,
+    }
+    assert Fact(basis="stated", content="  padded  ").content == "padded"
+    with pytest.raises(ValidationError):
+        Fact(basis="stated", content="  " + "x" * codec.MAX_FACT_CONTENT_CHARS)
+    assert manifest["fixtures"] == {
+        relative: codec.sha256_text((CONTRACT_ROOT / relative).read_text(encoding="utf-8"))
+        for relative in (
+            "canonical/profile.md",
+            "canonical/preferences.md",
+            "legacy-sources/profile.md",
+            "legacy-sources/preferences.md",
+        )
+    }
 
 
 def create(path: str, content: str, aliases: list[str] | None = None) -> CreateOperation:
@@ -466,6 +498,73 @@ def test_manual_edit_after_read_wins(memory_store: tuple[Path, MemoryStore]) -> 
     assert page.read_text(encoding="utf-8") == human
 
 
+def test_write_conflict_latest_can_be_reused_without_read(
+    memory_store: tuple[Path, MemoryStore],
+) -> None:
+    root, store = memory_store
+    stale = version(store, "profile.md")
+    page = root / "profile.md"
+    page.write_text(
+        page.read_text(encoding="utf-8").rstrip()
+        + "\n- [stated] Human edit.\n",
+        encoding="utf-8",
+    )
+
+    conflicted = store.add(
+        [AddOperation(path="profile.md", if_version=stale, facts=[fact("Agent edit.")])]
+    )
+    latest = conflicted["latest"]
+    assert isinstance(latest, dict)
+
+    applied = store.add(
+        [
+            AddOperation(
+                path="profile.md",
+                if_version=str(latest["version"]),
+                facts=[fact("Agent edit.")],
+            )
+        ]
+    )
+    assert applied["status"] == "applied"
+    assert "Human edit." in page.read_text(encoding="utf-8")
+    assert "Agent edit." in page.read_text(encoding="utf-8")
+
+
+def test_page_snapshots_preserve_capacity_signal(
+    memory_store: tuple[Path, MemoryStore],
+) -> None:
+    root, store = memory_store
+    applied = store.add(
+        [
+            AddOperation(
+                path="preferences.md",
+                if_version=version(store, "preferences.md"),
+                facts=[fact("x" * 2100)],
+            )
+        ]
+    )
+    snapshot = applied["files"][0]  # type: ignore[index]
+    assert snapshot["split_recommended"] is True
+
+    page = root / "preferences.md"
+    page.write_text(
+        page.read_text(encoding="utf-8").rstrip()
+        + "\n- [stated] Concurrent edit.\n",
+        encoding="utf-8",
+    )
+    conflicted = store.add(
+        [
+            AddOperation(
+                path="preferences.md",
+                if_version=snapshot["version"],
+                facts=[fact("Agent edit.")],
+            )
+        ]
+    )
+    assert conflicted["status"] == "write_conflict"
+    assert conflicted["latest"]["split_recommended"] is True  # type: ignore[index]
+
+
 def test_edit_during_commit_is_detected(
     memory_store: tuple[Path, MemoryStore], monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -503,6 +602,7 @@ def test_edit_during_commit_is_detected(
     )
     assert result["status"] == "partial_commit"
     assert result["applied_paths"] == ["profile.md"]
+    assert "files" not in result
     assert "Late edit." in page.read_text(encoding="utf-8")
     assert "Second agent edit." not in page.read_text(encoding="utf-8")
 
@@ -531,6 +631,17 @@ def test_move_fact(memory_store: tuple[Path, MemoryStore]) -> None:
         "Keep me.",
         "Move me.",
     }
+    snapshots = {item["path"]: item for item in moved["files"]}  # type: ignore[index]
+    chained = store.add(
+        [
+            AddOperation(
+                path="areas/destination.md",
+                if_version=snapshots["areas/destination.md"]["version"],
+                facts=[fact("Chained after move.")],
+            )
+        ]
+    )
+    assert chained["status"] == "applied"
 
 
 def test_rename_is_local_and_preserves_old_name_as_alias(
@@ -555,6 +666,17 @@ def test_rename_is_local_and_preserves_old_name_as_alias(
     )
     assert renamed["status"] == "applied"
     assert not (root / "topics/source.md").exists()
+    snapshot = renamed["files"][0]  # type: ignore[index]
+    chained = store.add(
+        [
+            AddOperation(
+                path="people/renamed.md",
+                if_version=snapshot["version"],
+                facts=[fact("Chained after rename.")],
+            )
+        ]
+    )
+    assert chained["status"] == "applied"
     assert read_file(store, "people/renamed.md")["aliases"] == ["source"]
     assert (root / "areas/reference.md").read_text(encoding="utf-8") == reference_before
 
@@ -620,13 +742,14 @@ def test_delete_requires_authorization_and_protects_fixed_pages(
         [
             DeletePageOperation(
                 path="topics/delete.md",
-                if_version=version(store, "topics/delete.md"),
+                if_version=deleted_fact["files"][0]["version"],  # type: ignore[index]
                 target="page",
                 authorization="user_requested",
             )
         ]
     )
     assert deleted_page["status"] == "applied"
+    assert deleted_page["files"] == []
 
 
 def test_catalog_rejects_alias_collision(memory_store: tuple[Path, MemoryStore]) -> None:
@@ -707,6 +830,39 @@ def test_applied_mutations_return_receipts(memory_store: tuple[Path, MemoryStore
     assert result["mutations"][0]["receipt"] == (  # type: ignore[index]
         "`🧠 create [topics/receipt.md]: Receipt fact.`"
     )
+
+
+def test_applied_files_can_chain_mutations_without_read(
+    memory_store: tuple[Path, MemoryStore],
+) -> None:
+    _, store = memory_store
+    added = store.add(
+        [
+            AddOperation(
+                path="preferences.md",
+                if_version=version(store, "preferences.md"),
+                facts=[fact("Original preference.")],
+            )
+        ]
+    )
+    snapshot = added["files"][0]  # type: ignore[index]
+
+    updated = store.update(
+        [
+            UpdateFactOperation(
+                path="preferences.md",
+                if_version=snapshot["version"],
+                target="fact",
+                old_fact=fact("Original preference."),
+                new_fact=fact("Refined preference."),
+            )
+        ]
+    )
+    assert updated["status"] == "applied"
+    assert updated["files"][0]["facts"][-1] == {  # type: ignore[index]
+        "basis": "stated",
+        "content": "Refined preference.",
+    }
 
 
 def test_receipt_markdown_code_span_handles_backticks_and_html(

@@ -69,3 +69,7 @@ _Avoid_: 搜索结果、页面摘要
 **Version**：
 由页面规范化文本派生、写入现有页面时必须携带的 opaque 并发令牌。
 _Avoid_: 修订号、数据库版本
+
+**页面快照（Page Snapshot）**：
+同一 Memory Page 的内容与匹配 Version 组成的成对视图，用于 Fact Convergence 和条件写入。
+_Avoid_: 永远最新的页面、无版本缓存

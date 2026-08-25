@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "page_version": {
+    "normalization": "crlf-and-cr-to-lf",
+    "encoding": "utf-8",
+    "algorithm": "sha256",
+    "prefix": "sha256:"
+  },
+  "fact_normalization": {
+    "line_pattern": "^- \\[(stated|observed)\\] (.+)$",
+    "blank_lines": "ignored",
+    "content_trim": "unicode-strip",
+    "max_content_chars": 4096,
+    "length_checked": "before-trim",
+    "duplicate_key": ["basis", "trimmed-content"],
+    "profile_path": "profile.md",
+    "profile_content_limit_chars": 300
+  },
+  "fixtures": {
+    "canonical/profile.md": "sha256:66c0b5c7ea6ade15c393b442248145fa6ed24149460a1047c99b7971a5461be8",
+    "canonical/preferences.md": "sha256:4a446afb33589cd2aeacd40af0f21f460797920ab0e7f9f5a4212f2340869c94",
+    "legacy-sources/profile.md": "sha256:7550a6e76d5f660b035ebe76527d9f45cf567f18b8eb8cd7657e6dc6b8b833f3",
+    "legacy-sources/preferences.md": "sha256:b192b9ce7805e1cd9f6655af02dcb9ac43b1dad97da6e76180b59b50cfc7e48d"
+  }
+}

@@ -25,10 +25,10 @@ agents-memory/
 ```
 
 - 规范 frontmatter 按顺序包含 `name`、`description`、`aliases`。读取暂时兼容旧 `sources` 字段，页面下一次写入时会规范化。
-- `contracts/core-memory-v1/` 保存 canonical 与 legacy-sources golden pages；Keepygaga 测试裁决其与当前 parser/renderer 一致，宿主注入器只读消费该版本化合同。
-- `core-memory-v1` 冻结字段顺序与 Fact 行语法；破坏性格式变化新建下一版本，并保留 v1 直到已知消费者完成迁移。fixture 的非语义样本文本可以在 v1 内调整。
+- `contracts/core-memory-v1/` 保存 canonical 与 legacy-sources golden pages，以及 `contract.json` 中的 Fact 规范化、Page Version 算法和 fixture 向量；Keepygaga 测试裁决其与当前 parser/renderer/version 一致，宿主注入器只读消费该版本化合同。
+- `core-memory-v1` 冻结字段顺序、Fact 行语法与规范化边界，以及 Page Version 的换行规范化、编码、摘要算法和前缀；破坏性格式、Fact 规范化或 version 变化新建下一版本，并保留 v1 直到已知消费者完成迁移。fixture 的非语义样本文本可以在 v1 内调整，但必须同步 `contract.json` 向量。
 - 正文只允许单行 `- [stated|observed] ...` Fact。
-- `profile.md` 与 `preferences.md` 是 Home Page：兼容宿主在任务开始时直接注入正文，未注入时 Agent 通过 MCP 主动读取两页；动态页只通过 Route Catalog 暴露并按任务需要读取。`profile.md` 保存三个月后仍应成立的身份级背景，新 Fact 只接受用户当前明确陈述并标记 `stated`；历史 `[observed]` 继续可读。`preferences.md` 保存长期回应、工作偏好与用户特有的条件检索偏好；宿主协议、Skill/MCP/Hook、启动、安全与工具路由仍属于全局规则，不进入 Memory。
+- `profile.md` 与 `preferences.md` 是 Home Page：兼容宿主在任务开始时直接注入正文；宿主同时注入由同一次原文读取派生的 version 时，正文与 version 构成可复用 Page Snapshot，缺少正文或 version 时 Agent 通过 MCP 主动读取对应页。动态页只通过 Route Catalog 暴露并按任务需要读取。`profile.md` 保存三个月后仍应成立的身份级背景，新 Fact 只接受用户当前明确陈述并标记 `stated`；历史 `[observed]` 继续可读。`preferences.md` 保存长期回应、工作偏好与用户特有的条件检索偏好；宿主协议、Skill/MCP/Hook、启动、安全与工具路由仍属于全局规则，不进入 Memory。
 - 直属 `areas/` 页面可以维护持续项目的项目索引，只记录每个项目的存放位置与已完成的重大进展，并拆成不同 Fact。排除阶段快照、角色、计划、阻塞、下一步、普通提交、单次任务、测试结果和当前运行状态；项目详情、决策、计划和当前状态仍属于项目 Authority 或直接真源，二者与项目索引冲突时优先。Agent 只在清点项目、定位仓库或核对重大进展的任务中读取项目索引。
 - 同一项目的位置与重大进展使用不同 Fact。位置在首次登记或移动时更新；进展只在完成会改变项目整体判断的重大里程碑时更新。阶段快照、角色、计划、阻塞、下一步、普通提交、单次任务、测试结果和临时运行状态不写入核心记忆。
 - `profile.md` 的 Fact content 合计不超过 300 字符；其他页面超出 soft limit 只返回 `split_recommended`。
@@ -36,21 +36,21 @@ agents-memory/
 
 ## Agent convergence
 
-Fact Convergence 是 Agent 对已经 `read` 的目标页执行的写入前分类，不是 Store 语义能力。候选分为 covered、refines、new 或 conflict：covered 跳过，refines 精确 `update`，new 才 `add`，conflict 以用户当前明确陈述或 live direct source 裁决。Store 仍只拒绝精确重复 Fact，不执行语义搜索、近义合并或候选提升。
+Fact Convergence 是 Agent 对目标页 Page Snapshot 执行的写入前分类，不是 Store 语义能力。Page Snapshot 是来自带 version 的首页注入、`read`、applied mutation `files` 或 `write_conflict.latest` 的匹配页面内容与 version；只要二者同时存在即可复用，缺失时才重新 `read`。候选分为 covered、refines、new 或 conflict：covered 跳过，refines 精确 `update`，new 才 `add`，conflict 以用户当前明确陈述或 live direct source 裁决。Store 仍只拒绝精确重复 Fact，不执行语义搜索、近义合并或候选提升。
 
 Agent 可以在无需逐条确认的情况下，把低敏、可操作且具有跨任务价值的重复工作行为作为 `observed` 写入 `preferences.md`，但证据必须在当前可见上下文中已经充分；Keepygaga 不保存跨会话候选、计数或 provenance，也不扫描历史聊天。已有 observed 可在后续任务中依据新证据细化；重复次数本身不会把 observed 提升为 stated，只有用户明确确认时才可更新为 stated。
 
 自动 observed 永不适用于身份、人格、动机、价值观，以及健康、法律、财务、家庭冲突、政治、宗教、性或亲密行为等敏感画像。精确地址和其他高敏个人信息仍只在用户明确要求时以最低必要精度保存；凭据与完整账户或政府标识始终禁止写入。
 
-为限制自主增长，没有用户明确写入指令时，Agent 每个任务对每个 Home Page 最多发起一次 mutation：一次 `add` 可包含多个独立 new Fact，一次 `update` 只收敛一个 Fact；同时存在 refinement 与 new 时优先 refinement。用户明确要求的维护、Profile Onboarding 和用户确认的 Preference Extraction 不受该次数限制，但每次 applied mutation 后必须重新 `read` 最新 version 并重新分类。`preferences.md` 已返回 `split_recommended` 时，禁止自动 `add observed`，仍可用 `update` 收敛；用户明确要求的 stated 写入可以继续，但 Agent 必须提示首页已超出建议预算。
+为限制自主增长，没有用户明确写入指令时，Agent 每个任务对每个 Home Page 最多发起一次 mutation：一次 `add` 可包含多个独立 new Fact，一次 `update` 只收敛一个 Fact；同时存在 refinement 与 new 时优先 refinement。用户明确要求的维护、Profile Onboarding 和用户确认的 Preference Extraction 不受该次数限制；applied mutation 返回的 `files` 是下一轮 Page Snapshot，Agent 直接据此重新分类，只有所需页面缺失时才 `read`。带 version 的首页注入不复制 Store capacity signal；自动 `add observed` 前必须以 `read preferences.md` 取得该信号，已返回 `split_recommended` 时禁止新增，仍可用 `update` 收敛。用户明确要求的 stated 写入可以继续，但 Agent 必须提示首页已超出建议预算。
 
 ## MCP contract
 
-客户端以 key `keepygaga` 注册服务；raw Tool 固定为 `list`、`read`、`create`、`add`、`update`、`move`、`rename`、`delete`，宿主可以为它们加命名空间。`list` 返回 canonical path，`read` 返回 opaque version，宿主将其映射为 mutation 的 `if_version`；缺少 `list` 或 `read` 时必须明确报告。每次 Tool 调用只有一个 endpoint。
+客户端以 key `keepygaga` 注册服务；raw Tool 固定为 `list`、`read`、`create`、`add`、`update`、`move`、`rename`、`delete`，宿主可以为它们加命名空间。`list` 返回 canonical path；`read`、applied mutation `files` 与 `write_conflict.latest` 返回结构化 Page Snapshot，宿主首页注入也可提供与正文匹配的 opaque version。Agent 复用已有 Route Catalog 与 Page Snapshot，只有缺少 canonical path 或匹配的正文/version 时才分别调用 `list` 或 `read`；必需 Tool 不可用时必须明确报告。每次 Tool 调用只有一个 endpoint。
 
 全局 Agent Contract 负责 Tool 选择前的语义决策：Authority、Home Page 加载、动态记忆检索触发、页面归属、Fact 准入、Convergence、主动增长限制和真实用户授权。MCP Tool descriptions 与 JSON Schema 负责已经选择 Tool 后的调用协议：canonical path、opaque version、operation 字段、target 判别和批次约束；Store 返回结构化状态，并继续强制页面格式、版本、身份冲突、固定页保护和文件写入不变量。全局合同不重复能够由 schema 或 Store 可靠裁决的实现细节，但不得把读取或写入语义隐藏到只有选择 Tool 后才可见的位置。
 
-`create` 创建页面，`add` 新增 Fact，`update` 按 `target` 更新精确 Fact 或页面元数据，`move` 在页面之间移动精确 Fact，`rename` 重命名动态页面，`delete` 删除精确 Fact 或页面。写入现有页面必须携带 `read` 返回的 version；`update target="fact"` 精确替换 Fact 且禁止把 stated 降级为 observed；`target="page"` 只更新 description/aliases。固定页不能 page rename/delete，`delete` 要求 `authorization="user_requested"`。当前 Store 拒绝同一 path 在一批 operations 中重复，不要求页面元数据与 Fact 必须在同一批提交。
+`create` 创建页面，`add` 新增 Fact，`update` 按 `target` 更新精确 Fact 或页面元数据，`move` 在页面之间移动精确 Fact，`rename` 重命名动态页面，`delete` 删除精确 Fact 或页面。写入现有页面必须携带最新 Page Snapshot 的 version；`update target="fact"` 精确替换 Fact 且禁止把 stated 降级为 observed；`target="page"` 只更新 description/aliases。固定页不能 page rename/delete，`delete` 要求 `authorization="user_requested"`。当前 Store 拒绝同一 path 在一批 operations 中重复，不要求页面元数据与 Fact 必须在同一批提交。
 
 用户陈述标记为 `stated`；`observed` 只用于符合 Agent convergence 门槛的 Preference Fact。精确地址以及健康、法律、财务、家庭等高敏信息只有用户明确要求时才以最低必要精度写入；密码、密钥、token、私钥、OTP、cookie、session 和完整账户/政府标识始终禁止写入。
 
@@ -78,7 +78,7 @@ Claude Code、WorkBuddy、Grok、Hermes 与 Antigravity CLI 分别使用 `host s
 - 写入保留已有页面的文件权限；初始化在写入前验证所有现有规范路径与页面，再以独占创建方式补齐缺失页面，不覆盖已有或并发出现的页面。
 - changed page 使用规范格式重写；未变更页面保持原样。
 - 格式、path、identity、version 或授权无效时保留现场并返回结构化失败。
-- applied mutation 返回服务端已经渲染的 receipt；读取、no-op、skip 和失败不返回 receipt，客户端只原样回显 applied receipt 一次。
+- applied mutation 返回 changed pages 的 Page Snapshot 与服务端已经渲染的 receipt；删除后的页面不出现在 `files`。读取、no-op、skip 和失败不返回 receipt，客户端只原样回显 applied receipt 一次。
 
 
 ## Threat model

@@ -136,7 +136,7 @@ __all__ = [
 
 ExistingPagePath = Annotated[
     str,
-    Field(description="Canonical existing page path returned by list; pass unchanged."),
+    Field(description="Canonical existing page path from the current Route Catalog."),
 ]
 DynamicPagePath = Annotated[
     str,
@@ -150,7 +150,7 @@ CurrentPageVersion = Annotated[
     str,
     Field(
         description=(
-            "Opaque version returned by the latest read of this page; pass unchanged."
+            "Opaque version from the latest Page Snapshot of this page; pass unchanged."
         )
     ),
 ]
@@ -313,7 +313,7 @@ ReadPaths = Annotated[
     Field(
         min_length=1,
         max_length=MAX_READ_PATHS,
-        description="Unique canonical page paths returned by list.",
+        description="Unique canonical page paths from the current Route Catalog.",
     ),
 ]
 
