@@ -775,8 +775,9 @@ def test_yaml_round_trip_runtime_is_thread_safe(tmp_path: Path) -> None:
 
     assert all(result == results[0] for result in results)
     rendered = results[0].decode()
-    assert rendered.startswith("# leading comment\n")
-    assert 'quoted: "keep" # inline' in rendered
+    lines = rendered.splitlines()
+    assert lines[0] == "# leading comment"
+    assert lines[1] == 'quoted: "keep" # inline'
     assert rendered.index("quoted:") < rendered.index("items:")
     assert host_adapters._yaml_runtime() is not host_adapters._yaml_runtime()
 
