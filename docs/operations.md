@@ -12,7 +12,7 @@
    再用 `scripts/smoke_mcp_server.py --server-command <installed keepygaga-mcp>`
    验证已安装的 console script；不能用源码 checkout 遮蔽 wheel，也不能吞掉入口失败。
 6. Codex 宿主安装器变化还要在临时 `CODEX_HOME` 运行两次 `keepygaga host setup codex`：第一次完成投影，第二次必须为 `no_op`；验证非空 `AGENTS.override.md` 的优先级、空 override 回退到 `AGENTS.md`、非生效候选的 stale managed block fail closed，以及 Agent Contract 块外原始 bytes、非 Keepygaga MCP 配置和非 AHR Hook 均未变化。确认 apply 顺序为 MCP、rules、可选 hooks，MCP apply 失败时 rules 不写。真实全局配置只在 Tim 明确把当前 Codex 放入目标范围时刷新。
-7. 非 Codex 宿主适配器变化在临时 host home 分别运行两次对应 `host setup`：第一次只更新 `keepygaga` MCP、Agent Contract 托管块和选中的 AHR-owned Hook，第二次必须为 `no_op`；核对无关 MCP、全局规则块外内容和其他 Hook 仍在。Grok 额外用 `grok mcp list --json` / `grok mcp doctor keepygaga` 核对用户层注册；Hermes 额外用 `hermes mcp test keepygaga` 与 `hermes hooks doctor` 核对 YAML 投影和 Hook allowlist；Antigravity 只使用 `antigravity` 适配器与 `agy` 现场验证，不把 `~/.gemini/settings.json` 当作 Gemini CLI 接线。
+7. 非 Codex 宿主适配器变化在临时 host home 分别运行两次对应 `host setup`：第一次只更新 `keepygaga` MCP、Agent Contract 托管块和选中的 AHR-owned Hook，第二次必须为 `no_op`；核对无关 MCP、全局规则块外内容和其他 Hook 仍在。WorkBuddy 额外在真实客户端的 MCP 服务管理中重连 `keepygaga`，确认当前公开 raw Tool 均已发现且未出现 `Connection closed`；临时 host home 只能验证写入与幂等，不能证明 WorkBuddy 实际读取了该配置文件。Grok 额外用 `grok mcp list --json` / `grok mcp doctor keepygaga` 核对用户层注册；Hermes 额外用 `hermes mcp test keepygaga` 与 `hermes hooks doctor` 核对 YAML 投影和 Hook allowlist；Antigravity 只使用 `antigravity` 适配器与 `agy` 现场验证，不把 `~/.gemini/settings.json` 当作 Gemini CLI 接线。
 
 普通验证不修改真实 Vault；测试使用临时 memory tree。当前配置与 live 页面状态必须从 `keepygaga.toml`、Doctor 和目标 Markdown 现场刷新，不能从本文推断。
 
