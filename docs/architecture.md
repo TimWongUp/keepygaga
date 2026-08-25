@@ -66,6 +66,8 @@ Codex 的安装、升级和修复统一运行幂等 `keepygaga host setup codex`
 
 Claude Code、WorkBuddy、Grok、Hermes 与 Antigravity CLI 分别使用 `host setup claude-code|workbuddy|grok|hermes|antigravity`，不提供会猜测目标或批量写入的 `setup all`。这些适配器共用 Doctor、当前 Keepygaga Python、托管块合并、原子写入与可选 AHR fragment merger，但各自固定真实宿主入口：Claude Code 使用 `~/.claude.json` 与 `~/.claude/CLAUDE.md`，WorkBuddy 使用 `~/.workbuddy/mcp.json` 与 `CODEBUDDY.md`，Grok 通过自身 CLI 管理用户 MCP，并复用已有 `~/.grok/AGENTS.md` / `Agents.md`（两者都不存在时新建 `Agents.md`），Antigravity CLI 使用 `~/.gemini/config/mcp_config.json` 与 `AGENTS.md`，Hermes 使用 `~/.hermes/config.yaml#mcp_servers`。Hermes 没有独立的全局 Agent Contract 文件；其现有唯一全局 system-prompt 入口是 `SOUL.md`，因此适配器只管理其中 Keepygaga 托管块并保留其人格内容，项目级 AGENTS 链不作为全局投影。Hermes 配置使用 round-trip YAML 合并保留非目标注释、顺序与引号；选定 AHR 时 `hooks` 节点的 owned-entry 重排仍由 runtime merger 裁决。JSON、Grok CLI 与 YAML 的差异保留在各宿主适配器内，不抽象成猜路径或猜 schema 的通用安装器。
 
+宿主安装的共享文件安全、托管合同、Python probe 与 Hook 原语由 `host_common.py` 提供公开内部接口；Codex 协调留在 `host_setup.py`，非 Codex 差异留在 `host_adapters.py`，适配器不得依赖 Codex 模块的私有函数。CLI 用单一宿主注册表关联实现与允许选项，兼容选项位于宿主名前后，并拒绝不属于该宿主的选项；宿主模块只在执行 `host setup` 时加载，Hermes 的 YAML runtime 只在 Hermes 配置路径加载。配置级测试只证明投影、保留、幂等与失败边界，真实宿主是否读取并暴露 Tool 必须按运维现场验证。
+
 `memory init` 继续是非交互幂等命令；只有成功创建固定页时才在 JSON 中返回可选 onboarding 与本轮 `created_pages`，no-op、失败或 partial commit 不返回可执行 onboarding。安装 Agent 完成 MCP、Agent Contract 与可选 Hook 的现场验证后，才可依据该信号提供 Profile Onboarding。Preference Extraction 也是安装 Agent 的按目标宿主首次安装可选流程：setup 前生效规则没有 Keepygaga 托管块的目标才进入，有块的重装、修复或升级直接跳过；它不属于 CLI、Store 或 Hook Runtime 的自动行为。
 
 ## Write invariants

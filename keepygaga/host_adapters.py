@@ -14,35 +14,49 @@ from typing import Any
 
 from filelock import FileLock
 from filelock import Timeout as FileLockTimeout
-from ruamel.yaml import YAML
-from ruamel.yaml.error import YAMLError
 
 from keepygaga import __version__
-from keepygaga.config import PROJECT_ROOT, KeepygagaConfig
-from keepygaga.diagnostics import run_doctor
-from keepygaga.host_setup import (
+from keepygaga.config import KeepygagaConfig
+from keepygaga.host_common import (
     HOOK_ENTRYPOINTS,
     HostSetupError,
     HostSetupPartialError,
-    _atomic_write,
-    _default_hook_config_path,
-    _ensure_regular_target,
-    _exclusive_backup,
-    _json_result,
-    _load_hook_merger,
-    _load_hook_runtime_config,
-    _probe_hook_python,
-    _probe_keepygaga_python,
-    _render_fragment,
-    _validate_hook_command_path,
+    atomic_write,
+    default_hook_config_path,
+    ensure_regular_target,
+    exclusive_backup,
+    json_result,
     load_canonical_contract,
+    load_hook_merger,
     load_legacy_contract,
     merge_managed_contract,
     parse_managed_block,
+    prepare_hook_runtime_config,
+    probe_hook_python,
+    probe_keepygaga_python,
+    render_fragment,
+    validate_hook_command_path,
+    validate_host_source,
 )
 
-_YAML = YAML(typ="rt")
-_YAML.preserve_quotes = True
+_atomic_write = atomic_write
+_default_hook_config_path = default_hook_config_path
+_ensure_regular_target = ensure_regular_target
+_exclusive_backup = exclusive_backup
+_json_result = json_result
+_load_hook_merger = load_hook_merger
+_probe_hook_python = probe_hook_python
+_probe_keepygaga_python = probe_keepygaga_python
+_render_fragment = render_fragment
+_validate_hook_command_path = validate_hook_command_path
+
+
+def _yaml_runtime() -> Any:
+    from ruamel.yaml import YAML
+
+    yaml = YAML(typ="rt")
+    yaml.preserve_quotes = True
+    return yaml
 
 
 @dataclass(frozen=True)
@@ -121,37 +135,7 @@ ANTIGRAVITY = JsonHostSpec(
 )
 
 
-def _validated_source(
-    config_path: Path, config: KeepygagaConfig
-) -> tuple[Path, dict[str, object]]:
-    if not config.memory.root.strip():
-        raise HostSetupError("memory.root is not configured")
-    doctor = run_doctor(config_path.resolve(), project_root=PROJECT_ROOT)
-    checks = doctor.get("checks")
-    if not isinstance(checks, list):
-        raise HostSetupError("Doctor did not return a checks list")
-    memory_check = next(
-        (
-            check
-            for check in checks
-            if isinstance(check, Mapping) and check.get("id") == "memory_tree"
-        ),
-        None,
-    )
-    details = memory_check.get("details") if isinstance(memory_check, Mapping) else None
-    status = memory_check.get("status") if isinstance(memory_check, Mapping) else None
-    soft_warning = (
-        status == "warning"
-        and isinstance(details, Mapping)
-        and details.get("split_recommended") is True
-    )
-    if status != "ok" and not soft_warning:
-        source_status = (
-            details.get("source_status") if isinstance(details, Mapping) else None
-        )
-        suffix = f" ({source_status})" if isinstance(source_status, str) else ""
-        raise HostSetupError(f"memory tree did not pass Doctor{suffix}")
-    return Path(config.memory.root).expanduser().resolve(), doctor
+_validated_source = validate_host_source
 
 
 def _resolve_home(selected: Path | None, default_name: str, label: str) -> Path:
@@ -197,12 +181,14 @@ def _json_bytes(value: Mapping[str, Any]) -> bytes:
 
 
 def _load_yaml_object(path: Path) -> tuple[bytes | None, dict[str, Any]]:
+    from ruamel.yaml.error import YAMLError
+
     _ensure_regular_target(path)
     if not path.exists():
         return None, {}
     try:
         original = path.read_bytes()
-        loaded = _YAML.load(original.decode("utf-8"))
+        loaded = _yaml_runtime().load(original.decode("utf-8"))
     except (OSError, UnicodeError, YAMLError) as exc:
         raise HostSetupError(f"host config is invalid YAML: {path}") from exc
     if loaded is None:
@@ -214,7 +200,7 @@ def _load_yaml_object(path: Path) -> tuple[bytes | None, dict[str, Any]]:
 
 def _yaml_bytes(value: Mapping[str, Any]) -> bytes:
     rendered = StringIO()
-    _YAML.dump(value, rendered)
+    _yaml_runtime().dump(value, rendered)
     return rendered.getvalue().encode("utf-8")
 
 
@@ -389,7 +375,6 @@ def _prepare_hook_selection(
             "selected Hook config is not the path Agent Hook Runtime will load; "
             "set AGENT_HOOK_RUNTIME_CONFIG to the same absolute path"
         )
-    existing_runtime = _load_hook_runtime_config(selected_config)
     configured_environment_root = os.environ.get(
         "AGENT_HOOK_RUNTIME_MEMORY_ROOT", ""
     ).strip()
@@ -402,17 +387,9 @@ def _prepare_hook_selection(
             raise HostSetupError(
                 "AGENT_HOOK_RUNTIME_MEMORY_ROOT conflicts with configured memory.root"
             )
-    runtime_original = (
-        selected_config.read_bytes() if selected_config.exists() else None
+    runtime_original, runtime_content = prepare_hook_runtime_config(
+        selected_config, memory_root
     )
-    runtime_merged = {
-        **existing_runtime,
-        "schema_version": 1,
-        "memory_root": str(memory_root),
-    }
-    runtime_content = _json_bytes(runtime_merged)
-    if runtime_merged == existing_runtime and runtime_original is not None:
-        runtime_content = runtime_original
     return HookSelection(
         fragment=rendered,
         merger=merger,
