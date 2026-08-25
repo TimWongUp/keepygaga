@@ -1,5 +1,5 @@
 <!-- KEEPYGAGA:START -->
-<!-- KEEPYGAGA:VERSION:0.2.1 -->
+<!-- KEEPYGAGA:VERSION:0.3.0 -->
 # Keepygaga Agent Contract
 
 ## Authority and reading

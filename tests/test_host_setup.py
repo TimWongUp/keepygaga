@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from keepygaga import __version__, host_setup
+from keepygaga import __version__, host_common, host_setup
 from keepygaga.config import KeepygagaConfig, MemoryFilesConfig
 from keepygaga.host_setup import HostSetupError
 
@@ -54,6 +54,13 @@ def test_canonical_contract_uses_version_only() -> None:
     assert f"<!-- KEEPYGAGA:VERSION:{__version__} -->" in contract
     assert "KEEPYGAGA:HASH" not in contract
     assert "SHA256" not in contract.upper()
+
+
+def test_host_setup_preserves_public_common_symbols() -> None:
+    assert (
+        host_setup.HOOK_MERGER_RELATIVE_PATH
+        == host_common.HOOK_MERGER_RELATIVE_PATH
+    )
 
 
 def test_canonical_contract_carries_agent_only_memory_policy() -> None:
@@ -820,7 +827,7 @@ def test_hook_preflight_rejects_symlink_config(
     link.symlink_to(target)
     monkeypatch.setenv("AGENT_HOOK_RUNTIME_CONFIG", str(link))
 
-    with pytest.raises(HostSetupError, match="must not be a symlink"):
+    with pytest.raises(HostSetupError, match="symlink"):
         host_setup.reconcile_codex_hooks(
             tmp_path / ".codex",
             tmp_path / "memory",
@@ -948,6 +955,55 @@ def test_hook_apply_refuses_concurrent_hooks_change(
     assert not hook_config.exists()
 
 
+def test_hook_apply_refuses_concurrent_runtime_config_change(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime, hook_python = minimal_hook_runtime(tmp_path)
+    hook_config = tmp_path / "ahr-config.json"
+    hook_config.write_text(
+        '{"schema_version": 1, "memory_root": "/old"}\n', encoding="utf-8"
+    )
+    monkeypatch.setenv("AGENT_HOOK_RUNTIME_CONFIG", str(hook_config))
+    codex_home = tmp_path / ".codex"
+    codex_home.mkdir()
+    plan = host_setup._prepare_codex_hooks(
+        codex_home,
+        tmp_path / "memory",
+        runtime,
+        hook_python,
+        hook_config_path=hook_config,
+    )
+    concurrent = '{"schema_version": 1, "memory_root": "/concurrent"}\n'
+    hook_config.write_text(concurrent, encoding="utf-8")
+
+    with pytest.raises(HostSetupError, match="write conflict"):
+        host_setup._apply_codex_hooks_plan(plan)
+
+    assert hook_config.read_text(encoding="utf-8") == concurrent
+    assert not (codex_home / "hooks.json").exists()
+
+
+def test_host_source_rejects_non_memory_doctor_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    memory_root = tmp_path / "memory"
+    config = KeepygagaConfig(MemoryFilesConfig(root=str(memory_root)))
+    monkeypatch.setattr(
+        host_common,
+        "run_doctor",
+        lambda *_args, **_kwargs: {
+            "status": "error",
+            "checks": [
+                {"id": "memory_tree", "status": "ok", "details": {}},
+                {"id": "config", "status": "error", "details": {}},
+            ],
+        },
+    )
+
+    with pytest.raises(HostSetupError, match="config"):
+        host_common.validate_host_source(tmp_path / "keepygaga.toml", config)
+
+
 def test_hook_config_refuses_unrelated_json(tmp_path: Path) -> None:
     config = tmp_path / "config.json"
     config.write_text('{"unrelated": true}\n', encoding="utf-8")
@@ -979,7 +1035,7 @@ def test_setup_accepts_valid_soft_limit_warning(
     config_path = tmp_path / "keepygaga.toml"
     config = KeepygagaConfig(MemoryFilesConfig(root=str(memory_root)))
     monkeypatch.setattr(
-        host_setup,
+        host_common,
         "run_doctor",
         lambda *_args, **_kwargs: {
             "status": "warning",
@@ -1041,7 +1097,7 @@ def test_setup_preflights_hook_config_before_host_writes(
     hook_config.write_text('{"unrelated": true}\n', encoding="utf-8")
     monkeypatch.setenv("AGENT_HOOK_RUNTIME_CONFIG", str(hook_config))
     monkeypatch.setattr(
-        host_setup,
+        host_common,
         "run_doctor",
         lambda *_args, **_kwargs: {
             "status": "ok",
@@ -1079,7 +1135,7 @@ def test_setup_preflights_mcp_before_rules(
     memory_root = tmp_path / "memory"
     memory_root.mkdir()
     monkeypatch.setattr(
-        host_setup,
+        host_common,
         "run_doctor",
         lambda *_args, **_kwargs: {
             "status": "ok",
@@ -1117,7 +1173,7 @@ def test_setup_applies_mcp_then_rules_then_optional_hooks(
     memory_root.mkdir()
     events: list[str] = []
     monkeypatch.setattr(
-        host_setup,
+        host_common,
         "run_doctor",
         lambda *_args, **_kwargs: {
             "status": "ok",
@@ -1169,7 +1225,7 @@ def test_setup_does_not_apply_rules_when_mcp_apply_fails(
     memory_root.mkdir()
     events: list[str] = []
     monkeypatch.setattr(
-        host_setup,
+        host_common,
         "run_doctor",
         lambda *_args, **_kwargs: {
             "status": "ok",
@@ -1214,7 +1270,7 @@ def test_setup_rejects_symlink_codex_home(
     link = tmp_path / "codex-home-link"
     link.symlink_to(target, target_is_directory=True)
     monkeypatch.setattr(
-        host_setup,
+        host_common,
         "run_doctor",
         lambda *_args, **_kwargs: {
             "status": "ok",
@@ -1240,7 +1296,7 @@ def test_setup_reports_codex_home_file_as_host_error(
     codex_home = tmp_path / ".codex"
     codex_home.write_text("not a directory\n", encoding="utf-8")
     monkeypatch.setattr(
-        host_setup,
+        host_common,
         "run_doctor",
         lambda *_args, **_kwargs: {
             "status": "ok",
@@ -1265,7 +1321,7 @@ def test_setup_treats_empty_codex_home_environment_as_default(
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
     monkeypatch.setenv("CODEX_HOME", "   ")
     monkeypatch.setattr(
-        host_setup,
+        host_common,
         "run_doctor",
         lambda *_args, **_kwargs: {
             "status": "ok",
@@ -1306,7 +1362,7 @@ def test_setup_expands_explicit_codex_home(
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
     monkeypatch.setattr(
-        host_setup,
+        host_common,
         "run_doctor",
         lambda *_args, **_kwargs: {
             "status": "ok",

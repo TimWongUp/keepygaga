@@ -1,8 +1,12 @@
+import json
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
-from keepygaga import cli
+from keepygaga import cli, host_adapters
+from keepygaga.host_common import HostSetupPartialError
 
 
 def test_no_subcommand_prints_help(capsys) -> None:
@@ -18,6 +22,151 @@ def test_unknown_subcommand_is_a_usage_error() -> None:
         cli.main(["unknown"])
 
 
+def test_cli_import_does_not_load_host_implementations() -> None:
+    probe = subprocess.run(
+        [
+            sys.executable,
+            "-I",
+            "-c",
+            (
+                "import sys; import keepygaga.cli; "
+                "assert 'keepygaga.host_setup' not in sys.modules; "
+                "assert 'keepygaga.host_adapters' not in sys.modules"
+            ),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert probe.returncode == 0, probe.stderr
+
+
+def test_non_hermes_adapters_do_not_load_yaml_runtime() -> None:
+    probe = subprocess.run(
+        [
+            sys.executable,
+            "-I",
+            "-c",
+            (
+                "import sys; import keepygaga.host_adapters; "
+                "assert not any(name.startswith('ruamel.yaml') for name in sys.modules)"
+            ),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert probe.returncode == 0, probe.stderr
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        ["host", "setup", "codex", "--host-home", "/tmp/host"],
+        ["host", "setup", "claude-code", "--codex-home", "/tmp/codex"],
+        ["host", "setup", "hermes", "--grok-binary", "/tmp/grok"],
+    ],
+)
+def test_host_setup_rejects_options_for_another_host(arguments: list[str]) -> None:
+    with pytest.raises(SystemExit):
+        cli.main(arguments)
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        ["host", "setup", "--host-home", "/tmp/host", "workbuddy"],
+        ["host", "setup", "--hook-runtime", "/tmp/runtime", "codex"],
+        ["host", "setup", "--grok-binary", "/tmp/grok", "grok"],
+    ],
+)
+def test_host_setup_accepts_options_before_host(arguments: list[str]) -> None:
+    parser = cli._parser()
+    args = parser.parse_args(arguments)
+    cli._validate_host_setup_options(args, parser)
+
+
+def test_options_before_host_reach_selected_setup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    config_path = tmp_path / "keepygaga.toml"
+    config_path.write_text("", encoding="utf-8")
+    received: dict[str, object] = {}
+
+    def fake_setup(_config_path, _config, **options) -> dict[str, object]:
+        received.update(options)
+        return {"status": "no_op", "host": "workbuddy"}
+
+    monkeypatch.setattr(host_adapters, "setup_workbuddy_host", fake_setup)
+    host_home = tmp_path / ".workbuddy"
+    hook_runtime = tmp_path / "runtime"
+    hook_python = tmp_path / "python"
+    hook_config = tmp_path / "hook-config.json"
+
+    assert (
+        cli.main(
+            [
+                "--config",
+                str(config_path),
+                "host",
+                "setup",
+                "--host-home",
+                str(host_home),
+                "--hook-runtime",
+                str(hook_runtime),
+                "--hook-python",
+                str(hook_python),
+                "--hook-config",
+                str(hook_config),
+                "workbuddy",
+            ]
+        )
+        == 0
+    )
+    assert received == {
+        "host_home": host_home,
+        "hook_runtime": hook_runtime,
+        "hook_python": hook_python,
+        "hook_config_path": hook_config,
+    }
+    assert json.loads(capsys.readouterr().out)["status"] == "no_op"
+
+
+def test_host_setup_partial_error_is_rendered_as_json(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    config_path = tmp_path / "keepygaga.toml"
+    config_path.write_text("", encoding="utf-8")
+
+    def fail_setup(*_args, **_kwargs) -> dict[str, object]:
+        raise HostSetupPartialError(
+            "simulated partial write", {"mcp": {"status": "applied"}}
+        )
+
+    monkeypatch.setattr(host_adapters, "setup_workbuddy_host", fail_setup)
+
+    assert (
+        cli.main(
+            [
+                "--config",
+                str(config_path),
+                "host",
+                "setup",
+                "workbuddy",
+                "--host-home",
+                str(tmp_path / ".workbuddy"),
+            ]
+        )
+        == 1
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == {
+        "status": "partial_commit",
+        "message": "simulated partial write",
+        "components": {"mcp": {"status": "applied"}},
+    }
+
+
 def test_host_setup_dispatches_antigravity(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
 ) -> None:
@@ -31,7 +180,7 @@ def test_host_setup_dispatches_antigravity(
         called.update({"config_path": config_path, **options})
         return {"status": "no_op", "host": "antigravity"}
 
-    monkeypatch.setattr(cli, "setup_antigravity_host", fake_setup)
+    monkeypatch.setattr(host_adapters, "setup_antigravity_host", fake_setup)
 
     assert (
         cli.main(

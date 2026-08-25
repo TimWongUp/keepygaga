@@ -50,6 +50,22 @@ Keepygaga 把临时状态留在当前对话或它的直接真源里，例如日�
 Obsidian 是可选的，仅推荐用于方便地浏览和手工编辑 Markdown 记忆；
 Keepygaga 可以直接使用普通文件系统目录，不要求安装或运行 Obsidian。
 
+## 宿主支持证据
+
+下列 setup 适配器均已达到**配置级验证**：仓库测试覆盖其原生配置投影、无关内容
+保留与幂等重跑。这不等于某一台机器上的真实宿主已经加载该配置。只有目标宿主在
+真实客户端或官方诊断命令中确认 `keepygaga` 注册和全部八个 raw Tool 后，该次安装
+才属于**现场验证**。
+
+| 宿主 | 配置级验证范围 | 必需现场检查 |
+| --- | --- | --- |
+| Codex | Codex CLI、实际生效的 `AGENTS.override.md` / `AGENTS.md` | 检查真实 MCP 注册与 Tool 清单 |
+| Claude Code | `~/.claude.json`、`CLAUDE.md` | 检查真实 MCP 服务与 Tool 清单 |
+| WorkBuddy | `mcp.json`、`CODEBUDDY.md`、可选 Hook 合并 | 重连 `keepygaga`，确认 Tool 清单且没有 `Connection closed` |
+| Grok | 用户级 Grok CLI 注册与全局规则 | 运行 `grok mcp list --json` 和 `grok mcp doctor keepygaga` |
+| Hermes | 保真合并 `config.yaml`、`SOUL.md`、可选 Hook | 运行 `hermes mcp test keepygaga`，适用时再运行 `hermes hooks doctor` |
+| Antigravity CLI | `mcp_config.json`、`AGENTS.md` | 检查真实 `agy` MCP 注册与 Tool 清单 |
+
 ## 安装
 
 把下面的 prompt 发给需要接入 Keepygaga 的目标 Agent：

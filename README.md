@@ -61,6 +61,24 @@ Obsidian is optional. It is recommended only as a convenient way to browse and
 edit the Markdown memories; Keepygaga works with an ordinary filesystem
 directory and does not require Obsidian to be installed or running.
 
+## Host support evidence
+
+Every setup adapter below is **Config-tested**: repository tests cover its
+native configuration projection, preservation of unrelated content, and
+idempotent reruns. That does not prove that a particular installed host has
+loaded the projected configuration. An installation becomes **Live-verified**
+only after the target host confirms the `keepygaga` registration and all eight
+raw tools in its real client or official diagnostic command.
+
+| Host | Config-tested projection | Required live check |
+| --- | --- | --- |
+| Codex | Codex CLI, effective `AGENTS.override.md` / `AGENTS.md` | Inspect the real MCP registration and tool list |
+| Claude Code | `~/.claude.json`, `CLAUDE.md` | Inspect the real MCP server and tool list |
+| WorkBuddy | `mcp.json`, `CODEBUDDY.md`, optional Hook merge | Reconnect `keepygaga` and confirm the tool list without `Connection closed` |
+| Grok | User-scoped Grok CLI registration and global rules | Run `grok mcp list --json` and `grok mcp doctor keepygaga` |
+| Hermes | Round-trip `config.yaml`, `SOUL.md`, optional Hook merge | Run `hermes mcp test keepygaga` and, when applicable, `hermes hooks doctor` |
+| Antigravity CLI | `mcp_config.json`, `AGENTS.md` | Inspect the real `agy` MCP registration and tool list |
+
 ## Install
 
 Give the prompt below to the Agent that should use Keepygaga:
