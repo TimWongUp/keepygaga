@@ -37,7 +37,6 @@ uv run ruff check .
 uv run pyright
 uv run pytest -q
 uv run python scripts/smoke_mcp_server.py
-uv build
 ```
 
 Add or update tests when behavior changes. Update the relevant contract fixture
