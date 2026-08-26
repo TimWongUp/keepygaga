@@ -65,6 +65,9 @@ def test_non_hermes_adapters_do_not_load_yaml_runtime() -> None:
         ["host", "setup", "codex", "--host-home", "/tmp/host"],
         ["host", "setup", "claude-code", "--codex-home", "/tmp/codex"],
         ["host", "setup", "hermes", "--grok-binary", "/tmp/grok"],
+        ["host", "uninstall", "codex", "--host-home", "/tmp/host"],
+        ["host", "uninstall", "claude-code", "--codex-home", "/tmp/codex"],
+        ["host", "uninstall", "hermes", "--grok-binary", "/tmp/grok"],
     ],
 )
 def test_host_setup_rejects_options_for_another_host(arguments: list[str]) -> None:
@@ -78,12 +81,15 @@ def test_host_setup_rejects_options_for_another_host(arguments: list[str]) -> No
         ["host", "setup", "--host-home", "/tmp/host", "workbuddy"],
         ["host", "setup", "--hook-runtime", "/tmp/runtime", "codex"],
         ["host", "setup", "--grok-binary", "/tmp/grok", "grok"],
+        ["host", "uninstall", "--host-home", "/tmp/host", "workbuddy"],
+        ["host", "uninstall", "--hook-runtime", "/tmp/runtime", "codex"],
+        ["host", "uninstall", "--grok-binary", "/tmp/grok", "grok"],
     ],
 )
 def test_host_setup_accepts_options_before_host(arguments: list[str]) -> None:
     parser = cli._parser()
     args = parser.parse_args(arguments)
-    cli._validate_host_setup_options(args, parser)
+    cli._validate_host_options(args, parser)
 
 
 def test_options_before_host_reach_selected_setup(
@@ -199,6 +205,40 @@ def test_host_setup_dispatches_antigravity(
     assert called["config_path"] == config_path.resolve()
     assert called["host_home"] == host_home
     assert '"host": "antigravity"' in capsys.readouterr().out
+
+
+def test_host_uninstall_dispatches_workbuddy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    config_path = tmp_path / "keepygaga.toml"
+    config_path.write_text("", encoding="utf-8")
+    host_home = tmp_path / ".workbuddy"
+    received: dict[str, object] = {}
+
+    def fake_uninstall(config_path: Path, config, **options) -> dict[str, object]:
+        del config
+        received.update({"config_path": config_path, **options})
+        return {"status": "no_op", "host": "workbuddy"}
+
+    monkeypatch.setattr(host_adapters, "uninstall_workbuddy_host", fake_uninstall)
+
+    assert (
+        cli.main(
+            [
+                "--config",
+                str(config_path),
+                "host",
+                "uninstall",
+                "--host-home",
+                str(host_home),
+                "workbuddy",
+            ]
+        )
+        == 0
+    )
+    assert received["config_path"] == config_path.resolve()
+    assert received["host_home"] == host_home
+    assert json.loads(capsys.readouterr().out)["status"] == "no_op"
 
 
 def test_memory_init_initializes_fixed_pages(

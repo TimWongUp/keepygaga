@@ -275,6 +275,40 @@ def merge_managed_contract(
     return f"{existing}{separator}\n{canonical}"
 
 
+def remove_managed_contract(
+    existing: str,
+    *,
+    source: str,
+    legacy: str | None = None,
+) -> str:
+    current = parse_managed_block(existing, source=source)
+    if current is not None:
+        removed = existing[: current.start] + existing[current.end :]
+        if legacy is not None:
+            leftover = _legacy_ranges(removed, legacy)
+            if leftover:
+                raise HostSetupError(
+                    f"{source} still contains an unmanaged legacy contract"
+                )
+            if "# Keepygaga Agent Contract" in removed:
+                raise HostSetupError(
+                    f"{source} has a modified unmanaged legacy contract; migrate it manually"
+                )
+        return removed
+    if legacy is not None:
+        matches = _legacy_ranges(existing, legacy)
+        if len(matches) > 1:
+            raise HostSetupError(f"{source} has duplicate unmanaged legacy contracts")
+        if matches:
+            start, end = matches[0]
+            return existing[:start] + existing[end:]
+        if "# Keepygaga Agent Contract" in existing:
+            raise HostSetupError(
+                f"{source} has a modified unmanaged legacy contract; migrate it manually"
+            )
+    return existing
+
+
 def ensure_regular_target(path: Path) -> None:
     try:
         if path.is_symlink():

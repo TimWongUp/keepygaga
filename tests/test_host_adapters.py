@@ -19,6 +19,11 @@ from keepygaga.host_adapters import (
     setup_grok_host,
     setup_hermes_host,
     setup_workbuddy_host,
+    uninstall_antigravity_host,
+    uninstall_claude_code_host,
+    uninstall_grok_host,
+    uninstall_hermes_host,
+    uninstall_workbuddy_host,
 )
 from keepygaga.host_common import HostSetupError, HostSetupPartialError
 from keepygaga.memory import initialize_memory_tree
@@ -1127,3 +1132,385 @@ def test_hermes_rejects_malformed_yaml_before_writing_rules(tmp_path: Path) -> N
 
     assert config_file.read_text(encoding="utf-8") == original
     assert not (home / "SOUL.md").exists()
+
+@pytest.mark.parametrize(
+    ("setup", "uninstall", "home_name", "mcp_relative", "rules_relative"),
+    [
+        (setup_claude_code_host, uninstall_claude_code_host, ".claude", "../.claude.json", "CLAUDE.md"),
+        (setup_workbuddy_host, uninstall_workbuddy_host, ".workbuddy", "mcp.json", "CODEBUDDY.md"),
+        (
+            setup_antigravity_host,
+            uninstall_antigravity_host,
+            ".gemini",
+            "config/mcp_config.json",
+            "AGENTS.md",
+        ),
+    ],
+)
+def test_json_host_uninstall_is_idempotent_and_preserves_unrelated_config(
+    tmp_path: Path,
+    setup: SetupFunction,
+    uninstall: SetupFunction,
+    home_name: str,
+    mcp_relative: str,
+    rules_relative: str,
+) -> None:
+    config_path, config = setup_source(tmp_path)
+    home = tmp_path / home_name
+    home.mkdir()
+    mcp_path = (home / mcp_relative).resolve()
+    mcp_path.parent.mkdir(parents=True, exist_ok=True)
+    mcp_path.write_text(
+        json.dumps(
+            {
+                "unrelated": {"keep": True},
+                "mcpServers": {
+                    "other": {"command": "other"},
+                    "keepygaga": {
+                        "type": "http",
+                        "serverUrl": "https://old.invalid/sse",
+                    },
+                },
+                "disabledMcpServers": ["other", "keepygaga"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    rules_path = home / rules_relative
+    rules_path.write_text("# Existing rules\n", encoding="utf-8")
+
+    setup(config_path, config, host_home=home, python=Path(sys.executable))
+    first = uninstall(config_path, config, host_home=home, python=Path(sys.executable))
+    second = uninstall(config_path, config, host_home=home, python=Path(sys.executable))
+
+    loaded = json.loads(mcp_path.read_text(encoding="utf-8"))
+    assert first["status"] == "applied"
+    assert second["status"] == "no_op"
+    assert loaded["unrelated"] == {"keep": True}
+    assert loaded["mcpServers"] == {"other": {"command": "other"}}
+    assert loaded["disabledMcpServers"] == ["other"]
+    rules = rules_path.read_text(encoding="utf-8")
+    assert rules.startswith("# Existing rules\n")
+    assert "KEEPYGAGA:START" not in rules
+
+
+def test_workbuddy_uninstall_removes_legacy_keepygaga_registration(
+    tmp_path: Path,
+) -> None:
+    config_path, config = setup_source(tmp_path)
+    home = tmp_path / ".workbuddy"
+    home.mkdir()
+    legacy_home = tmp_path / ".codebuddy"
+    legacy_home.mkdir()
+    legacy_path = legacy_home / ".mcp.json"
+    legacy_path.write_text(
+        json.dumps(
+            {
+                "unrelated": {"keep": True},
+                "disabledMcpServers": ["other", "Keepygaga"],
+                "mcpServers": {
+                    "other": {"command": "other"},
+                    "Keepygaga": {"command": "/old/python"},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    first = uninstall_workbuddy_host(
+        config_path, config, host_home=home, python=Path(sys.executable)
+    )
+    loaded = json.loads(legacy_path.read_text(encoding="utf-8"))
+
+    assert first["legacy_mcp"]["status"] == "applied"  # type: ignore[index]
+    assert loaded["unrelated"] == {"keep": True}
+    assert loaded["mcpServers"] == {"other": {"command": "other"}}
+    assert loaded["disabledMcpServers"] == ["other"]
+
+
+def test_workbuddy_uninstall_preserves_unrelated_hooks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_path, config = setup_source(tmp_path)
+    home = tmp_path / ".workbuddy"
+    home.mkdir()
+    (home / "settings.json").write_text(
+        json.dumps(
+            {
+                "other": True,
+                "hooks": {
+                    "PostToolUse": [{"hooks": [{"command": "prettier", "timeout": 5}]}],
+                    "SessionStart": [
+                        {
+                            "hooks": [
+                                {
+                                    "command": "python runtime/hooks/context_hook.py workbuddy",
+                                    "timeout": 10,
+                                }
+                            ]
+                        }
+                    ],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    runtime, hook_python = minimal_hook_runtime(tmp_path)
+    runtime_config = tmp_path / "ahr.json"
+    runtime_config.write_text(
+        json.dumps({"schema_version": 1, "memory_root": str(tmp_path / "memory")}),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("AGENT_HOOK_RUNTIME_CONFIG", str(runtime_config))
+
+    result = uninstall_workbuddy_host(
+        config_path,
+        config,
+        host_home=home,
+        python=Path(sys.executable),
+        hook_runtime=runtime,
+        hook_python=hook_python,
+        hook_config_path=runtime_config,
+    )
+
+    loaded = json.loads((home / "settings.json").read_text(encoding="utf-8"))
+    assert result["hooks"]["status"] == "applied"  # type: ignore[index]
+    assert loaded["other"] is True
+    assert loaded["hooks"]["PostToolUse"] == [
+        {"hooks": [{"command": "prettier", "timeout": 5}]}
+    ]
+    assert "context_hook.py" not in json.dumps(loaded)
+    assert json.loads(runtime_config.read_text(encoding="utf-8"))["memory_root"] == str(
+        tmp_path / "memory"
+    )
+
+
+def test_grok_uninstall_removes_user_registration(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_path, config = setup_source(tmp_path)
+    home = tmp_path / ".grok"
+    home.mkdir()
+    (home / "config.toml").write_text("[unrelated]\nkeep = true\n", encoding="utf-8")
+    (home / "AGENTS.md").write_text("# Existing Grok rules\n", encoding="utf-8")
+    fake_binary = Path(sys.executable)
+    registrations: list[dict[str, Any]] = [
+        {
+            "name": "keepygaga",
+            "scope": "user",
+            "enabled": True,
+            "command": str(Path(sys.executable)),
+            "args": ["-m", "keepygaga.server"],
+            "env": {"KEEPYGAGA_CONFIG": str(config_path)},
+        }
+    ]
+    remove_calls = 0
+
+    def fake_run(
+        binary: Path, selected_home: Path, arguments: list[str]
+    ) -> subprocess.CompletedProcess[str]:
+        nonlocal remove_calls
+        del binary, selected_home
+        if arguments == ["mcp", "list", "--json"]:
+            return subprocess.CompletedProcess(
+                arguments, 0, json.dumps(registrations), ""
+            )
+        assert arguments == ["mcp", "remove", "--scope", "user", "keepygaga"]
+        remove_calls += 1
+        registrations.clear()
+        return subprocess.CompletedProcess(arguments, 0, "", "")
+
+    monkeypatch.setattr(host_adapters, "_run_grok", fake_run)
+    (home / "AGENTS.md").write_text(
+        "# Existing Grok rules\n<!-- KEEPYGAGA:START -->\n<!-- KEEPYGAGA:END -->\n",
+        encoding="utf-8",
+    )
+    first = uninstall_grok_host(
+        config_path,
+        config,
+        host_home=home,
+        python=Path(sys.executable),
+        grok_binary=fake_binary,
+    )
+    second = uninstall_grok_host(
+        config_path,
+        config,
+        host_home=home,
+        python=Path(sys.executable),
+        grok_binary=fake_binary,
+    )
+
+    assert first["status"] == "applied"
+    assert first["mcp"]["status"] == "applied"  # type: ignore[index]
+    assert second["status"] == "no_op"
+    assert remove_calls == 1
+    assert "# Existing Grok rules" in (home / "AGENTS.md").read_text(encoding="utf-8")
+    assert "KEEPYGAGA:START" not in (home / "AGENTS.md").read_text(encoding="utf-8")
+
+
+def test_hermes_uninstall_removes_mcp_and_soul_block(tmp_path: Path) -> None:
+    config_path, config = setup_source(tmp_path)
+    home = tmp_path / ".hermes"
+    home.mkdir()
+    (home / "config.yaml").write_text(
+        "# keep this comment\n"
+        "model: existing\n"
+        "mcp_servers:\n"
+        "  other:\n"
+        "    command: other\n",
+        encoding="utf-8",
+    )
+    (home / "SOUL.md").write_text("# Existing personality\n", encoding="utf-8")
+
+    setup_hermes_host(
+        config_path, config, host_home=home, python=Path(sys.executable)
+    )
+    first = uninstall_hermes_host(
+        config_path, config, host_home=home, python=Path(sys.executable)
+    )
+    second = uninstall_hermes_host(
+        config_path, config, host_home=home, python=Path(sys.executable)
+    )
+    loaded = yaml.safe_load((home / "config.yaml").read_text(encoding="utf-8"))
+
+    assert first["status"] == "applied"
+    assert second["status"] == "no_op"
+    assert loaded["model"] == "existing"
+    assert loaded["mcp_servers"] == {"other": {"command": "other"}}
+    assert (home / "config.yaml").read_text(encoding="utf-8").startswith(
+        "# keep this comment\n"
+    )
+    soul = (home / "SOUL.md").read_text(encoding="utf-8")
+    assert soul.startswith("# Existing personality\n")
+    assert "KEEPYGAGA:START" not in soul
+
+def test_json_host_uninstall_clears_disabled_keepygaga_without_servers(
+    tmp_path: Path,
+) -> None:
+    config_path, config = setup_source(tmp_path)
+    home = tmp_path / ".workbuddy"
+    home.mkdir()
+    mcp_path = home / "mcp.json"
+    mcp_path.write_text(
+        json.dumps({"disabledMcpServers": ["other", "keepygaga"]}),
+        encoding="utf-8",
+    )
+
+    first = uninstall_workbuddy_host(
+        config_path, config, host_home=home, python=Path(sys.executable)
+    )
+    loaded = json.loads(mcp_path.read_text(encoding="utf-8"))
+
+    assert first["mcp"]["status"] == "applied"  # type: ignore[index]
+    assert loaded == {"disabledMcpServers": ["other"]}
+
+
+def test_grok_uninstall_is_noop_when_home_is_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_path, config = setup_source(tmp_path)
+    home = tmp_path / ".grok"
+
+    def fail_run(*_args, **_kwargs):
+        raise AssertionError("Grok CLI should not run when home is missing")
+
+    monkeypatch.setattr(host_adapters, "_run_grok", fail_run)
+    result = uninstall_grok_host(
+        config_path,
+        config,
+        host_home=home,
+        python=Path(sys.executable),
+        grok_binary=Path(sys.executable),
+    )
+
+    assert result["status"] == "no_op"
+    assert not home.exists()
+
+def test_workbuddy_uninstall_skips_rewrite_when_no_owned_hooks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_path, config = setup_source(tmp_path)
+    home = tmp_path / ".workbuddy"
+    home.mkdir()
+    original = (
+        json.dumps(
+            {
+                "other": True,
+                "hooks": {
+                    "PostToolUse": [{"hooks": [{"command": "prettier"}]}],
+                },
+            },
+            separators=(",", ":"),
+        )
+        + "\n"
+    )
+    settings = home / "settings.json"
+    settings.write_text(original, encoding="utf-8")
+    runtime, hook_python = minimal_hook_runtime(tmp_path)
+    runtime_config = tmp_path / "ahr.json"
+    monkeypatch.setenv("AGENT_HOOK_RUNTIME_CONFIG", str(runtime_config))
+
+    result = uninstall_workbuddy_host(
+        config_path,
+        config,
+        host_home=home,
+        python=Path(sys.executable),
+        hook_runtime=runtime,
+        hook_python=hook_python,
+        hook_config_path=runtime_config,
+    )
+
+    assert result["hooks"]["status"] == "no_op"  # type: ignore[index]
+    assert settings.read_text(encoding="utf-8") == original
+    assert not runtime_config.exists()
+
+def test_workbuddy_uninstall_skips_rewrite_when_hooks_target_is_absent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_path, config = setup_source(tmp_path)
+    home = tmp_path / ".workbuddy"
+    home.mkdir()
+    original = json.dumps({"other": True}, separators=(",", ":")) + "\n"
+    settings = home / "settings.json"
+    settings.write_text(original, encoding="utf-8")
+    runtime, hook_python = minimal_hook_runtime(tmp_path)
+    runtime_config = tmp_path / "ahr.json"
+    monkeypatch.setenv("AGENT_HOOK_RUNTIME_CONFIG", str(runtime_config))
+
+    result = uninstall_workbuddy_host(
+        config_path,
+        config,
+        host_home=home,
+        python=Path(sys.executable),
+        hook_runtime=runtime,
+        hook_python=hook_python,
+        hook_config_path=runtime_config,
+    )
+
+    assert result["hooks"]["status"] == "no_op"  # type: ignore[index]
+    assert settings.read_text(encoding="utf-8") == original
+
+def test_hermes_uninstall_skips_empty_hooks_target(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_path, config = setup_source(tmp_path)
+    home = tmp_path / ".hermes"
+    home.mkdir()
+    original = "model: existing\n"
+    (home / "config.yaml").write_text(original, encoding="utf-8")
+    runtime, hook_python = minimal_hook_runtime(tmp_path)
+    runtime_config = tmp_path / "ahr.json"
+    monkeypatch.setenv("AGENT_HOOK_RUNTIME_CONFIG", str(runtime_config))
+
+    result = uninstall_hermes_host(
+        config_path,
+        config,
+        host_home=home,
+        python=Path(sys.executable),
+        hook_runtime=runtime,
+        hook_python=hook_python,
+        hook_config_path=runtime_config,
+    )
+
+    assert result["hooks"]["status"] == "no_op"  # type: ignore[index]
+    assert (home / "config.yaml").read_text(encoding="utf-8") == original
