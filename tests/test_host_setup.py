@@ -1030,6 +1030,120 @@ def test_hook_command_path_rejects_backslash(tmp_path: Path) -> None:
         host_setup._validate_hook_command_path(tmp_path / "bad\\path", label="runtime")
 
 
+
+def test_setup_accepts_dynamic_page_limit_warning(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    memory_root = tmp_path / "memory"
+    memory_root.mkdir()
+    config_path = tmp_path / "keepygaga.toml"
+    config = KeepygagaConfig(MemoryFilesConfig(root=str(memory_root)))
+    monkeypatch.setattr(
+        host_common,
+        "run_doctor",
+        lambda *_args, **_kwargs: {
+            "status": "warning",
+            "checks": [
+                {
+                    "id": "memory_tree",
+                    "status": "warning",
+                    "details": {"dynamic_page_limit_exceeded": True},
+                }
+            ],
+        },
+    )
+    monkeypatch.setattr(
+        host_setup,
+        "reconcile_codex_rules",
+        lambda _home: {"status": "no_op"},
+    )
+    monkeypatch.setattr(
+        host_setup,
+        "_prepare_codex_mcp",
+        lambda *_args, **_kwargs: object(),
+    )
+    monkeypatch.setattr(
+        host_setup,
+        "_apply_codex_mcp_plan",
+        lambda _plan: {"status": "no_op"},
+    )
+
+    result = host_setup.setup_codex_host(
+        config_path, config, codex_home=tmp_path / ".codex"
+    )
+
+    assert result["status"] == "no_op"
+    assert result["doctor"] == "warning"
+
+
+def test_setup_rejects_permission_warning_even_with_soft_flags(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    memory_root = tmp_path / "memory"
+    memory_root.mkdir()
+    config = KeepygagaConfig(MemoryFilesConfig(root=str(memory_root)))
+    monkeypatch.setattr(
+        host_common,
+        "run_doctor",
+        lambda *_args, **_kwargs: {
+            "status": "warning",
+            "checks": [
+                {
+                    "id": "memory_tree",
+                    "status": "warning",
+                    "details": {
+                        "split_recommended": True,
+                        "dynamic_page_limit_exceeded": True,
+                        "permission_warnings": [
+                            {
+                                "path": str(memory_root / "profile.md"),
+                                "mode": "0o644",
+                                "expected": "0o600",
+                            }
+                        ],
+                    },
+                }
+            ],
+        },
+    )
+
+    with pytest.raises(HostSetupError, match="memory tree did not pass Doctor"):
+        host_common.validate_host_source(tmp_path / "keepygaga.toml", config)
+
+
+def test_setup_rejects_permission_warning(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    memory_root = tmp_path / "memory"
+    memory_root.mkdir()
+    config = KeepygagaConfig(MemoryFilesConfig(root=str(memory_root)))
+    monkeypatch.setattr(
+        host_common,
+        "run_doctor",
+        lambda *_args, **_kwargs: {
+            "status": "warning",
+            "checks": [
+                {
+                    "id": "memory_tree",
+                    "status": "warning",
+                    "details": {
+                        "permission_warnings": [
+                            {
+                                "path": str(memory_root / "profile.md"),
+                                "mode": "0o644",
+                                "expected": "0o600",
+                            }
+                        ]
+                    },
+                }
+            ],
+        },
+    )
+
+    with pytest.raises(HostSetupError, match="memory tree did not pass Doctor"):
+        host_common.validate_host_source(tmp_path / "keepygaga.toml", config)
+
+
 def test_setup_accepts_valid_soft_limit_warning(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -75,7 +75,7 @@ Claude Code、WorkBuddy、Grok、Hermes 与 Antigravity CLI 分别使用 `host s
 - 每次调用重新读取整个 allowlist，任一 operation 预检失败则整批不写。
 - mutation 在全局文件锁内执行；整批提交前核对所有受影响页面，并在每个文件替换或删除前立即再次核对该页面的 version。
 - 每个变更文件通过同目录临时文件与 `os.replace` 原子替换；跨文件批次不承诺断电级原子性。
-- 写入保留已有页面的文件权限；POSIX 上新建 Memory Root、动态目录、页面和 lock 使用目录 `0700`、文件 `0600`。初始化在写入前验证所有现有规范路径与页面，再以独占创建方式补齐缺失页面，不覆盖已有或并发出现的页面。已有过宽权限不自动收紧，Doctor 只给出 warning。
+- 写入保留已有页面的文件权限；POSIX 上新建 Memory Root、动态目录、页面和 lock 使用目录 `0700`、文件 `0600`。初始化在写入前验证所有现有规范路径与页面，再以独占创建方式补齐缺失页面，不覆盖已有或并发出现的页面。已有过宽权限不自动收紧，Doctor 只给出 warning；`host setup` 把过宽权限视为阻断，把 `split_recommended` 和动态页超限视为可继续的 soft warning。
 - changed page 使用规范格式重写；未变更页面保持原样。
 - 格式、path、identity、version 或授权无效时保留现场并返回结构化失败。
 - applied mutation 返回 changed pages 的 Page Snapshot 与服务端已经渲染的 receipt；删除后的页面不出现在 `files`。读取、no-op、skip 和失败不返回 receipt，客户端只原样回显 applied receipt 一次。
