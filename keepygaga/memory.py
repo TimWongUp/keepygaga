@@ -461,8 +461,9 @@ def _exclusive_create(target: Path, text: str) -> bool:
     else:
         target.parent.mkdir(parents=True, exist_ok=True)
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
-    if hasattr(os, "O_NOFOLLOW"):
-        flags |= os.O_NOFOLLOW
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    if nofollow:
+        flags |= nofollow
     try:
         descriptor = os.open(target, flags, NEW_FILE_MODE if _posix_mode_supported() else 0o666)
     except FileExistsError:
@@ -499,8 +500,9 @@ def _ensure_private_lock_file(lock_path: Path) -> None:
     if not _posix_mode_supported() or not lock_path.parent.is_dir():
         return
     flags = os.O_RDWR | os.O_CREAT | os.O_EXCL
-    if hasattr(os, "O_NOFOLLOW"):
-        flags |= os.O_NOFOLLOW
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    if nofollow:
+        flags |= nofollow
     try:
         descriptor = os.open(lock_path, flags, NEW_FILE_MODE)
     except FileExistsError:
