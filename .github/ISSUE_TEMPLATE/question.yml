@@ -30,4 +30,4 @@ body:
     id: environment
     attributes:
       label: Environment
-      description: Include Keepygaga version or commit, OS, Python version, and MCP host when relevant.
+      description: Include the exact Keepygaga commit SHA, OS, Python version, and MCP host when relevant.
