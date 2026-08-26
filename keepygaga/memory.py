@@ -77,6 +77,9 @@ PAGE_SOFT_LIMIT = 8000
 MAX_READ_PATHS = 20
 MAX_MUTATION_OPERATIONS = 20
 MAX_FACTS_PER_OPERATION = 50
+MAX_DYNAMIC_PAGES = 100
+NEW_DIRECTORY_MODE = 0o700
+NEW_FILE_MODE = 0o600
 
 VERSION_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 
@@ -103,10 +106,13 @@ __all__ = [
     "FRONTMATTER_KEY_RE",
     "Fact",
     "LoadedFile",
+    "MAX_DYNAMIC_PAGES",
     "MAX_FACTS_PER_OPERATION",
     "MAX_FACT_CONTENT_CHARS",
     "MAX_MUTATION_OPERATIONS",
     "MAX_READ_PATHS",
+    "NEW_DIRECTORY_MODE",
+    "NEW_FILE_MODE",
     "MemoryDocument",
     "MemoryStore",
     "MoveOperation",
@@ -358,15 +364,17 @@ def initialize_memory_tree(
         if root.is_dir():
             MemoryStore(root, _config)._load_catalog(require_complete=False)
         root_was_missing = not root.exists()
-        root.mkdir(parents=True, exist_ok=True)
         if root_was_missing:
+            _mkdir_private(root, parents=True)
             created_directories.append(root)
+        else:
+            root.mkdir(parents=True, exist_ok=True)
         lock_path = root / ".keepygaga.lock"
         if lock_path.is_symlink():
             raise MemoryValidationError(
                 "invalid_source", f"memory lock path must not be a symlink: {lock_path}"
             )
-        with FileLock(str(lock_path), timeout=30):
+        with _memory_lock(lock_path):
             store = MemoryStore(root, _config)
             store._load_catalog(require_complete=False)
             for directory in DYNAMIC_DIRS:
@@ -376,9 +384,11 @@ def initialize_memory_tree(
                         "invalid_source", f"memory path must be a directory: {target}"
                     )
                 target_was_missing = not target.exists()
-                target.mkdir(exist_ok=True)
                 if target_was_missing:
+                    _mkdir_private(target)
                     created_directories.append(target)
+                else:
+                    target.mkdir(exist_ok=True)
             for relative in FIXED_PATHS:
                 target = root / relative
                 if target.is_symlink():
@@ -446,19 +456,96 @@ def initialize_memory_tree(
 
 
 def _exclusive_create(target: Path, text: str) -> bool:
-    target.parent.mkdir(parents=True, exist_ok=True)
+    if not target.parent.exists():
+        _mkdir_private(target.parent, parents=True)
+    else:
+        target.parent.mkdir(parents=True, exist_ok=True)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    if nofollow:
+        flags |= nofollow
     try:
-        with target.open("x", encoding="utf-8") as handle:
+        descriptor = os.open(target, flags, NEW_FILE_MODE if _posix_mode_supported() else 0o666)
+    except FileExistsError:
+        return False
+    except OSError as exc:
+        if exc.errno == errno.EEXIST:
+            return False
+        raise
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            descriptor = -1
             handle.write(text)
             handle.flush()
             os.fsync(handle.fileno())
-    except FileExistsError:
-        return False
     except Exception:
+        if descriptor >= 0:
+            os.close(descriptor)
         with suppress(FileNotFoundError):
             target.unlink()
         raise
     return True
+
+
+def _posix_mode_supported() -> bool:
+    return os.name != "nt"
+
+
+def _memory_lock(lock_path: Path) -> FileLock:
+    _ensure_private_lock_file(lock_path)
+    return FileLock(str(lock_path), timeout=30)
+
+
+def _ensure_private_lock_file(lock_path: Path) -> None:
+    if not _posix_mode_supported() or not lock_path.parent.is_dir():
+        return
+    flags = os.O_RDWR | os.O_CREAT | os.O_EXCL
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    if nofollow:
+        flags |= nofollow
+    try:
+        descriptor = os.open(lock_path, flags, NEW_FILE_MODE)
+    except FileExistsError:
+        return
+    except OSError as exc:
+        if exc.errno in {errno.EEXIST, errno.ENOENT, errno.ENOTDIR}:
+            return
+        raise
+    os.close(descriptor)
+
+
+def _mkdir_private(target: Path, *, parents: bool = False) -> None:
+    if parents:
+        missing: list[Path] = []
+        current = target
+        while not current.exists():
+            missing.append(current)
+            if current.parent == current:
+                break
+            current = current.parent
+        for directory in reversed(missing):
+            _mkdir_new(directory)
+        return
+    _mkdir_new(target)
+
+
+def _mkdir_new(target: Path) -> None:
+    if _posix_mode_supported():
+        target.mkdir(mode=NEW_DIRECTORY_MODE)
+        return
+    target.mkdir()
+
+
+def _chmod_private_file(target: Path) -> None:
+    if _posix_mode_supported():
+        os.chmod(target, NEW_FILE_MODE)
+
+
+def _permission_too_open(mode: int, *, directory: bool) -> bool:
+    if not _posix_mode_supported():
+        return False
+    allowed = NEW_DIRECTORY_MODE if directory else NEW_FILE_MODE
+    return (mode & 0o777) & ~allowed != 0
 
 
 class MemoryStore:
@@ -511,6 +598,7 @@ class MemoryStore:
                 "message": f"memory lock path must not be a symlink: {self.lock_path}",
             }
         try:
+            _ensure_private_lock_file(self.lock_path)
             with self.lock:
                 return callback()
         except Timeout:
@@ -673,12 +761,18 @@ class MemoryStore:
             }
             for path, loaded in files.items()
         }
+        dynamic_pages = sum(1 for path in files if is_dynamic_path(path))
+        permission_warnings = self._permission_warnings()
         return {
             "status": "ok",
             "capacities": capacities,
             "split_recommended": any(
                 bool(item["split_recommended"]) for item in capacities.values()
             ),
+            "dynamic_pages": dynamic_pages,
+            "max_dynamic_pages": MAX_DYNAMIC_PAGES,
+            "dynamic_page_limit_exceeded": dynamic_pages > MAX_DYNAMIC_PAGES,
+            "permission_warnings": permission_warnings,
         }
 
     def _create_locked(self, operations: list[CreateOperation]) -> dict[str, object]:
@@ -686,6 +780,7 @@ class MemoryStore:
         initial = self._load_catalog()
         working = dict(initial)
         mutations: list[dict[str, object]] = []
+        created_paths: list[str] = []
         for operation in operations:
             path = canonical_memory_path(operation.path)
             if not is_dynamic_path(path):
@@ -701,10 +796,23 @@ class MemoryStore:
                 facts=tuple(operation.facts),
             )
             working[path] = self._loaded(path, document)
+            created_paths.append(path)
             mutations.append(
                 self._mutation(
                     "create", "page", path, [fact.content for fact in document.facts]
                 )
+            )
+        current = sum(1 for path in initial if is_dynamic_path(path))
+        if current + len(created_paths) > MAX_DYNAMIC_PAGES:
+            raise MemoryValidationError(
+                "capacity_exceeded",
+                (
+                    "dynamic page count would exceed "
+                    f"{MAX_DYNAMIC_PAGES}: current {current}, "
+                    f"creating {len(created_paths)}"
+                ),
+                current=current,
+                limit=MAX_DYNAMIC_PAGES,
             )
         return self._finish(initial, working, mutations)
 
@@ -990,6 +1098,8 @@ class MemoryStore:
                         if relative in initial:
                             mode = target.stat(follow_symlinks=False).st_mode & 0o7777
                             os.chmod(temporary, mode)
+                        else:
+                            _chmod_private_file(temporary)
                         os.replace(temporary, target)
                         del staged[relative]
                     applied_paths.append(relative)
@@ -1113,6 +1223,39 @@ class MemoryStore:
                 latest=self._read_item(loaded),
             )
         return loaded
+
+    def _permission_warnings(self) -> list[dict[str, object]]:
+        if not _posix_mode_supported():
+            return []
+        warnings: list[dict[str, object]] = []
+        candidates: list[tuple[Path, bool]] = [
+            (self.root, True),
+            (self.lock_path, False),
+            *((self.root / directory, True) for directory in DYNAMIC_DIRS),
+            *((self.root / relative, False) for relative in FIXED_PATHS),
+        ]
+        for directory_name in DYNAMIC_DIRS:
+            directory = self.root / directory_name
+            if not directory.is_dir():
+                continue
+            for target in sorted(directory.iterdir(), key=lambda item: item.name):
+                if target.suffix == ".md" and target.is_file() and not target.is_symlink():
+                    candidates.append((target, False))
+        for target, directory in candidates:
+            if not target.exists() or target.is_symlink():
+                continue
+            mode = target.stat(follow_symlinks=False).st_mode & 0o777
+            if _permission_too_open(mode, directory=directory):
+                warnings.append(
+                    {
+                        "path": str(target),
+                        "mode": oct(mode),
+                        "expected": oct(
+                            NEW_DIRECTORY_MODE if directory else NEW_FILE_MODE
+                        ),
+                    }
+                )
+        return warnings
 
     @staticmethod
     def _require_operations(operations: Sequence[object]) -> None:

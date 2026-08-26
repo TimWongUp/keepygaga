@@ -6,6 +6,9 @@
     "algorithm": "sha256",
     "prefix": "sha256:"
   },
+  "limits": {
+    "max_dynamic_pages": 100
+  },
   "fact_normalization": {
     "line_pattern": "^- \\[(stated|observed)\\] (.+)$",
     "blank_lines": "ignored",

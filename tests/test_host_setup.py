@@ -71,6 +71,7 @@ def test_canonical_contract_carries_agent_only_memory_policy() -> None:
     assert "an applied mutation's `files`" in contract
     assert "After `write_conflict`, reclassify against `latest`" in contract
     assert "Route Catalog descriptions and aliases" in contract
+    assert "clear owning page" in contract
     assert "Add new Profile Facts only from the user's current explicit statements" in contract
     assert "current visible context already contains repeated direct evidence" in contract
     assert "project affiliations and project roles" in contract

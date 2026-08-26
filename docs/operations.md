@@ -53,6 +53,7 @@ Doctor 只报告非敏感 metadata，不输出正文、凭据、API key、cookie
 - 页面格式无效：停止 mutation，报告 exact path 和错误，保留原文。
 - version 冲突：响应含 `latest` 时直接将其作为 Page Snapshot 重新分类；缺少 `latest` 时才重新 `read`，明确合并后使用新 version 重试，不原样重试旧 operation。
 - name 或 alias identity 冲突：修正目标页面或输入，不绕过全库验证。
+- `capacity_exceeded`：动态页已达上限，读取、更新、移动、重命名和删除仍可用；删除页面后再创建。Doctor 对已超额的树给出 warning，不自动删页。
 - `write_failed`：首个文件尚未提交时写入失败；现场未应用本批次内容，排除文件系统问题后重新读取并重试。
 - `partial_commit`：响应中的 `applied_paths` 已完成替换，其余路径未完成；重新读取整批相关页面并明确合并，不重复提交原批次，也不假设跨文件回滚。
 - `host setup codex` 的 `partial_commit`：响应中的 component 已应用部分必须按其 `backup` / `recovery` 现场处理；MCP 未成功 apply 时 rules 不会写入，rules 成功后 Hook 失败则明确报告已应用的 rules 和未完成的 Hook。
