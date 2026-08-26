@@ -1015,10 +1015,6 @@ def test_initialize_uses_private_posix_modes(tmp_path: Path) -> None:
 
 
 @pytest.mark.skipif(sys.platform == 'win32', reason='Windows does not support POSIX file modes')
-
-@pytest.mark.skipif(sys.platform == 'win32', reason='Windows does not support POSIX file modes')
-
-@pytest.mark.skipif(sys.platform == 'win32', reason='Windows does not support POSIX file modes')
 def test_existing_overbroad_lock_mode_is_preserved(
     memory_store: tuple[Path, MemoryStore],
 ) -> None:
@@ -1034,6 +1030,7 @@ def test_existing_overbroad_lock_mode_is_preserved(
     assert any(item["path"] == str(lock_path) for item in warnings)  # type: ignore[index]
 
 
+@pytest.mark.skipif(sys.platform == 'win32', reason='Windows does not support POSIX file modes')
 def test_missing_lock_is_recreated_with_private_mode(
     memory_store: tuple[Path, MemoryStore],
 ) -> None:
@@ -1045,6 +1042,7 @@ def test_missing_lock_is_recreated_with_private_mode(
     assert lock_path.stat().st_mode & 0o777 == memory_module.NEW_FILE_MODE
 
 
+@pytest.mark.skipif(sys.platform == 'win32', reason='Windows does not support POSIX file modes')
 def test_create_uses_private_posix_mode_without_changing_existing_pages(
     memory_store: tuple[Path, MemoryStore],
 ) -> None:
