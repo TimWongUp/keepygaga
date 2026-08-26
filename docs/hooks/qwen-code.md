@@ -7,8 +7,9 @@ routing, compact recovery, and write-triggered Closeout.
 - `SessionStart`: run `context_hook.py qwen SessionStart` with timeout `10000`
   milliseconds.
 - `SubagentStart`: run `context_hook.py qwen SubagentStart` with timeout `10000`
-  milliseconds. The current runtime injects the full `profile.md`,
-  `preferences.md`, routing instructions, and listing.
+  milliseconds. The current runtime injects the full versioned `profile.md` and
+  `preferences.md`, a minimal canonical routing instruction, and the dynamic-page
+  listing.
 - `UserPromptSubmit`: run `memory_route_hook.py qwen UserPromptSubmit` with
   timeout `2000` milliseconds.
 - `SessionStart` with matcher `compact`: run
