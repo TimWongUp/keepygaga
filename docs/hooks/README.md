@@ -43,6 +43,13 @@ download, or copy Hook executables merely because these instructions exist. If
 no compatible runtime is available, finish the MCP installation and report that
 Hook integration was not installed.
 
+When Hook integration is installed, the target host must also load the current
+Keepygaga Agent Contract and register the Keepygaga MCP server against the same
+memory root. Do not install the memory Bootstrap, routing, or Closeout Hooks as
+a standalone substitute for either prerequisite. Public `keepygaga host setup`
+adapters coordinate all three; unsupported or manually composed hosts must
+provide and verify both prerequisites before merging a Hook fragment.
+
 Resolve the runtime's native absolute Python and checkout paths. Configure its
 memory root to the same physical directory as Keepygaga `memory.root`, preferably
 through `AGENT_HOOK_RUNTIME_MEMORY_ROOT`. Personal paths remain machine-local.

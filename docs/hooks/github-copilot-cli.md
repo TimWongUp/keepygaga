@@ -11,8 +11,7 @@ Closeout signal; it is not used as a visible memory-routing reminder.
   `timeoutSec: 10`.
 - `subagentStart`: run `context_hook.py copilot subagentStart` with
   `timeoutSec: 10`. The current runtime injects the full versioned `profile.md`
-  and `preferences.md`, a minimal canonical routing instruction, and the
-  dynamic-page listing.
+  and `preferences.md` together with the dynamic-page listing.
 - `userPromptSubmitted`: run
   `closeout_hook.py copilot userPromptSubmitted` with `timeoutSec: 2`.
 - `postToolUse` with matcher `create|edit|str_replace_editor|apply_patch`: run

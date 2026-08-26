@@ -8,8 +8,8 @@ routing, compact recovery, and write-triggered Closeout.
   merge contract.
 - `SessionStart`: run `context_hook.py claude` with a 10-second timeout.
 - `SubagentStart`: run `context_hook.py claude` with a 10-second timeout. The
-  current runtime injects the full versioned `profile.md` and `preferences.md`,
-  a minimal canonical routing instruction, and the dynamic-page listing.
+  current runtime injects the full versioned `profile.md` and `preferences.md`
+  together with the dynamic-page listing.
 - `UserPromptSubmit`: run `memory_route_hook.py claude UserPromptSubmit` with a
   2-second timeout.
 - `SessionStart` with matcher `compact`: run
