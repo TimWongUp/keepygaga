@@ -13,6 +13,7 @@
 ## Page ownership and admission
 
 - Fixed pages are `profile.md` and `preferences.md`. Dynamic pages are direct Markdown children of `topics/`, `areas/`, or `people/` only.
+- When creating a dynamic page, write its description so later catalog lookup can tell whether a memory belongs on that page. If the current Route Catalog already shows a clear owning page, write there instead of creating another page.
 - Add new Profile Facts only from the user's current explicit statements about stable identity or background, and mark them `stated`; existing Profile `observed` Facts remain readable. Keep project affiliations and project roles in the project Authority or live direct source, not Profile.
 - Keep stable response and working preferences, including user-specific conditional retrieval preferences, in `preferences.md`. Keep host protocols, Skill/MCP/Hook, startup, safety, and tool-routing instructions in global rules. A low-sensitivity, actionable working pattern may be added to Preferences as `observed` without confirmation only when the current visible context already contains repeated direct evidence and the Fact has clear future value.
 - Keep each Fact independently maintainable, complete, and single-line. Do not accumulate isolated observations across sessions, scan chat history, infer missing evidence, or promote `observed` merely because it recurs. When the user explicitly confirms an observed Fact, update it to `stated`.

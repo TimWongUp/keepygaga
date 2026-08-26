@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import cast
 
+import pytest
+
 from keepygaga.config import MemoryFilesConfig
 from keepygaga.diagnostics import PUBLIC_MCP_TOOLS, run_doctor
 from keepygaga.memory import initialize_memory_tree
@@ -25,7 +27,7 @@ def test_doctor_reports_missing_memory_root_as_warning(tmp_path: Path) -> None:
     result = run_doctor(path, project_root=tmp_path)
     checks = cast(list[dict[str, object]], result["checks"])
     memory = next(item for item in checks if item["id"] == "memory_tree")
-    assert result["schema"] == "keepygaga-doctor-v6"
+    assert result["schema"] == "keepygaga-doctor-v7"
     assert result["status"] == "warning"
     tools = result["tools"]
     assert isinstance(tools, list)
@@ -92,3 +94,67 @@ def test_doctor_config_error_returns_error(tmp_path: Path) -> None:
     checks = cast(list[dict[str, object]], result["checks"])
     assert checks[0]["id"] == "config"
     assert checks[0]["status"] == "error"
+
+def test_doctor_warns_when_dynamic_page_limit_is_exceeded(tmp_path: Path) -> None:
+    from keepygaga import memory as memory_module
+    from keepygaga.codec import MemoryDocument
+    from keepygaga.memory import Fact, render_memory_file
+
+    path = tmp_path / "keepygaga.toml"
+    memory_root = tmp_path / "memory"
+    config = MemoryFilesConfig(root=str(memory_root))
+    assert initialize_memory_tree(memory_root, config)["status"] == "applied"
+    for index in range(memory_module.MAX_DYNAMIC_PAGES + 1):
+        page = memory_root / "topics" / f"manual-{index}.md"
+        page.write_text(
+            render_memory_file(
+                MemoryDocument(
+                    name=f"manual-{index}",
+                    description=f"Manual page {index}.",
+                    aliases=(),
+                    facts=(Fact(basis="stated", content=f"Manual fact {index}."),),
+                ),
+                f"topics/manual-{index}.md",
+            ),
+            encoding="utf-8",
+        )
+    path.write_text(
+        f'[memory]\nroot = "{memory_root.as_posix()}"\n',
+        encoding="utf-8",
+    )
+    result = run_doctor(path, project_root=tmp_path)
+    assert result["status"] == "warning"
+    checks = cast(list[dict[str, object]], result["checks"])
+    memory = next(item for item in checks if item["id"] == "memory_tree")
+    details = cast(dict[str, object], memory["details"])
+    assert details["dynamic_page_limit_exceeded"] is True
+    assert details["dynamic_pages"] == memory_module.MAX_DYNAMIC_PAGES + 1
+
+
+@pytest.mark.skipif(
+    __import__("sys").platform == "win32",
+    reason="Windows does not support POSIX file modes",
+)
+def test_doctor_warns_about_overbroad_existing_permissions(tmp_path: Path) -> None:
+    import os
+
+    path = tmp_path / "keepygaga.toml"
+    memory_root = tmp_path / "memory"
+    config = MemoryFilesConfig(root=str(memory_root))
+    assert initialize_memory_tree(memory_root, config)["status"] == "applied"
+    os.chmod(memory_root / "profile.md", 0o644)
+    path.write_text(
+        f'[memory]\nroot = "{memory_root.as_posix()}"\n',
+        encoding="utf-8",
+    )
+    result = run_doctor(path, project_root=tmp_path)
+    assert result["status"] == "warning"
+    checks = cast(list[dict[str, object]], result["checks"])
+    memory = next(item for item in checks if item["id"] == "memory_tree")
+    details = cast(dict[str, object], memory["details"])
+    warnings = details["permission_warnings"]
+    assert isinstance(warnings, list)
+    assert any(
+        item["path"] == str(memory_root / "profile.md") for item in warnings  # type: ignore[index]
+    )
+    assert (memory_root / "profile.md").stat().st_mode & 0o777 == 0o644

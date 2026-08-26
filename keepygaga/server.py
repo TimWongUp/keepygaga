@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from mcp.server.fastmcp import FastMCP
 from mcp.types import AnyFunction, Icon, ToolAnnotations
@@ -18,6 +18,42 @@ from keepygaga.memory import (
     RenameOperations,
     UpdateOperations,
 )
+
+COMPATIBLE_MCP_NOTE = "compatible with MCP SDK 1.12-1.28 closed-schema adapter"
+
+
+def _close_registered_tool(server: FastMCP, tool_name: str) -> None:
+    manager = getattr(server, "_tool_manager", None)
+    get_tool = getattr(manager, "get_tool", None)
+    if not callable(get_tool):
+        raise RuntimeError(
+            f"FastMCP closed-schema adapter cannot find {tool_name}; {COMPATIBLE_MCP_NOTE}"
+        )
+    tool = get_tool(tool_name)
+    if tool is None:
+        raise RuntimeError(f"tool registration failed: {tool_name}")
+    fn_metadata = getattr(tool, "fn_metadata", None)
+    arguments = getattr(fn_metadata, "arg_model", None)
+    config = getattr(arguments, "model_config", None)
+    rebuild = getattr(arguments, "model_rebuild", None)
+    schema = getattr(arguments, "model_json_schema", None)
+    if not isinstance(config, dict) or not callable(rebuild) or not callable(schema):
+        raise RuntimeError(
+            f"FastMCP closed-schema adapter cannot close {tool_name}; {COMPATIBLE_MCP_NOTE}"
+        )
+    config["extra"] = "forbid"
+    rebuild(force=True)
+    generated = schema(by_alias=True)
+    if not isinstance(generated, dict):
+        raise RuntimeError(
+            f"FastMCP closed-schema adapter cannot publish {tool_name}; {COMPATIBLE_MCP_NOTE}"
+        )
+    try:
+        cast(Any, tool).parameters = generated
+    except Exception as exc:
+        raise RuntimeError(
+            f"FastMCP closed-schema adapter cannot publish {tool_name}; {COMPATIBLE_MCP_NOTE}"
+        ) from exc
 
 
 class StrictFastMCP(FastMCP):
@@ -44,14 +80,8 @@ class StrictFastMCP(FastMCP):
             meta=meta,
             structured_output=structured_output,
         )
-        tool_name = name or fn.__name__
-        tool = self._tool_manager.get_tool(tool_name)
-        if tool is None:  # pragma: no cover
-            raise RuntimeError(f"tool registration failed: {tool_name}")
-        arguments = tool.fn_metadata.arg_model
-        arguments.model_config["extra"] = "forbid"
-        arguments.model_rebuild(force=True)
-        tool.parameters = arguments.model_json_schema(by_alias=True)
+        _close_registered_tool(self, name or fn.__name__)
+
 
 mcp = StrictFastMCP("Keepygaga")
 
@@ -125,6 +155,7 @@ def delete_memory(operations: DeleteOperations) -> dict[str, object]:
 
 def main() -> None:
     mcp.run()
+
 
 if __name__ == "__main__":
     main()

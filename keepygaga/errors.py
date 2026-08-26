@@ -12,11 +12,15 @@ class MemoryValidationError(ValueError):
         path: str | None = None,
         latest: dict[str, object] | None = None,
         applied_paths: Sequence[str] | None = None,
+        current: int | None = None,
+        limit: int | None = None,
     ):
         self.status = status
         self.path = path
         self.latest = latest
         self.applied_paths = list(applied_paths or [])
+        self.current = current
+        self.limit = limit
         super().__init__(message)
 
     def response(self) -> dict[str, object]:
@@ -27,4 +31,8 @@ class MemoryValidationError(ValueError):
             payload["latest"] = self.latest
         if self.applied_paths:
             payload["applied_paths"] = self.applied_paths
+        if self.current is not None:
+            payload["current"] = self.current
+        if self.limit is not None:
+            payload["limit"] = self.limit
         return payload

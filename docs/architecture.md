@@ -25,13 +25,13 @@ agents-memory/
 ```
 
 - 规范 frontmatter 按顺序包含 `name`、`description`、`aliases`。读取暂时兼容旧 `sources` 字段，页面下一次写入时会规范化。
-- `contracts/core-memory-v1/` 保存 canonical 与 legacy-sources golden pages，以及 `contract.json` 中的 Fact 规范化、Page Version 算法和 fixture 向量；Keepygaga 测试裁决其与当前 parser/renderer/version 一致，宿主注入器只读消费该版本化合同。
+- `contracts/core-memory-v1/` 保存 canonical 与 legacy-sources golden pages，以及 `contract.json` 中的 Fact 规范化、Page Version 算法、动态页上限和 fixture 向量；Keepygaga 测试裁决其与当前 parser/renderer/version 一致，宿主注入器只读消费该版本化合同。
 - `core-memory-v1` 冻结字段顺序、Fact 行语法与规范化边界，以及 Page Version 的换行规范化、编码、摘要算法和前缀；破坏性格式、Fact 规范化或 version 变化新建下一版本，并保留 v1 直到已知消费者完成迁移。fixture 的非语义样本文本可以在 v1 内调整，但必须同步 `contract.json` 向量。
 - 正文只允许单行 `- [stated|observed] ...` Fact。
 - `profile.md` 与 `preferences.md` 是 Home Page：兼容宿主在任务开始时直接注入正文；宿主同时注入由同一次原文读取派生的 version 时，正文与 version 构成可复用 Page Snapshot，缺少正文或 version 时 Agent 通过 MCP 主动读取对应页。动态页只通过 Route Catalog 暴露并按任务需要读取。`profile.md` 保存三个月后仍应成立的身份级背景，新 Fact 只接受用户当前明确陈述并标记 `stated`；历史 `[observed]` 继续可读。`preferences.md` 保存长期回应、工作偏好与用户特有的条件检索偏好；宿主协议、Skill/MCP/Hook、启动、安全与工具路由仍属于全局规则，不进入 Memory。
 - 直属 `areas/` 页面可以维护持续项目的项目索引，只记录每个项目的存放位置与已完成的重大进展，并拆成不同 Fact。排除阶段快照、角色、计划、阻塞、下一步、普通提交、单次任务、测试结果和当前运行状态；项目详情、决策、计划和当前状态仍属于项目 Authority 或直接真源，二者与项目索引冲突时优先。Agent 只在清点项目、定位仓库或核对重大进展的任务中读取项目索引。
 - 同一项目的位置与重大进展使用不同 Fact。位置在首次登记或移动时更新；进展只在完成会改变项目整体判断的重大里程碑时更新。阶段快照、角色、计划、阻塞、下一步、普通提交、单次任务、测试结果和临时运行状态不写入核心记忆。
-- `profile.md` 的 Fact content 合计不超过 300 字符；其他页面超出 soft limit 只返回 `split_recommended`。
+- `profile.md` 的 Fact content 合计不超过 300 字符；其他页面超出 soft limit 只返回 `split_recommended`。动态页总数硬上限为 100，只统计 `topics/`、`areas/`、`people/` 直属页面；`create` 整批预检超限则拒绝，已有页面的读取和维护不受影响。
 - name 与 aliases 在全库规范化后不得冲突。
 
 ## Agent convergence
@@ -75,7 +75,7 @@ Claude Code、WorkBuddy、Grok、Hermes 与 Antigravity CLI 分别使用 `host s
 - 每次调用重新读取整个 allowlist，任一 operation 预检失败则整批不写。
 - mutation 在全局文件锁内执行；整批提交前核对所有受影响页面，并在每个文件替换或删除前立即再次核对该页面的 version。
 - 每个变更文件通过同目录临时文件与 `os.replace` 原子替换；跨文件批次不承诺断电级原子性。
-- 写入保留已有页面的文件权限；初始化在写入前验证所有现有规范路径与页面，再以独占创建方式补齐缺失页面，不覆盖已有或并发出现的页面。
+- 写入保留已有页面的文件权限；POSIX 上新建 Memory Root、动态目录、页面和 lock 使用目录 `0700`、文件 `0600`。初始化在写入前验证所有现有规范路径与页面，再以独占创建方式补齐缺失页面，不覆盖已有或并发出现的页面。已有过宽权限不自动收紧，Doctor 只给出 warning。
 - changed page 使用规范格式重写；未变更页面保持原样。
 - 格式、path、identity、version 或授权无效时保留现场并返回结构化失败。
 - applied mutation 返回 changed pages 的 Page Snapshot 与服务端已经渲染的 receipt；删除后的页面不出现在 `files`。读取、no-op、skip 和失败不返回 receipt，客户端只原样回显 applied receipt 一次。
@@ -87,7 +87,7 @@ Keepygaga 的安全边界分为三层，各自由不同主体保证：
 
 | 边界 | 保证方式 | 责任方 |
 |------|----------|--------|
-| 文件系统安全 | canonical path 白名单、symlink 检查、原子替换、文件锁 | 代码强制 |
+| 文件系统安全 | canonical path 白名单、symlink 检查、原子替换、文件锁、POSIX 新建私密权限 | 代码强制 |
 | 用户意图授权 | `delete` 要求 `authorization="user_requested"`；宿主和 Agent 必须确保用户当轮明确授权后才调用 | 宿主 + Agent |
 | 内容信任 | Memory Root 内 Markdown 被视为可信输入；格式校验不防御恶意内容 | 本地环境 |
 

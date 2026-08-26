@@ -277,3 +277,11 @@ def test_runtime_rejects_more_than_twenty_read_paths() -> None:
         tool.fn_metadata.arg_model.model_validate(
             {"paths": [f"topics/page-{index}.md" for index in range(21)]}
         )
+
+def test_closed_schema_adapter_fails_closed_without_fastmcp_tool_manager() -> None:
+    class EmptyServer:
+        pass
+
+    with pytest.raises(RuntimeError, match="closed-schema adapter"):
+        mcp_server._close_registered_tool(EmptyServer(), "list")  # type: ignore[arg-type]
+

@@ -98,6 +98,7 @@ def test_core_memory_v1_contract_matches_current_page_format() -> None:
         "profile_path": "profile.md",
         "profile_content_limit_chars": codec.PROFILE_FACT_CONTENT_LIMIT,
     }
+    assert manifest["limits"] == {"max_dynamic_pages": memory_module.MAX_DYNAMIC_PAGES}
     assert Fact(basis="stated", content="  padded  ").content == "padded"
     with pytest.raises(ValidationError):
         Fact(basis="stated", content="  " + "x" * codec.MAX_FACT_CONTENT_CHARS)
@@ -244,14 +245,14 @@ def test_initialize_reports_created_directories_on_partial_failure(
 ) -> None:
     root = tmp_path / "memory"
     root.mkdir()
-    original_mkdir = Path.mkdir
+    original_mkdir = memory_module._mkdir_new
 
     def fail_areas(path: Path, *args, **kwargs) -> None:
         if path == root / "areas":
             raise PermissionError("simulated directory failure")
         original_mkdir(path, *args, **kwargs)
 
-    monkeypatch.setattr(Path, "mkdir", fail_areas)
+    monkeypatch.setattr(memory_module, "_mkdir_new", fail_areas)
 
     result = initialize_memory_tree(root, MemoryFilesConfig(root=str(root)))
 
@@ -1000,3 +1001,144 @@ def test_add_duplicate_path_in_batch_returns_duplicate_target(
     content = (root / "preferences.md").read_text(encoding="utf-8")
     assert "First fact." not in content
     assert "Second fact." not in content
+
+@pytest.mark.skipif(sys.platform == 'win32', reason='Windows does not support POSIX file modes')
+def test_initialize_uses_private_posix_modes(tmp_path: Path) -> None:
+    root = tmp_path / "nested" / "memory"
+    result = initialize_memory_tree(root, MemoryFilesConfig(root=str(root)))
+    assert result["status"] == "applied"
+    assert root.stat().st_mode & 0o777 == memory_module.NEW_DIRECTORY_MODE
+    for directory in ("topics", "areas", "people"):
+        assert (root / directory).stat().st_mode & 0o777 == memory_module.NEW_DIRECTORY_MODE
+    for relative in ("profile.md", "preferences.md", ".keepygaga.lock"):
+        assert (root / relative).stat().st_mode & 0o777 == memory_module.NEW_FILE_MODE
+
+
+@pytest.mark.skipif(sys.platform == 'win32', reason='Windows does not support POSIX file modes')
+
+@pytest.mark.skipif(sys.platform == 'win32', reason='Windows does not support POSIX file modes')
+
+@pytest.mark.skipif(sys.platform == 'win32', reason='Windows does not support POSIX file modes')
+def test_existing_overbroad_lock_mode_is_preserved(
+    memory_store: tuple[Path, MemoryStore],
+) -> None:
+    root, store = memory_store
+    lock_path = root / ".keepygaga.lock"
+    lock_path.chmod(0o644)
+    listed = store.list_files()
+    assert listed["status"] == "ok"
+    assert lock_path.stat().st_mode & 0o777 == 0o644
+    inspected = store.inspect()
+    warnings = inspected["permission_warnings"]
+    assert isinstance(warnings, list)
+    assert any(item["path"] == str(lock_path) for item in warnings)  # type: ignore[index]
+
+
+def test_missing_lock_is_recreated_with_private_mode(
+    memory_store: tuple[Path, MemoryStore],
+) -> None:
+    root, store = memory_store
+    lock_path = root / ".keepygaga.lock"
+    lock_path.unlink()
+    listed = store.list_files()
+    assert listed["status"] == "ok"
+    assert lock_path.stat().st_mode & 0o777 == memory_module.NEW_FILE_MODE
+
+
+def test_create_uses_private_posix_mode_without_changing_existing_pages(
+    memory_store: tuple[Path, MemoryStore],
+) -> None:
+    root, store = memory_store
+    profile = root / "profile.md"
+    profile.chmod(0o644)
+    result = store.create([create("topics/private.md", "New private page.")])
+    assert result["status"] == "applied"
+    assert (root / "topics/private.md").stat().st_mode & 0o777 == memory_module.NEW_FILE_MODE
+    assert profile.stat().st_mode & 0o777 == 0o644
+
+
+def test_create_rejects_more_than_max_dynamic_pages(
+    memory_store: tuple[Path, MemoryStore],
+) -> None:
+    _, store = memory_store
+    existing = memory_module.MAX_DYNAMIC_PAGES - 1
+    for index in range(existing):
+        directory = ("topics", "areas", "people")[index % 3]
+        path = f"{directory}/page-{index}.md"
+        assert store.create([create(path, f"Fact {index}.")])["status"] == "applied"
+    overflow = store.create(
+        [
+            create("topics/limit-a.md", "First extra."),
+            create("topics/limit-b.md", "Second extra."),
+        ]
+    )
+    assert overflow["status"] == "capacity_exceeded"
+    assert overflow["current"] == existing
+    assert overflow["limit"] == memory_module.MAX_DYNAMIC_PAGES
+    assert "topics/limit-a.md" not in {
+        item["path"] for item in store.list_files()["files"]  # type: ignore[index]
+    }
+    allowed = store.create([create("topics/limit-a.md", "Last allowed.")])
+    assert allowed["status"] == "applied"
+    blocked = store.create([create("topics/limit-b.md", "Over the limit.")])
+    assert blocked["status"] == "capacity_exceeded"
+    assert blocked["current"] == memory_module.MAX_DYNAMIC_PAGES
+    listed = store.list_files()
+    assert listed["status"] == "ok"
+
+
+
+def test_create_capacity_check_runs_after_path_validation(
+    memory_store: tuple[Path, MemoryStore],
+) -> None:
+    _, store = memory_store
+    for index in range(memory_module.MAX_DYNAMIC_PAGES):
+        directory = ("topics", "areas", "people")[index % 3]
+        path = f"{directory}/page-{index}.md"
+        assert store.create([create(path, f"Fact {index}.")])["status"] == "applied"
+    invalid = store.create([create("profile.md", "Fixed page.")])
+    assert invalid["status"] == "invalid_path"
+    duplicate = store.create([create("topics/page-0.md", "Already there.")])
+    assert duplicate["status"] == "already_exists"
+    overflow = store.create([create("topics/limit-b.md", "Over the limit.")])
+    assert overflow["status"] == "capacity_exceeded"
+
+
+def test_existing_tree_over_dynamic_page_limit_remains_readable(
+    memory_store: tuple[Path, MemoryStore],
+) -> None:
+    root, store = memory_store
+    for index in range(memory_module.MAX_DYNAMIC_PAGES + 1):
+        path = root / "topics" / f"manual-{index}.md"
+        path.write_text(
+            render_memory_file(
+                MemoryDocument(
+                    name=f"manual-{index}",
+                    description=f"Manual page {index}.",
+                    aliases=(),
+                    facts=(fact(f"Manual fact {index}."),),
+                ),
+                f"topics/manual-{index}.md",
+            ),
+            encoding="utf-8",
+        )
+    inspected = store.inspect()
+    assert inspected["status"] == "ok"
+    assert inspected["dynamic_pages"] == memory_module.MAX_DYNAMIC_PAGES + 1
+    assert inspected["dynamic_page_limit_exceeded"] is True
+    listed = store.list_files()
+    assert listed["status"] == "ok"
+    first = read_file(store, "topics/manual-0.md")
+    renamed = store.rename(
+        [
+            RenameOperation(
+                path="topics/manual-0.md",
+                if_version=str(first["version"]),
+                new_path="topics/manual-renamed.md",
+            )
+        ]
+    )
+    assert renamed["status"] == "applied"
+    blocked = store.create([create("topics/another.md", "Still blocked.")])
+    assert blocked["status"] == "capacity_exceeded"
+
