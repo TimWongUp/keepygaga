@@ -37,6 +37,7 @@ from keepygaga.host_common import (
     probe_hook_python,
     probe_keepygaga_python,
     read_utf8,
+    remove_managed_contract,
     render_fragment,
     validate_hook_command_path,
     validate_host_source,
@@ -677,19 +678,8 @@ def reconcile_codex_hooks(
     return _apply_codex_hooks_plan(plan)
 
 
-def setup_codex_host(
-    config_path: Path,
-    config: KeepygagaConfig,
-    *,
-    codex_home: Path | None = None,
-    codex_binary: Path | None = None,
-    hook_runtime: Path | None = None,
-    hook_python: Path | None = None,
-    hook_config_path: Path | None = None,
-) -> dict[str, object]:
-    if (hook_runtime is None) != (hook_python is None):
-        raise HostSetupError("hook runtime and hook Python must be supplied together")
-    memory_root, doctor = validate_host_source(config_path, config)
+
+def _resolve_codex_home(codex_home: Path | None, *, create: bool) -> Path:
     if codex_home is not None:
         raw_home = codex_home.expanduser()
     else:
@@ -706,10 +696,28 @@ def setup_codex_host(
     selected_home = raw_home.resolve()
     if selected_home.exists() and not selected_home.is_dir():
         raise HostSetupError(f"Codex home is not a directory: {selected_home}")
-    try:
-        selected_home.mkdir(parents=True, exist_ok=True)
-    except OSError as exc:
-        raise HostSetupError(f"Codex home could not be created: {exc}") from exc
+    if create:
+        try:
+            selected_home.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise HostSetupError(f"Codex home could not be created: {exc}") from exc
+    return selected_home
+
+
+def setup_codex_host(
+    config_path: Path,
+    config: KeepygagaConfig,
+    *,
+    codex_home: Path | None = None,
+    codex_binary: Path | None = None,
+    hook_runtime: Path | None = None,
+    hook_python: Path | None = None,
+    hook_config_path: Path | None = None,
+) -> dict[str, object]:
+    if (hook_runtime is None) != (hook_python is None):
+        raise HostSetupError("hook runtime and hook Python must be supplied together")
+    memory_root, doctor = validate_host_source(config_path, config)
+    selected_home = _resolve_codex_home(codex_home, create=True)
 
     lock = FileLock(str(selected_home / ".keepygaga-host-setup.lock"), timeout=30)
     components: dict[str, object] = {}
@@ -770,6 +778,428 @@ def setup_codex_host(
         host="codex",
         version=__version__,
         doctor=doctor.get("status", "unknown"),
+        rules=rules,
+        mcp=mcp,
+        hooks=hooks,
+        restart_required=True,
+    )
+
+
+def _load_codex_hook_fragment(
+    runtime_root: Path,
+    hook_python: Path,
+) -> tuple[Path, Path, dict[str, Any], Any]:
+    raw_runtime = runtime_root.expanduser()
+    if raw_runtime.is_symlink():
+        raise HostSetupError(
+            f"Agent Hook Runtime root must not be a symlink: {raw_runtime}"
+        )
+    selected_runtime = raw_runtime.resolve()
+    selected_python = Path(os.path.abspath(hook_python.expanduser()))
+    if not selected_runtime.is_dir():
+        raise HostSetupError(f"Agent Hook Runtime root is invalid: {selected_runtime}")
+    if not selected_python.is_file():
+        raise HostSetupError(f"Hook Python is invalid: {selected_python}")
+    _probe_hook_python(selected_python)
+    _validate_hook_command_path(selected_runtime, label="Agent Hook Runtime root")
+    _validate_hook_command_path(selected_python, label="Hook Python")
+    for relative in HOOK_ENTRYPOINTS:
+        entrypoint = selected_runtime / relative
+        if not entrypoint.is_file() or entrypoint.is_symlink():
+            raise HostSetupError(
+                f"Agent Hook Runtime entrypoint is missing: {entrypoint}"
+            )
+    fragment_path = selected_runtime / HOOK_FRAGMENT_RELATIVE_PATH
+    if fragment_path.is_symlink() or not fragment_path.is_file():
+        raise HostSetupError(
+            f"Codex Hook fragment must be a regular file: {fragment_path}"
+        )
+    try:
+        fragment = json.loads(fragment_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise HostSetupError(
+            f"Codex Hook fragment could not be loaded: {fragment_path}"
+        ) from exc
+    if not isinstance(fragment, dict) or fragment.get("host") != "codex":
+        raise HostSetupError("Agent Hook Runtime Codex fragment is invalid")
+    rendered = _render_fragment(
+        fragment,
+        {"{{PYTHON}}": str(selected_python), "{{RUNTIME_ROOT}}": str(selected_runtime)},
+    )
+    if not isinstance(rendered, dict):
+        raise HostSetupError("rendered Codex Hook fragment is invalid")
+    markers = rendered.get("owned_command_markers")
+    if not isinstance(markers, list):
+        raise HostSetupError("rendered Codex Hook ownership markers are invalid")
+    markers.extend(str(selected_runtime / relative) for relative in HOOK_ENTRYPOINTS)
+    merger = _load_hook_merger(selected_runtime)
+    return selected_runtime, selected_python, rendered, merger
+
+
+def _prepare_codex_hook_strip(
+    codex_home: Path,
+    runtime_root: Path,
+    hook_python: Path,
+    *,
+    hook_config_path: Path | None = None,
+) -> CodexHookPlan:
+    del hook_config_path
+    selected_runtime, selected_python, rendered, merger = _load_codex_hook_fragment(
+        runtime_root, hook_python
+    )
+    hooks_path = codex_home / "hooks.json"
+    _ensure_regular_target(hooks_path)
+    hooks_original = hooks_path.read_bytes() if hooks_path.exists() else None
+    existing: dict[str, Any] = {}
+    if hooks_original is not None:
+        try:
+            loaded = json.loads(hooks_original.decode("utf-8"))
+        except (UnicodeError, json.JSONDecodeError) as exc:
+            raise HostSetupError(
+                f"Codex hooks file is invalid JSON: {hooks_path}"
+            ) from exc
+        if not isinstance(loaded, dict):
+            raise HostSetupError(f"Codex hooks file must be an object: {hooks_path}")
+        existing = loaded
+    strip_fragment = dict(rendered)
+    strip_fragment["payload"] = {}
+    try:
+        merged = merger(existing, strip_fragment)
+    except Exception as exc:
+        raise HostSetupError(f"Agent Hook Runtime rejected Codex hooks: {exc}") from exc
+    if not isinstance(merged, dict):
+        raise HostSetupError("Agent Hook Runtime merger must return a JSON object")
+    required = rendered.get("required_top_level", {})
+    if isinstance(required, dict):
+        for key, value in required.items():
+            if key not in existing and merged.get(key) == value:
+                merged.pop(key, None)
+    target = rendered.get("merge_target")
+    if (
+        isinstance(target, str)
+        and target not in existing
+        and merged.get(target) in ({}, [])
+    ):
+        merged.pop(target, None)
+    return CodexHookPlan(
+        hooks_path=hooks_path,
+        hooks_original=hooks_original,
+        hook_config_path=Path("."),
+        hook_config_original=None,
+        hook_config_content=b"",
+        memory_root=Path("."),
+        selected_python=selected_python,
+        selected_runtime=selected_runtime,
+        merged=merged,
+    )
+
+
+def _apply_codex_hook_strip(plan: CodexHookPlan) -> dict[str, object]:
+    if plan.hooks_original is None:
+        return _json_result(
+            "no_op",
+            path=str(plan.hooks_path),
+            reason="Codex hooks file was not found",
+        )
+    live_hooks = plan.hooks_path.read_bytes() if plan.hooks_path.exists() else None
+    if live_hooks != plan.hooks_original:
+        raise HostSetupError(f"write conflict while updating {plan.hooks_path}")
+    try:
+        existing = json.loads(plan.hooks_original.decode("utf-8"))
+    except (UnicodeError, json.JSONDecodeError) as exc:
+        raise HostSetupError(
+            f"Codex hooks file is invalid JSON: {plan.hooks_path}"
+        ) from exc
+    if existing == plan.merged:
+        encoded = plan.hooks_original
+    else:
+        encoded = (json.dumps(plan.merged, ensure_ascii=False, indent=2) + "\n").encode(
+            "utf-8"
+        )
+    status, backup = _atomic_write(
+        plan.hooks_path,
+        encoded,
+        expected_original=plan.hooks_original,
+    )
+    return _json_result(status, path=str(plan.hooks_path), backup=backup)
+
+
+def _prepare_codex_rules_removal(
+    codex_home: Path,
+    *,
+    legacy_contract_path: Path | None = None,
+) -> tuple[Path, bytes | None, bytes]:
+    legacy = load_legacy_contract(legacy_contract_path)
+    target, original, existing = _select_codex_rules_candidate(codex_home)
+    if original is None:
+        return target, None, b""
+    removed = remove_managed_contract(
+        existing, source=str(target), legacy=legacy
+    )
+    verified_target, verified_original, verified_existing = (
+        _select_codex_rules_candidate(codex_home)
+    )
+    if (
+        verified_target != target
+        or verified_original != original
+        or verified_existing != existing
+    ):
+        raise HostSetupError("Codex rules candidates changed during uninstall")
+    return target, original, removed.encode("utf-8")
+
+
+def _apply_codex_rules_removal(
+    plan: tuple[Path, bytes | None, bytes],
+) -> dict[str, object]:
+    target, original, content = plan
+    if original is None:
+        return _json_result(
+            "no_op",
+            path=str(target),
+            reason="global rules file was not found",
+        )
+    status, backup = _atomic_write(
+        target, content, expected_original=original
+    )
+    return _json_result(status, path=str(target), backup=backup)
+
+
+def remove_codex_rules(
+    codex_home: Path,
+    *,
+    legacy_contract_path: Path | None = None,
+) -> dict[str, object]:
+    return _apply_codex_rules_removal(
+        _prepare_codex_rules_removal(
+            codex_home, legacy_contract_path=legacy_contract_path
+        )
+    )
+
+
+def _prepare_codex_mcp_removal(
+    codex_home: Path,
+    *,
+    codex_binary: Path | None = None,
+) -> CodexMcpPlan:
+    selected_codex = codex_binary or (
+        Path(found).resolve() if (found := shutil.which("codex")) else None
+    )
+    if (
+        selected_codex is None
+        or not selected_codex.is_file()
+        or not os.access(selected_codex, os.X_OK)
+    ):
+        raise HostSetupError("Codex CLI could not be located")
+    codex_config = codex_home / "config.toml"
+    _ensure_regular_target(codex_config)
+    config_original = codex_config.read_bytes() if codex_config.exists() else None
+    current = _run_codex(
+        selected_codex, codex_home, ["mcp", "get", "keepygaga", "--json"]
+    )
+    current_payload: Mapping[str, Any] | None = None
+    if current.returncode == 0:
+        try:
+            loaded_payload = json.loads(current.stdout)
+        except json.JSONDecodeError as exc:
+            raise HostSetupError(
+                "Codex returned invalid MCP registration JSON"
+            ) from exc
+        if not isinstance(loaded_payload, Mapping):
+            raise HostSetupError("Codex returned an invalid MCP registration object")
+        current_payload = loaded_payload
+    elif "No MCP server named" not in f"{current.stderr}\n{current.stdout}":
+        detail = (
+            current.stderr.strip() or current.stdout.strip() or "unknown Codex error"
+        )
+        raise HostSetupError(f"Codex MCP registration could not be read: {detail}")
+    return CodexMcpPlan(
+        codex_home=codex_home,
+        codex_config=codex_config,
+        config_original=config_original,
+        selected_python=Path(sys.executable),
+        selected_codex=selected_codex,
+        desired_env={},
+        current_payload=current_payload,
+        needs_update=current_payload is not None,
+    )
+
+
+def _apply_codex_mcp_removal(plan: CodexMcpPlan) -> dict[str, object]:
+    if not plan.needs_update:
+        current = _run_codex(
+            plan.selected_codex,
+            plan.codex_home,
+            ["mcp", "get", "keepygaga", "--json"],
+        )
+        if current.returncode == 0:
+            raise HostSetupError("Keepygaga MCP registration changed after preflight")
+        if "No MCP server named" not in f"{current.stderr}\n{current.stdout}":
+            detail = (
+                current.stderr.strip() or current.stdout.strip() or "unknown Codex error"
+            )
+            raise HostSetupError(
+                f"Codex MCP registration could not be re-read: {detail}"
+            )
+        return _json_result("no_op", key="keepygaga")
+    live_config = plan.codex_config.read_bytes() if plan.codex_config.exists() else None
+    if live_config != plan.config_original:
+        raise HostSetupError(f"write conflict while updating {plan.codex_config}")
+    config_backup = (
+        _exclusive_backup(plan.codex_config, plan.config_original)
+        if plan.config_original is not None
+        else None
+    )
+    removed = _run_codex(
+        plan.selected_codex,
+        plan.codex_home,
+        ["mcp", "remove", "keepygaga"],
+    )
+    if removed.returncode != 0:
+        detail = removed.stderr.strip() or removed.stdout.strip() or "unknown Codex error"
+        raise HostSetupError(f"Codex MCP removal failed: {detail}")
+    recovery: dict[str, object] = (
+        {
+            "action": "restore_file",
+            "source": str(config_backup),
+            "destination": str(plan.codex_config),
+        }
+        if config_backup is not None
+        else {
+            "action": "manual_restore_required",
+            "reason": "Keepygaga MCP registration was not removed",
+        }
+    )
+    try:
+        verified = _run_codex(
+            plan.selected_codex,
+            plan.codex_home,
+            ["mcp", "get", "keepygaga", "--json"],
+        )
+    except HostSetupError as exc:
+        raise HostSetupPartialError(
+            f"Codex accepted the MCP removal but verification failed: {exc}",
+            {
+                "mcp": _json_result(
+                    "applied",
+                    key="keepygaga",
+                    verified=False,
+                    backup=str(config_backup) if config_backup else None,
+                    recovery=recovery,
+                )
+            },
+        ) from exc
+    if verified.returncode == 0 or (
+        "No MCP server named" not in f"{verified.stderr}\n{verified.stdout}"
+    ):
+        detail = (
+            verified.stderr.strip() or verified.stdout.strip() or "unknown Codex error"
+        )
+        raise HostSetupPartialError(
+            f"Codex accepted the MCP removal but verification failed: {detail}",
+            {
+                "mcp": _json_result(
+                    "applied",
+                    key="keepygaga",
+                    verified=False,
+                    backup=str(config_backup) if config_backup else None,
+                    recovery=recovery,
+                )
+            },
+        )
+    return _json_result(
+        "applied",
+        key="keepygaga",
+        backup=str(config_backup) if config_backup else None,
+    )
+
+
+def uninstall_codex_host(
+    config_path: Path,
+    config: KeepygagaConfig,
+    *,
+    codex_home: Path | None = None,
+    codex_binary: Path | None = None,
+    hook_runtime: Path | None = None,
+    hook_python: Path | None = None,
+    hook_config_path: Path | None = None,
+) -> dict[str, object]:
+    del config_path, config
+    if (hook_runtime is None) != (hook_python is None):
+        raise HostSetupError("hook runtime and hook Python must be supplied together")
+    selected_home = _resolve_codex_home(codex_home, create=False)
+    if not selected_home.exists():
+        skipped = _json_result(
+            "no_op", reason="Codex home was not found", path=str(selected_home)
+        )
+        return _json_result(
+            "no_op",
+            host="codex",
+            version=__version__,
+            rules=skipped,
+            mcp=skipped,
+            hooks=(
+                _json_result(
+                    "skipped", reason="compatible Agent Hook Runtime was not selected"
+                )
+                if hook_runtime is None
+                else skipped
+            ),
+            restart_required=True,
+        )
+    lock = FileLock(str(selected_home / ".keepygaga-host-setup.lock"), timeout=30)
+    components: dict[str, object] = {}
+    try:
+        lock.acquire()
+    except (FileLockTimeout, OSError) as exc:
+        raise HostSetupError(f"Codex setup lock could not be acquired: {exc}") from exc
+    try:
+        try:
+            hook_plan = (
+                _prepare_codex_hook_strip(
+                    selected_home,
+                    hook_runtime,
+                    hook_python,
+                    hook_config_path=hook_config_path,
+                )
+                if hook_runtime is not None and hook_python is not None
+                else None
+            )
+            mcp_plan = _prepare_codex_mcp_removal(
+                selected_home, codex_binary=codex_binary
+            )
+            rules_plan = _prepare_codex_rules_removal(selected_home)
+            components["rules"] = _apply_codex_rules_removal(rules_plan)
+            components["hooks"] = (
+                _apply_codex_hook_strip(hook_plan)
+                if hook_plan is not None
+                else _json_result(
+                    "skipped", reason="compatible Agent Hook Runtime was not selected"
+                )
+            )
+            components["mcp"] = _apply_codex_mcp_removal(mcp_plan)
+        except HostSetupPartialError as exc:
+            components.update(exc.components)
+            raise HostSetupPartialError(str(exc), components) from exc
+        except Exception as exc:
+            if any(
+                isinstance(value, Mapping) and value.get("status") == "applied"
+                for value in components.values()
+            ):
+                raise HostSetupPartialError(str(exc), components) from exc
+            if isinstance(exc, HostSetupError):
+                raise
+            raise HostSetupError(str(exc)) from exc
+    finally:
+        lock.release()
+    rules = components["rules"]
+    mcp = components["mcp"]
+    hooks = components["hooks"]
+    component_statuses = {rules["status"], mcp["status"], hooks["status"]}
+    overall = "applied" if "applied" in component_statuses else "no_op"
+    return _json_result(
+        overall,
+        host="codex",
+        version=__version__,
         rules=rules,
         mcp=mcp,
         hooks=hooks,

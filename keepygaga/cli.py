@@ -17,7 +17,8 @@ _HOOK_OPTIONS = {"hook_runtime", "hook_python", "hook_config"}
 @dataclass(frozen=True)
 class HostCliSpec:
     module: str
-    function: str
+    setup: str
+    uninstall: str
     options: frozenset[str]
 
 
@@ -25,31 +26,37 @@ _HOST_SPECS = {
     "codex": HostCliSpec(
         "keepygaga.host_setup",
         "setup_codex_host",
+        "uninstall_codex_host",
         frozenset(_HOOK_OPTIONS | {"codex_home", "codex_binary"}),
     ),
     "claude-code": HostCliSpec(
         "keepygaga.host_adapters",
         "setup_claude_code_host",
+        "uninstall_claude_code_host",
         frozenset(_HOOK_OPTIONS | {"host_home"}),
     ),
     "workbuddy": HostCliSpec(
         "keepygaga.host_adapters",
         "setup_workbuddy_host",
+        "uninstall_workbuddy_host",
         frozenset(_HOOK_OPTIONS | {"host_home"}),
     ),
     "grok": HostCliSpec(
         "keepygaga.host_adapters",
         "setup_grok_host",
+        "uninstall_grok_host",
         frozenset(_HOOK_OPTIONS | {"host_home", "grok_binary"}),
     ),
     "hermes": HostCliSpec(
         "keepygaga.host_adapters",
         "setup_hermes_host",
+        "uninstall_hermes_host",
         frozenset(_HOOK_OPTIONS | {"host_home"}),
     ),
     "antigravity": HostCliSpec(
         "keepygaga.host_adapters",
         "setup_antigravity_host",
+        "uninstall_antigravity_host",
         frozenset(_HOOK_OPTIONS | {"host_home"}),
     ),
 }
@@ -65,7 +72,7 @@ _OPTION_FLAGS = {
 }
 
 
-def _validate_host_setup_options(
+def _validate_host_options(
     args: argparse.Namespace, parser: argparse.ArgumentParser
 ) -> None:
     invalid = sorted(
@@ -98,10 +105,11 @@ def _parser() -> argparse.ArgumentParser:
 
     host = commands.add_parser("host")
     host_commands = host.add_subparsers(dest="host_command", required=True)
-    setup = host_commands.add_parser("setup")
-    setup.add_argument("host", choices=_HOSTS)
-    for destination, flag in _OPTION_FLAGS.items():
-        setup.add_argument(flag, dest=destination, type=Path)
+    for command_name in ("setup", "uninstall"):
+        command = host_commands.add_parser(command_name)
+        command.add_argument("host", choices=_HOSTS)
+        for destination, flag in _OPTION_FLAGS.items():
+            command.add_argument(flag, dest=destination, type=Path)
 
     return parser
 
@@ -116,8 +124,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.command is None:
         parser.print_help()
         return 0
-    if args.command == "host" and args.host_command == "setup":
-        _validate_host_setup_options(args, parser)
+    if args.command == "host" and args.host_command in {"setup", "uninstall"}:
+        _validate_host_options(args, parser)
     explicit_config = args.config.expanduser().resolve() if args.config else None
     config_path = resolve_config_path(explicit_config)
     if args.command == "doctor":
@@ -150,13 +158,14 @@ def main(argv: list[str] | None = None) -> int:
         _print(payload)
         return 0 if payload["status"] in {"applied", "no_op"} else 1
 
-    if args.command == "host" and args.host_command == "setup":
+    if args.command == "host" and args.host_command in {"setup", "uninstall"}:
         from keepygaga.host_common import HostSetupError, HostSetupPartialError
 
         try:
             spec = _HOST_SPECS[args.host]
-            selected_setup = getattr(
-                importlib.import_module(spec.module), spec.function
+            selected = getattr(
+                importlib.import_module(spec.module),
+                spec.setup if args.host_command == "setup" else spec.uninstall,
             )
             options = {
                 ("hook_config_path" if name == "hook_config" else name): getattr(
@@ -164,7 +173,7 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 for name in spec.options
             }
-            payload = selected_setup(config_path, config, **options)
+            payload = selected(config_path, config, **options)
         except HostSetupPartialError as exc:
             _print(
                 {

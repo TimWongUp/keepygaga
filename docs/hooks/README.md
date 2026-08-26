@@ -19,10 +19,11 @@ Agents or infer one host's events or payload shape from another host.
 | Hermes | [`hermes.md`](hermes.md) |
 | Grok | [`grok.md`](grok.md) |
 
-当前支持的公开安装命令是 `keepygaga host setup
+当前支持的公开安装和卸载命令是 `keepygaga host setup|uninstall
 codex|claude-code|workbuddy|grok|hermes|antigravity`。选定兼容 Agent Hook
 Runtime 时传入其 runtime root 与 Python；每个适配器只读取 runtime 自己的同名
-fragment 并调用其 `merge_hook_fragment`，本目录不另存一份可执行 Hook payload。
+fragment 并调用其 `merge_hook_fragment`。卸载时用空 payload 只拆除 AHR-owned
+条目，不改写 runtime `memory_root`，本目录不另存一份可执行 Hook payload。
 `antigravity` 指 Antigravity CLI，不等同于 Gemini CLI；后者只有在真实 CLI 存在且
 被单独适配后才能使用 `gemini-cli.md`。
 

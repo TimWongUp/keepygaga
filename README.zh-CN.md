@@ -99,6 +99,12 @@ uv run keepygaga --config /absolute/path/to/keepygaga.toml host setup workbuddy
 uv run keepygaga --config /absolute/path/to/keepygaga.toml host setup grok
 uv run keepygaga --config /absolute/path/to/keepygaga.toml host setup hermes
 uv run keepygaga --config /absolute/path/to/keepygaga.toml host setup antigravity
+uv run keepygaga --config /absolute/path/to/keepygaga.toml host uninstall codex
+uv run keepygaga --config /absolute/path/to/keepygaga.toml host uninstall claude-code
+uv run keepygaga --config /absolute/path/to/keepygaga.toml host uninstall workbuddy
+uv run keepygaga --config /absolute/path/to/keepygaga.toml host uninstall grok
+uv run keepygaga --config /absolute/path/to/keepygaga.toml host uninstall hermes
+uv run keepygaga --config /absolute/path/to/keepygaga.toml host uninstall antigravity
 ```
 
 `doctor` 只检查核心记忆并报告八个 raw Tool。`memory init` 创建规范
@@ -137,6 +143,27 @@ Markdown 记忆树，只为本轮新建的固定页返回可选 onboarding 元�
 override 选择与 CLI 专属 MCP 校验，其他适配器分别保留原生 JSON、Grok CLI 或
 Hermes YAML 投影，不猜测统一 schema。重启目标 Agent，重新运行 Doctor 与 smoke，
 再检查宿主实际 MCP Tool 清单；检查注册时不得输出凭据。
+
+### 卸载宿主接线
+
+把下面的 prompt 发给需要断开 Keepygaga 的目标 Agent：
+
+```text
+请从你自己卸载 Keepygaga。只有用户明确要求你为某个其他 Agent 卸载 Keepygaga 时，才为该 Agent 卸载。
+
+1. 根据用户请求确定 `TARGET_HOSTS`：默认只包含当前工作的 Agent，只有用户明确要求为某个其他 Agent 卸载 Keepygaga 时才将其加入。逐个处理目标，不修改范围外的 Agent。
+2. 使用该运行环境已有的 Keepygaga checkout 和绝对 `CONFIG_PATH`。不要新建 checkout，不要运行 `memory init`，也不要扫描磁盘寻找另一棵记忆树。
+3. 每个已选择目标分别运行一条确定性 uninstall 命令：`host uninstall codex`、`host uninstall claude-code`、`host uninstall workbuddy`、`host uninstall grok`、`host uninstall hermes` 或 `host uninstall antigravity`。项目有意不提供 `uninstall all`。若当初用 `--hook-runtime` 和 `--hook-python` 安装了 Hook，传入相同参数；否则省略它们，让 Hook 返回 `skipped`。
+4. 每条命令只拆除该宿主的 `keepygaga` MCP 注册、Keepygaga 托管块，以及选定的 AHR-owned Hook。保留无关宿主配置、托管块外文字、其他 MCP、Memory Root、checkout 和 `keepygaga.toml`。除非用户本轮明确要求，否则不要删除记忆页面。
+5. 重启目标 Agent，确认 `keepygaga` 工具已消失。对同一宿主再跑一次 uninstall 必须返回 `no_op`。
+
+最终报告修改文件、各目标剩余的 MCP 注册和剩余缺口，绝不输出凭据。
+```
+
+对应的逐宿主 uninstall 命令只拆除该宿主的 `keepygaga` MCP 注册、Keepygaga 托管块，
+以及选定兼容 runtime 时的 AHR-owned Hook。无关宿主配置、托管块外文字、其他 MCP、
+Memory Root、checkout 和 `keepygaga.toml` 都保留。对同一宿主再跑一次返回 `no_op`。
+完成后重启目标 Agent，确认 `keepygaga` 工具已消失。
 
 ## Hook 集成
 

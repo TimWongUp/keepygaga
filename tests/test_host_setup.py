@@ -151,6 +151,64 @@ def test_merge_fails_closed_for_corrupt_or_duplicate_blocks(existing: str) -> No
         host_setup.merge_managed_contract(existing, canonical(), source="AGENTS.md")
 
 
+def test_remove_managed_contract_strips_block_and_preserves_outside_bytes() -> None:
+    existing = (
+        "before\r\n"
+        + canonical().replace("\n", "\r\n")
+        + "after\r\n"
+    )
+
+    removed = host_setup.remove_managed_contract(existing, source="AGENTS.md")
+
+    assert removed == "before\r\nafter\r\n"
+
+
+def test_remove_managed_contract_is_noop_without_block() -> None:
+    existing = "# Personal\nkeep this\n"
+
+    assert (
+        host_setup.remove_managed_contract(existing, source="AGENTS.md") == existing
+    )
+
+
+def test_remove_managed_contract_strips_exact_unmanaged_legacy() -> None:
+    legacy = "# Keepygaga Agent Contract\n\n- old rule\n"
+    existing = f"before\n{legacy}after\n"
+
+    removed = host_setup.remove_managed_contract(
+        existing, source="AGENTS.md", legacy=legacy
+    )
+
+    assert removed == "before\nafter\n"
+
+
+def test_remove_managed_contract_refuses_modified_unmanaged_legacy() -> None:
+    with pytest.raises(HostSetupError, match="modified unmanaged legacy"):
+        host_setup.remove_managed_contract(
+            "# Keepygaga Agent Contract\n\n- locally changed\n",
+            source="AGENTS.md",
+            legacy="# Keepygaga Agent Contract\n\n- old rule\n",
+        )
+
+
+
+def test_remove_managed_contract_preserves_leading_blank_lines() -> None:
+    existing = canonical() + "\nkept\n"
+
+    removed = host_setup.remove_managed_contract(existing, source="AGENTS.md")
+
+    assert removed == "\nkept\n"
+
+
+def test_remove_managed_contract_refuses_leftover_legacy_after_block() -> None:
+    legacy = "# Keepygaga Agent Contract\n\n- old rule\n"
+    existing = canonical() + legacy
+
+    with pytest.raises(HostSetupError, match="still contains an unmanaged legacy"):
+        host_setup.remove_managed_contract(
+            existing, source="AGENTS.md", legacy=legacy
+        )
+
 def test_rules_use_nonempty_global_override_and_are_idempotent(tmp_path: Path) -> None:
     codex_home = tmp_path / ".codex"
     codex_home.mkdir()
@@ -1510,3 +1568,206 @@ def test_setup_expands_explicit_codex_home(
     )
 
     assert seen == [tmp_path / "custom-codex"]
+
+
+def test_uninstall_codex_rules_removes_block_and_is_idempotent(tmp_path: Path) -> None:
+    home = tmp_path / ".codex"
+    home.mkdir()
+    agents = home / "AGENTS.md"
+    agents.write_text("# Existing\n" + canonical(), encoding="utf-8")
+
+    first = host_setup.remove_codex_rules(home)
+    second = host_setup.remove_codex_rules(home)
+
+    assert first["status"] == "applied"
+    assert second["status"] == "no_op"
+    assert agents.read_text(encoding="utf-8") == "# Existing\n"
+
+
+def test_uninstall_codex_mcp_removes_registration(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    python = tmp_path / "python"
+    codex = tmp_path / "codex"
+    python.touch()
+    codex.touch()
+    codex.chmod(0o755)
+    home = tmp_path / ".codex"
+    home.mkdir()
+    (home / "config.toml").write_text("[mcp_servers.keepygaga]\n", encoding="utf-8")
+    calls: list[list[str]] = []
+    present = True
+
+    def run(
+        _binary: Path, _home: Path, arguments: list[str]
+    ) -> subprocess.CompletedProcess[str]:
+        nonlocal present
+        calls.append(arguments)
+        if arguments == ["mcp", "get", "keepygaga", "--json"]:
+            if present:
+                payload = {
+                    "enabled": True,
+                    "transport": {
+                        "type": "stdio",
+                        "command": str(python),
+                        "args": ["-m", "keepygaga.server"],
+                        "env": {"KEEPYGAGA_CONFIG": "/tmp/keepygaga.toml"},
+                    },
+                }
+                return subprocess.CompletedProcess(
+                    arguments, 0, json.dumps(payload), ""
+                )
+            return subprocess.CompletedProcess(
+                arguments, 1, "", "No MCP server named 'keepygaga' found."
+            )
+        if arguments == ["mcp", "remove", "keepygaga"]:
+            present = False
+            return subprocess.CompletedProcess(arguments, 0, "Removed", "")
+        raise AssertionError(arguments)
+
+    monkeypatch.setattr(host_setup, "_run_codex", run)
+    monkeypatch.setattr(host_setup, "_probe_keepygaga_python", lambda _python: None)
+
+    first = host_setup._apply_codex_mcp_removal(
+        host_setup._prepare_codex_mcp_removal(home, codex_binary=codex)
+    )
+    second = host_setup._apply_codex_mcp_removal(
+        host_setup._prepare_codex_mcp_removal(home, codex_binary=codex)
+    )
+
+    assert first["status"] == "applied"
+    assert second["status"] == "no_op"
+    assert ["mcp", "remove", "keepygaga"] in calls
+
+
+def test_uninstall_codex_does_not_require_doctor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = tmp_path / ".codex"
+    home.mkdir()
+    (home / "AGENTS.md").write_text("# Existing\n" + canonical(), encoding="utf-8")
+    monkeypatch.setattr(
+        host_setup,
+        "_prepare_codex_mcp_removal",
+        lambda *_args, **_kwargs: object(),
+    )
+    monkeypatch.setattr(
+        host_setup,
+        "_apply_codex_mcp_removal",
+        lambda _plan: {"status": "no_op", "key": "keepygaga"},
+    )
+    called = {"doctor": False}
+    monkeypatch.setattr(
+        host_setup,
+        "validate_host_source",
+        lambda *_args, **_kwargs: called.__setitem__("doctor", True) or (tmp_path, {}),
+    )
+
+    result = host_setup.uninstall_codex_host(
+        tmp_path / "keepygaga.toml",
+        KeepygagaConfig(MemoryFilesConfig(root=str(tmp_path / "memory"))),
+        codex_home=home,
+    )
+
+    assert called["doctor"] is False
+    assert result["status"] == "applied"
+    rules = result["rules"]
+    hooks = result["hooks"]
+    assert isinstance(rules, dict)
+    assert isinstance(hooks, dict)
+    assert rules["status"] == "applied"
+    assert (home / "AGENTS.md").read_text(encoding="utf-8") == "# Existing\n"
+    assert hooks["status"] == "skipped"
+
+def test_uninstall_codex_refuses_corrupt_rules_before_writes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = tmp_path / ".codex"
+    home.mkdir()
+    (home / "AGENTS.md").write_text("<!-- KEEPYGAGA:START -->\nmissing end\n", encoding="utf-8")
+    hooks = home / "hooks.json"
+    hooks.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(
+        host_setup,
+        "_prepare_codex_mcp_removal",
+        lambda *_args, **_kwargs: object(),
+    )
+    monkeypatch.setattr(
+        host_setup,
+        "_apply_codex_mcp_removal",
+        lambda _plan: (_ for _ in ()).throw(AssertionError("mcp should not apply")),
+    )
+    monkeypatch.setattr(
+        host_setup,
+        "_prepare_codex_hook_strip",
+        lambda *_args, **_kwargs: object(),
+    )
+    monkeypatch.setattr(
+        host_setup,
+        "_apply_codex_hook_strip",
+        lambda _plan: (_ for _ in ()).throw(AssertionError("hooks should not apply")),
+    )
+
+    with pytest.raises(HostSetupError, match="unmatched Keepygaga start marker"):
+        host_setup.uninstall_codex_host(
+            tmp_path / "keepygaga.toml",
+            KeepygagaConfig(MemoryFilesConfig(root=str(tmp_path / "memory"))),
+            codex_home=home,
+            hook_runtime=tmp_path / "runtime",
+            hook_python=Path(sys.executable),
+        )
+
+    assert (home / "AGENTS.md").read_text(encoding="utf-8") == (
+        "<!-- KEEPYGAGA:START -->\nmissing end\n"
+    )
+    assert hooks.read_text(encoding="utf-8") == "{}"
+
+
+def test_uninstall_codex_mcp_verification_error_is_partial(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    python = tmp_path / "python"
+    codex = tmp_path / "codex"
+    python.touch()
+    codex.touch()
+    codex.chmod(0o755)
+    home = tmp_path / ".codex"
+    home.mkdir()
+    (home / "config.toml").write_text("[mcp_servers.keepygaga]\n", encoding="utf-8")
+    calls = 0
+
+    def run(
+        _binary: Path, _home: Path, arguments: list[str]
+    ) -> subprocess.CompletedProcess[str]:
+        nonlocal calls
+        calls += 1
+        if arguments == ["mcp", "get", "keepygaga", "--json"] and calls == 1:
+            payload = {
+                "enabled": True,
+                "transport": {
+                    "type": "stdio",
+                    "command": str(python),
+                    "args": ["-m", "keepygaga.server"],
+                    "env": {"KEEPYGAGA_CONFIG": "/tmp/keepygaga.toml"},
+                },
+            }
+            return subprocess.CompletedProcess(arguments, 0, json.dumps(payload), "")
+        if arguments == ["mcp", "remove", "keepygaga"]:
+            return subprocess.CompletedProcess(arguments, 0, "Removed", "")
+        raise host_setup.HostSetupError("Codex CLI could not be executed")
+
+    monkeypatch.setattr(host_setup, "_run_codex", run)
+    monkeypatch.setattr(host_setup, "_probe_keepygaga_python", lambda _python: None)
+
+    with pytest.raises(host_setup.HostSetupPartialError) as error:
+        host_setup._apply_codex_mcp_removal(
+            host_setup._prepare_codex_mcp_removal(home, codex_binary=codex)
+        )
+
+    payload = error.value.components["mcp"]
+    assert isinstance(payload, dict)
+    assert payload["status"] == "applied"
+    assert payload["verified"] is False
+    recovery = payload["recovery"]
+    assert isinstance(recovery, dict)
+    assert recovery["action"] == "restore_file"

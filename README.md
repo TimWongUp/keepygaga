@@ -113,6 +113,12 @@ uv run keepygaga --config /absolute/path/to/keepygaga.toml host setup workbuddy
 uv run keepygaga --config /absolute/path/to/keepygaga.toml host setup grok
 uv run keepygaga --config /absolute/path/to/keepygaga.toml host setup hermes
 uv run keepygaga --config /absolute/path/to/keepygaga.toml host setup antigravity
+uv run keepygaga --config /absolute/path/to/keepygaga.toml host uninstall codex
+uv run keepygaga --config /absolute/path/to/keepygaga.toml host uninstall claude-code
+uv run keepygaga --config /absolute/path/to/keepygaga.toml host uninstall workbuddy
+uv run keepygaga --config /absolute/path/to/keepygaga.toml host uninstall grok
+uv run keepygaga --config /absolute/path/to/keepygaga.toml host uninstall hermes
+uv run keepygaga --config /absolute/path/to/keepygaga.toml host uninstall antigravity
 ```
 
 `doctor` checks core memory and reports the eight raw tools. `memory init`
@@ -155,6 +161,29 @@ and CLI-specific MCP checks. The other adapters retain their native JSON, Grok
 CLI, or Hermes YAML projections instead of guessing a shared schema. Restart the
 target Agent, rerun Doctor and the smoke test, then verify the host's actual MCP
 tool listing. Never print credentials while inspecting a registration.
+
+### Uninstall a host registration
+
+Give the prompt below to the Agent that should disconnect Keepygaga:
+
+```text
+Uninstall Keepygaga from yourself. Uninstall it from another Agent only when the user explicitly asks you to uninstall Keepygaga from that named Agent.
+
+1. Determine `TARGET_HOSTS` from the user's request: default to the current working Agent only, and include another Agent only when the user explicitly asks to uninstall Keepygaga from it. Process targets independently and do not change non-target Agents.
+2. Use that runtime's existing Keepygaga checkout and absolute `CONFIG_PATH`. Do not create a new checkout, run `memory init`, or scan the disk for another tree.
+3. Run one deterministic uninstall command per selected target: `host uninstall codex`, `host uninstall claude-code`, `host uninstall workbuddy`, `host uninstall grok`, `host uninstall hermes`, or `host uninstall antigravity`. There is intentionally no `uninstall all`. If Hooks were installed with `--hook-runtime` and `--hook-python`, pass the same options; otherwise omit them and let Hooks report `skipped`.
+4. Each command removes only that host's `keepygaga` MCP registration, Keepygaga managed block, and selected AHR-owned Hook entries. Preserve unrelated host configuration, text outside the block, other MCP servers, the Memory Root, checkout, and `keepygaga.toml`. Do not delete memory pages unless the user explicitly asks in this turn.
+5. Restart the target Agent and confirm the `keepygaga` tools are gone. A second uninstall against the same host must return `no_op`.
+
+Report the files changed, each target's remaining MCP registration, and remaining gaps. Never print credentials.
+```
+
+The matching per-host uninstall command removes only that host's `keepygaga` MCP
+registration, the Keepygaga managed block, and AHR-owned Hook entries when a
+compatible runtime is selected. Unrelated host configuration, text outside the
+managed block, other MCP servers, the Memory Root, checkout, and `keepygaga.toml`
+stay in place. A second run against the same host returns `no_op`. Restart the
+target Agent afterward and confirm the `keepygaga` tools are gone.
 
 ## Core capabilities (self-contained)
 
