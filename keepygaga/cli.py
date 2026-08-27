@@ -5,7 +5,9 @@ import importlib
 import json
 import sys
 from collections.abc import Mapping
+from contextlib import suppress
 from dataclasses import dataclass
+from io import TextIOWrapper
 from pathlib import Path
 
 from keepygaga.config import PROJECT_ROOT, load_config, resolve_config_path
@@ -141,6 +143,9 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def _print(payload: Mapping[str, object]) -> None:
+    with suppress(AttributeError, OSError):
+        assert isinstance(sys.stdout, TextIOWrapper)
+        sys.stdout.reconfigure(encoding="utf-8")
     print(json.dumps(payload, ensure_ascii=False, indent=2))
 
 
@@ -186,9 +191,13 @@ def main(argv: list[str] | None = None) -> int:
 
         try:
             if args.command == "install":
-                hosts = args.hosts or (_interactive_hosts() if sys.stdin.isatty() else [])
+                hosts = args.hosts or (
+                    _interactive_hosts() if sys.stdin.isatty() else []
+                )
                 if not args.yes and not sys.stdin.isatty():
-                    parser.error("non-interactive install requires --yes and explicit --host")
+                    parser.error(
+                        "non-interactive install requires --yes and explicit --host"
+                    )
                 memory_root = (
                     args.memory_root.expanduser().resolve()
                     if args.memory_root

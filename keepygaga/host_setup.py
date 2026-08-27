@@ -654,6 +654,8 @@ def _run_hook_smoke(plan: CodexHookPlan) -> None:
     }
     if not plan.builtin:
         smoke_environment["AGENT_HOOK_RUNTIME_CONFIG"] = str(plan.hook_config_path)
+    else:
+        smoke_environment["PYTHONIOENCODING"] = "utf-8"
     command = (
         [
             str(plan.selected_python),
@@ -681,8 +683,8 @@ def _run_hook_smoke(plan: CodexHookPlan) -> None:
             command,
             check=False,
             capture_output=True,
+            encoding="utf-8",
             input="{}",
-            text=True,
             env=smoke_environment,
             timeout=15,
         )
