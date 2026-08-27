@@ -2,9 +2,13 @@
 
 ## Product boundary
 
-Keepygaga is one independently installable Python product. The published wheel owns the MCP server, stable launchers, memory store, Agent Contract, built-in Hooks, host adapters, installer control plane, and diagnostics. It neither imports nor packages `keepygaga-knowledge`, `agent-runtime-config`, or an external Agent Hook Runtime.
+Keepygaga is a user-owned cross-host core-memory layer: one Memory Root is shared by every configured Agent host. The recommended human interface is a private Obsidian vault, while any Markdown editor remains compatible. Obsidian is not a runtime dependency.
+
+Keepygaga is one independently installable Python product. The published wheel owns the MCP server, stable launchers, memory store, Agent Contract, built-in Hooks, host adapters, installation and operations control plane, and diagnostics. The `keepygaga` CLI performs installation, host wiring, status, diagnosis, repair, upgrades, and uninstall; it is not a daily memory browser or editor. It neither imports nor packages `keepygaga-knowledge`, `agent-runtime-config`, or an external Agent Hook Runtime.
 
 The sibling `keepygaga-knowledge` repository may consume the same Markdown ecosystem, but it is not a runtime dependency and exposes no tool through this server.
+
+Host-native memory remains free to own host-specific conversation recall and project learning. Keepygaga owns only the stable user facts that should cross host boundaries; project authority remains in project-owned sources.
 
 ## Runtime layers
 

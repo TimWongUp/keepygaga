@@ -1,8 +1,10 @@
 # Keepygaga Operations
 
-## User control plane
+## Installation and operations control plane
 
-Install a published release with `uv tool install keepygaga`, then run `keepygaga install`. Non-interactive installation requires `--yes` and one or more explicit `--host` values. Use an explicit `--memory-root` only when reusing a private, trusted tree.
+The `keepygaga` CLI installs and maintains the product; it is not the routine interface for browsing or editing memory. Users inspect, correct, and organize the shared Memory Root in Obsidian or another Markdown editor, while Agents use MCP and Hooks.
+
+Install a published release with `uv tool install keepygaga`, then run `keepygaga install`. Interactive installation prompts for the Memory Root before host selection. An existing configured root is reused automatically when adding another host. Non-interactive first installation requires `--yes`, one or more explicit `--host` values, and an explicit `--memory-root` only when reusing a private, trusted tree.
 
 - `keepygaga status` reads live config and Doctor, compares recorded Contract versions, and labels host checks that still require live verification.
 - `keepygaga repair --yes` reruns idempotent reconciliation for recorded hosts.

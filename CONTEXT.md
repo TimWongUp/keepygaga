@@ -9,8 +9,16 @@ Keepygaga 是面向 Agent 的 local-first 核心记忆系统。这里定义项�
 _Avoid_: 普通知识、RAG、会话历史
 
 **Memory Root**：
-由 `memory.root` 配置、直接存放核心记忆页面树的可写本地目录。它可以独立存在，也可以位于 Obsidian Vault 或其他 Markdown 知识库中。
-_Avoid_: Obsidian 依赖、数据库目录
+由 `memory.root` 配置、供所有已接入宿主共用的核心记忆页面树。推荐位于私有 Obsidian Vault，也可以是独立 Markdown 目录。
+_Avoid_: 单宿主记忆目录、Obsidian 运行依赖、数据库目录
+
+**人类记忆界面（Human Memory Interface）**：
+用户直接查看、纠正和整理 Memory Root 的 Obsidian 或其他 Markdown 编辑器。
+_Avoid_: Keepygaga GUI、日常记忆 CLI
+
+**安装与运维控制面（Operations Control Plane）**：
+负责安装、宿主接线、状态、诊断、修复、升级与卸载的 `keepygaga` CLI，不承担日常记忆浏览或编辑。
+_Avoid_: 记忆管理客户端、Agent 记忆接口
 
 **Memory Page**：
 `agents-memory/` allowlist 内一份可独立路由和维护的 Markdown 页面。

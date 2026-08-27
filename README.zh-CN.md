@@ -2,11 +2,21 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-**一个小而克制、local-first 的 Agent 长期记忆产品。**
+**一个私有 Obsidian Vault，供所有编码 Agent 共用同一套核心记忆。**
 
-Keepygaga 把少量真正耐久的用户事实保存在可读 Markdown 中，并独立提供完整运行时：八个 raw Tool 的 MCP Server、精简全局 Agent Contract、内置跨宿主 Hook，以及安装控制面。它不依赖数据库、向量索引、源码 checkout 或外部 Hook Runtime。
+Keepygaga 让 Codex、Claude Code、WorkBuddy、Grok、Hermes 与 Antigravity CLI 使用同一份属于用户的核心记忆，不再把长期身份和偏好分散在各宿主的记忆孤岛中。唯一事实源是一个私有 Memory Root 中的可读 Markdown；推荐把它放进 Obsidian Vault，也兼容任意 Markdown 编辑器。
+
+产品刻意分成三个界面：
+
+- **Obsidian 或其他 Markdown 编辑器**供人查看、纠正和整理记忆。
+- **MCP、Hook 与 Agent Contract**让 Agent 在明确约束下读取和修改记忆。
+- **`keepygaga` CLI**是薄的安装与运维控制面，只负责宿主接线、状态、诊断、修复、升级和卸载，不承担日常记忆浏览或编辑。
+
+Keepygaga 独立提供完整运行时：八个 raw Tool 的 MCP Server、精简全局 Agent Contract、内置跨宿主 Hook，以及 CLI 控制面。它不依赖数据库、向量索引、源码 checkout 或外部 Hook Runtime；Obsidian 是推荐的人类界面，不是运行依赖。
 
 核心记忆由 `profile.md`、`preferences.md` 以及 `topics/`、`areas/`、`people/` 的直属页面组成。项目详情与当前状态仍以仓库或 live source 为准；Keepygaga 只保留项目位置和已完成重大里程碑。
+
+宿主原生记忆可以继续负责该宿主的会话召回与项目内学习；Keepygaga 只负责应当随用户跨宿主流动的少量稳定事实。
 
 公开 MCP Tool 固定为 `list`、`read`、`create`、`add`、`update`、`move`、`rename`、`delete`。
 
@@ -19,7 +29,7 @@ uv tool install keepygaga
 keepygaga install
 ```
 
-交互安装会检测可用宿主，但仍由用户选择。自动化安装必须显式列出全部目标：
+交互安装会先让用户确认或输入 Memory Root，再检测可用宿主并由用户选择。已有 `agents-memory` 记忆树可以直接接入；配置完成后，后续新增 Agent 会自动复用该目录。自动化安装必须显式列出全部目标：
 
 ```shell
 keepygaga install --yes --host codex --host claude-code
@@ -27,7 +37,7 @@ keepygaga install --yes --host codex --host claude-code
 
 当前适配 Codex、Claude Code、WorkBuddy、Grok、Hermes 与 Antigravity CLI。安装器只管理目标宿主的 `keepygaga` MCP 注册、Keepygaga 托管的 Agent Contract 块和 Hook 条目，保留其他配置。
 
-默认配置与记忆目录使用各平台原生路径。首次安装如需复用已有私有记忆树，可传入 `--memory-root`；不要把记忆树放进公开或自动发布目录。
+默认配置与记忆目录使用各平台原生路径。非交互首次安装如需复用已有私有记忆树，可传入 `--memory-root`；不要把记忆树放进公开或自动发布目录。
 
 ## 运维
 
