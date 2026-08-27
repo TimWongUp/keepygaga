@@ -18,6 +18,18 @@ from keepygaga.host_common import HostSetupError
 from keepygaga.memory import initialize_memory_tree
 
 
+def _commands(value: object) -> list[str]:
+    if isinstance(value, dict):
+        direct = value.get("command")
+        found = [direct] if isinstance(direct, str) else []
+        return found + [
+            command for nested in value.values() for command in _commands(nested)
+        ]
+    if isinstance(value, list):
+        return [command for nested in value for command in _commands(nested)]
+    return []
+
+
 def test_builtin_fragment_is_idempotent_and_preserves_unrelated(tmp_path: Path) -> None:
     fragment = build_fragment(
         "codex",
@@ -36,11 +48,12 @@ def test_builtin_fragment_is_idempotent_and_preserves_unrelated(tmp_path: Path) 
 
     assert second == first
     assert second["unrelated"] is True
-    rendered = json.dumps(second)
-    assert "other-hook" in rendered
-    assert "hook run context" in rendered
-    assert "hook run route" in rendered
-    assert "hook run closeout" in rendered
+    commands = _commands(second)
+    assert "other-hook" in commands
+    normalized = [command.replace('"', "") for command in commands]
+    assert any("hook run context" in command for command in normalized)
+    assert any("hook run route" in command for command in normalized)
+    assert any("hook run closeout" in command for command in normalized)
 
 
 def test_builtin_fragment_replaces_entries_after_launcher_and_config_move(
@@ -59,11 +72,11 @@ def test_builtin_fragment_replaces_entries_after_launcher_and_config_move(
 
     installed = merge_hook_fragment({}, old_fragment)
     migrated = merge_hook_fragment(installed, new_fragment)
-    rendered = json.dumps(migrated)
+    commands = _commands(migrated)
 
-    assert str(tmp_path / "old") not in rendered
-    assert rendered.count("--owner=keepygaga-hook-v1") == 5
-    assert str(tmp_path / "new" / "keepygaga") in rendered
+    assert all(str(tmp_path / "old") not in command for command in commands)
+    assert sum(command.count("--owner=keepygaga-hook-v1") for command in commands) == 5
+    assert any(str(tmp_path / "new" / "keepygaga") in command for command in commands)
 
 
 def test_hook_merge_preserves_unrelated_generic_command(tmp_path: Path) -> None:
@@ -114,9 +127,8 @@ def test_hook_merge_preserves_legacy_looking_third_party_command(
     }
 
     merged = merge_hook_fragment(existing, fragment)
-    rendered = json.dumps(merged)
 
-    assert all(command in rendered for command in commands)
+    assert all(command in _commands(merged) for command in commands)
 
 
 def test_hook_merge_preserves_owner_lookalike_commands(tmp_path: Path) -> None:
@@ -200,7 +212,9 @@ def test_context_bootstrap_contains_home_pages_and_catalog(tmp_path: Path) -> No
     memory_root = tmp_path / "agents-memory"
     initialize_memory_tree(memory_root, MemoryFilesConfig(root=str(memory_root)))
     config = tmp_path / "config.toml"
-    config.write_text(f'[memory]\nroot = "{memory_root}"\n', encoding="utf-8")
+    config.write_text(
+        f"[memory]\nroot = {json.dumps(str(memory_root))}\n", encoding="utf-8"
+    )
 
     rendered = context.load_bootstrap(config)
 

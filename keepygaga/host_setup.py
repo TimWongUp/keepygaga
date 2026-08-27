@@ -679,6 +679,7 @@ def _run_hook_smoke(plan: CodexHookPlan) -> None:
             command,
             check=False,
             capture_output=True,
+            input="{}",
             text=True,
             env=smoke_environment,
             timeout=15,
@@ -770,7 +771,6 @@ def reconcile_codex_hooks(
         hook_config_path=hook_config_path,
     )
     return _apply_codex_hooks_plan(plan)
-
 
 
 def _resolve_codex_home(codex_home: Path | None, *, create: bool) -> Path:
@@ -945,7 +945,9 @@ def _prepare_codex_hook_strip(
         merger = merge_hook_fragment
     else:
         if runtime_root is None or hook_python is None:
-            raise HostSetupError("hook runtime and hook Python must be supplied together")
+            raise HostSetupError(
+                "hook runtime and hook Python must be supplied together"
+            )
         selected_runtime, selected_python, rendered, merger = _load_codex_hook_fragment(
             runtime_root, hook_python
         )
@@ -1037,9 +1039,7 @@ def _prepare_codex_rules_removal(
     target, original, existing = _select_codex_rules_candidate(codex_home)
     if original is None:
         return target, None, b""
-    removed = remove_managed_contract(
-        existing, source=str(target), legacy=legacy
-    )
+    removed = remove_managed_contract(existing, source=str(target), legacy=legacy)
     verified_target, verified_original, verified_existing = (
         _select_codex_rules_candidate(codex_home)
     )
@@ -1062,9 +1062,7 @@ def _apply_codex_rules_removal(
             path=str(target),
             reason="global rules file was not found",
         )
-    status, backup = _atomic_write(
-        target, content, expected_original=original
-    )
+    status, backup = _atomic_write(target, content, expected_original=original)
     return _json_result(status, path=str(target), backup=backup)
 
 
@@ -1140,7 +1138,9 @@ def _apply_codex_mcp_removal(plan: CodexMcpPlan) -> dict[str, object]:
             raise HostSetupError("Keepygaga MCP registration changed after preflight")
         if "No MCP server named" not in f"{current.stderr}\n{current.stdout}":
             detail = (
-                current.stderr.strip() or current.stdout.strip() or "unknown Codex error"
+                current.stderr.strip()
+                or current.stdout.strip()
+                or "unknown Codex error"
             )
             raise HostSetupError(
                 f"Codex MCP registration could not be re-read: {detail}"
@@ -1160,7 +1160,9 @@ def _apply_codex_mcp_removal(plan: CodexMcpPlan) -> dict[str, object]:
         ["mcp", "remove", "keepygaga"],
     )
     if removed.returncode != 0:
-        detail = removed.stderr.strip() or removed.stdout.strip() or "unknown Codex error"
+        detail = (
+            removed.stderr.strip() or removed.stdout.strip() or "unknown Codex error"
+        )
         raise HostSetupError(f"Codex MCP removal failed: {detail}")
     recovery: dict[str, object] = (
         {
