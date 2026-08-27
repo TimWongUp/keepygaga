@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from keepygaga import cli, host_adapters
+from keepygaga import cli, host_adapters, installer
 from keepygaga.host_common import HostSetupPartialError
 
 
@@ -158,6 +158,136 @@ def test_host_setup_partial_error_is_rendered_as_json(
         "message": "simulated partial write",
         "components": {"mcp": {"status": "applied"}},
     }
+
+
+def test_interactive_install_prompts_for_existing_memory_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_path = tmp_path / "keepygaga.toml"
+    memory_root = tmp_path / "vault" / "agents-memory"
+    received: dict[str, object] = {}
+
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda _prompt: str(memory_root))
+    monkeypatch.setattr(
+        installer,
+        "install",
+        lambda config, root, hosts: received.update(
+            config=config, root=root, hosts=hosts
+        )
+        or {"status": "no_op"},
+    )
+
+    assert (
+        cli.main(
+            [
+                "--config",
+                str(config_path),
+                "install",
+                "--host",
+                "codex",
+            ]
+        )
+        == 0
+    )
+    assert received == {
+        "config": config_path.resolve(),
+        "root": memory_root.resolve(),
+        "hosts": ["codex"],
+    }
+
+
+def test_install_reuses_configured_memory_root_for_a_new_host(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_path = tmp_path / "keepygaga.toml"
+    memory_root = tmp_path / "vault" / "agents-memory"
+    config_path.write_text(
+        f'[memory]\nroot = "{memory_root.as_posix()}"\n',
+        encoding="utf-8",
+    )
+    received: dict[str, object] = {}
+    monkeypatch.setattr(
+        installer,
+        "install",
+        lambda config, root, hosts: received.update(
+            config=config, root=root, hosts=hosts
+        )
+        or {"status": "no_op"},
+    )
+
+    assert (
+        cli.main(
+            [
+                "--config",
+                str(config_path),
+                "install",
+                "--yes",
+                "--host",
+                "claude-code",
+            ]
+        )
+        == 0
+    )
+    assert received == {
+        "config": config_path.resolve(),
+        "root": memory_root.resolve(),
+        "hosts": ["claude-code"],
+    }
+
+
+def test_noninteractive_install_validates_yes_before_reading_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_path = tmp_path / "keepygaga.toml"
+    config_path.write_text("not toml [", encoding="utf-8")
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
+
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main(
+            [
+                "--config",
+                str(config_path),
+                "install",
+                "--host",
+                "codex",
+            ]
+        )
+
+    assert exc_info.value.code == 2
+
+
+def test_install_rejects_explicit_root_different_from_configured_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    config_path = tmp_path / "keepygaga.toml"
+    configured_root = tmp_path / "configured-memory"
+    requested_root = tmp_path / "different-memory"
+    config_path.write_text(
+        f'[memory]\nroot = "{configured_root.as_posix()}"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
+
+    assert (
+        cli.main(
+            [
+                "--config",
+                str(config_path),
+                "install",
+                "--yes",
+                "--host",
+                "codex",
+                "--memory-root",
+                str(requested_root),
+            ]
+        )
+        == 1
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "invalid_source"
+    assert "differs from requested" in payload["message"]
+    assert not requested_root.exists()
 
 
 def test_host_setup_dispatches_antigravity(

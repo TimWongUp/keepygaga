@@ -174,6 +174,21 @@ def _interactive_hosts() -> list[str]:
     return list(dict.fromkeys(selected))
 
 
+def _configured_memory_root(config_path: Path) -> Path | None:
+    try:
+        configured = load_config(config_path)
+    except Exception as exc:
+        raise ValueError(f"configuration could not be loaded: {exc}") from exc
+    if not configured.memory.root.strip():
+        return None
+    return Path(configured.memory.root).expanduser().resolve()
+
+
+def _interactive_memory_root(default: Path) -> Path:
+    raw = input(f"Memory Root [{default}]: ").strip()
+    return Path(raw).expanduser().resolve() if raw else default
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
@@ -191,18 +206,25 @@ def main(argv: list[str] | None = None) -> int:
 
         try:
             if args.command == "install":
-                hosts = args.hosts or (
-                    _interactive_hosts() if sys.stdin.isatty() else []
-                )
-                if not args.yes and not sys.stdin.isatty():
+                interactive = sys.stdin.isatty()
+                if not args.yes and not interactive:
                     parser.error(
                         "non-interactive install requires --yes and explicit --host"
                     )
-                memory_root = (
-                    args.memory_root.expanduser().resolve()
-                    if args.memory_root
-                    else installer.default_memory_root().resolve()
-                )
+                configured_root = _configured_memory_root(config_path)
+                if args.memory_root:
+                    memory_root = args.memory_root.expanduser().resolve()
+                elif configured_root is not None:
+                    memory_root = configured_root
+                    if interactive:
+                        print(f"Using configured Memory Root: {memory_root}")
+                elif interactive:
+                    memory_root = _interactive_memory_root(
+                        installer.default_memory_root().resolve()
+                    )
+                else:
+                    memory_root = installer.default_memory_root().resolve()
+                hosts = args.hosts or (_interactive_hosts() if interactive else [])
                 payload = installer.install(config_path, memory_root, hosts)
             elif args.command == "status":
                 payload = installer.status(config_path)
