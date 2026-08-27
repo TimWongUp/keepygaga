@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "keepygaga"
-version = "0.3.0"
+dynamic = ["version"]
 description = "A warm, local-first keeper of memories for AI agents."
 readme = "README.md"
 license = "MIT"
@@ -44,7 +44,13 @@ Issues = "https://github.com/TimWongUp/keepygaga/issues"
 Repository = "https://github.com/TimWongUp/keepygaga"
 
 [tool.setuptools.packages.find]
-include = ["keepygaga*"]
+include = ["keepygaga", "keepygaga.*"]
+
+[tool.setuptools.package-data]
+keepygaga = ["mcp_instructions.md"]
+
+[tool.setuptools.dynamic]
+version = { attr = "keepygaga.version.APPLICATION_VERSION" }
 
 [tool.setuptools.data-files]
 "share/keepygaga" = [

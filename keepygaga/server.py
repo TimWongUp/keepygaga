@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from importlib.resources import files
 from pathlib import Path
 from typing import Any, cast
 
@@ -83,7 +84,12 @@ class StrictFastMCP(FastMCP):
         _close_registered_tool(self, name or fn.__name__)
 
 
-mcp = StrictFastMCP("Keepygaga")
+
+def _server_instructions() -> str:
+    return files("keepygaga").joinpath("mcp_instructions.md").read_text(encoding="utf-8")
+
+
+mcp = StrictFastMCP("Keepygaga", instructions=_server_instructions())
 
 
 def _with_memory_store(

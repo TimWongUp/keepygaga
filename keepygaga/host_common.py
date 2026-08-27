@@ -12,13 +12,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
-from keepygaga import __version__
 from keepygaga.config import PROJECT_ROOT, KeepygagaConfig
 from keepygaga.diagnostics import run_doctor
+from keepygaga.version import CONTRACT_VERSION
 
 START_MARKER = "<!-- KEEPYGAGA:START -->"
 END_MARKER = "<!-- KEEPYGAGA:END -->"
-VERSION_PREFIX = "<!-- KEEPYGAGA:VERSION:"
+VERSION_PREFIX = "<!-- KEEPYGAGA:CONTRACT:"
 CONTRACT_RELATIVE_PATH = Path("docs/agent-contract.md")
 LEGACY_CONTRACT_RELATIVE_PATH = Path("docs/legacy-agent-contract-v0.md")
 HOOK_MERGER_RELATIVE_PATH = Path("agent_hook_runtime/hook_config.py")
@@ -196,11 +196,12 @@ def load_canonical_contract(path: Path | None = None) -> str:
         raise HostSetupError(
             "canonical Agent Contract must contain exactly one managed block"
         )
-    version_line = f"{VERSION_PREFIX}{__version__} -->"
+    version_line = f"{VERSION_PREFIX}{CONTRACT_VERSION} -->"
     lines = block.text.splitlines()
     if lines.count(version_line) != 1:
         raise HostSetupError(
-            f"canonical Agent Contract must contain version {__version__} exactly once"
+            "canonical Agent Contract must contain contract version "
+            f"{CONTRACT_VERSION} exactly once"
         )
     if any("HASH" in line.upper() or "SHA256" in line.upper() for line in lines[:3]):
         raise HostSetupError("canonical Agent Contract must use version-only ownership")
@@ -313,10 +314,27 @@ def ensure_regular_target(path: Path) -> None:
     try:
         if path.is_symlink():
             raise HostSetupError(f"refusing symlink target: {path}")
+        is_junction = getattr(path, "is_junction", None)
+        if callable(is_junction) and is_junction():
+            raise HostSetupError(f"refusing junction target: {path}")
         if path.exists() and not path.is_file():
             raise HostSetupError(f"target is not a regular file: {path}")
     except OSError as exc:
         raise HostSetupError(f"target could not be inspected: {path}") from exc
+
+
+def ensure_safe_parent(path: Path) -> None:
+    current = path.parent
+    while current != current.parent:
+        try:
+            if current.is_symlink():
+                raise HostSetupError(f"refusing symlink parent: {current}")
+            is_junction = getattr(current, "is_junction", None)
+            if callable(is_junction) and is_junction():
+                raise HostSetupError(f"refusing junction parent: {current}")
+        except OSError as exc:
+            raise HostSetupError(f"parent could not be inspected: {current}") from exc
+        current = current.parent
 
 
 def exclusive_backup(path: Path, original: bytes) -> Path:
@@ -346,7 +364,9 @@ def atomic_write(
     *,
     expected_original: bytes | None | object = EXPECTED_ANY,
 ) -> tuple[str, str | None]:
+    ensure_safe_parent(path)
     path.parent.mkdir(parents=True, exist_ok=True)
+    ensure_safe_parent(path)
     ensure_regular_target(path)
     original = path.read_bytes() if path.exists() else None
     if expected_original is not EXPECTED_ANY and original != expected_original:

@@ -3,15 +3,16 @@ from __future__ import annotations
 import argparse
 import importlib
 import json
+import sys
 from collections.abc import Mapping
+from contextlib import suppress
 from dataclasses import dataclass
+from io import TextIOWrapper
 from pathlib import Path
 
 from keepygaga.config import PROJECT_ROOT, load_config, resolve_config_path
 from keepygaga.diagnostics import run_doctor
 from keepygaga.memory import initialize_memory_tree
-
-_HOOK_OPTIONS = {"hook_runtime", "hook_python", "hook_config"}
 
 
 @dataclass(frozen=True)
@@ -27,37 +28,37 @@ _HOST_SPECS = {
         "keepygaga.host_setup",
         "setup_codex_host",
         "uninstall_codex_host",
-        frozenset(_HOOK_OPTIONS | {"codex_home", "codex_binary"}),
+        frozenset({"codex_home", "codex_binary"}),
     ),
     "claude-code": HostCliSpec(
         "keepygaga.host_adapters",
         "setup_claude_code_host",
         "uninstall_claude_code_host",
-        frozenset(_HOOK_OPTIONS | {"host_home"}),
+        frozenset({"host_home"}),
     ),
     "workbuddy": HostCliSpec(
         "keepygaga.host_adapters",
         "setup_workbuddy_host",
         "uninstall_workbuddy_host",
-        frozenset(_HOOK_OPTIONS | {"host_home"}),
+        frozenset({"host_home"}),
     ),
     "grok": HostCliSpec(
         "keepygaga.host_adapters",
         "setup_grok_host",
         "uninstall_grok_host",
-        frozenset(_HOOK_OPTIONS | {"host_home", "grok_binary"}),
+        frozenset({"host_home", "grok_binary"}),
     ),
     "hermes": HostCliSpec(
         "keepygaga.host_adapters",
         "setup_hermes_host",
         "uninstall_hermes_host",
-        frozenset(_HOOK_OPTIONS | {"host_home"}),
+        frozenset({"host_home"}),
     ),
     "antigravity": HostCliSpec(
         "keepygaga.host_adapters",
         "setup_antigravity_host",
         "uninstall_antigravity_host",
-        frozenset(_HOOK_OPTIONS | {"host_home"}),
+        frozenset({"host_home"}),
     ),
 }
 _HOSTS = tuple(_HOST_SPECS)
@@ -66,9 +67,6 @@ _OPTION_FLAGS = {
     "codex_binary": "--codex-binary",
     "host_home": "--host-home",
     "grok_binary": "--grok-binary",
-    "hook_runtime": "--hook-runtime",
-    "hook_python": "--hook-python",
-    "hook_config": "--hook-config",
 }
 
 
@@ -96,12 +94,42 @@ def _parser() -> argparse.ArgumentParser:
     )
     commands = parser.add_subparsers(dest="command")
 
+    install = commands.add_parser("install")
+    install.add_argument("--host", action="append", choices=_HOSTS, dest="hosts")
+    install.add_argument("--memory-root", type=Path)
+    install.add_argument("--yes", action="store_true")
+
+    commands.add_parser("status")
+
+    repair = commands.add_parser("repair")
+    repair.add_argument("--yes", action="store_true")
+
+    upgrade = commands.add_parser("upgrade")
+    upgrade.add_argument("--yes", action="store_true")
+
+    uninstall = commands.add_parser("uninstall")
+    uninstall.add_argument("--host", action="append", choices=_HOSTS, dest="hosts")
+    uninstall.add_argument("--yes", action="store_true")
+
     doctor = commands.add_parser("doctor")
     doctor.add_argument("--json", action="store_true")
 
     memory = commands.add_parser("memory")
     memory_commands = memory.add_subparsers(dest="memory_command", required=True)
     memory_commands.add_parser("init")
+
+    hook = commands.add_parser("hook")
+    hook_commands = hook.add_subparsers(dest="hook_command", required=True)
+    hook_run = hook_commands.add_parser("run")
+    hook_run.add_argument("hook", choices=("context", "route", "closeout"))
+    hook_run.add_argument("--owner", choices=("keepygaga-hook-v1",))
+    hook_run.add_argument(
+        "--host",
+        required=True,
+        choices=("codex", "claude", "workbuddy", "grok", "hermes", "agy_cli"),
+    )
+    hook_run.add_argument("--event", required=True)
+    hook_run.add_argument("--compact", action="store_true")
 
     host = commands.add_parser("host")
     host_commands = host.add_subparsers(dest="host_command", required=True)
@@ -115,7 +143,35 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def _print(payload: Mapping[str, object]) -> None:
+    with suppress(AttributeError, OSError):
+        assert isinstance(sys.stdout, TextIOWrapper)
+        sys.stdout.reconfigure(encoding="utf-8")
     print(json.dumps(payload, ensure_ascii=False, indent=2))
+
+
+def _interactive_hosts() -> list[str]:
+    detected = [
+        host
+        for host, path in {
+            "codex": Path.home() / ".codex",
+            "claude-code": Path.home() / ".claude",
+            "workbuddy": Path.home() / ".workbuddy",
+            "grok": Path.home() / ".grok",
+            "hermes": Path.home() / ".hermes",
+            "antigravity": Path.home() / ".gemini",
+        }.items()
+        if path.exists()
+    ]
+    suggestions = detected or list(_HOSTS)
+    print("Detected or available Agents:")
+    for index, host in enumerate(suggestions, start=1):
+        print(f"  {index}. {host}")
+    raw = input("Select Agents by number, separated with commas: ").strip()
+    try:
+        selected = [suggestions[int(item.strip()) - 1] for item in raw.split(",")]
+    except (ValueError, IndexError) as exc:
+        raise ValueError("invalid Agent selection") from exc
+    return list(dict.fromkeys(selected))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -128,10 +184,74 @@ def main(argv: list[str] | None = None) -> int:
         _validate_host_options(args, parser)
     explicit_config = args.config.expanduser().resolve() if args.config else None
     config_path = resolve_config_path(explicit_config)
+
+    if args.command in {"install", "status", "repair", "upgrade", "uninstall"}:
+        from keepygaga import installer
+        from keepygaga.host_common import HostSetupError, HostSetupPartialError
+
+        try:
+            if args.command == "install":
+                hosts = args.hosts or (
+                    _interactive_hosts() if sys.stdin.isatty() else []
+                )
+                if not args.yes and not sys.stdin.isatty():
+                    parser.error(
+                        "non-interactive install requires --yes and explicit --host"
+                    )
+                memory_root = (
+                    args.memory_root.expanduser().resolve()
+                    if args.memory_root
+                    else installer.default_memory_root().resolve()
+                )
+                payload = installer.install(config_path, memory_root, hosts)
+            elif args.command == "status":
+                payload = installer.status(config_path)
+            elif args.command == "repair":
+                if not args.yes:
+                    parser.error("repair requires --yes")
+                payload = installer.repair(config_path)
+            elif args.command == "upgrade":
+                payload = installer.upgrade(config_path, apply=args.yes)
+            else:
+                if not args.yes:
+                    parser.error("uninstall requires --yes")
+                payload = installer.uninstall(config_path, args.hosts or [])
+        except HostSetupPartialError as exc:
+            _print(
+                {
+                    "status": "partial_commit",
+                    "message": str(exc),
+                    "components": exc.components,
+                }
+            )
+            return 1
+        except (HostSetupError, ValueError) as exc:
+            _print({"status": "invalid_source", "message": str(exc)})
+            return 1
+        _print(payload)
+        return 1 if payload.get("status") == "error" else 0
+
     if args.command == "doctor":
         payload = run_doctor(config_path, project_root=PROJECT_ROOT)
         _print(payload)
         return 1 if payload["status"] == "error" else 0
+
+    if args.command == "hook" and args.hook_command == "run":
+        from keepygaga.hooks import closeout as closeout_hook
+        from keepygaga.hooks import context as context_hook
+        from keepygaga.hooks import route as route_hook
+
+        payload = context_hook.loads_stdin(sys.stdin.read())
+        if args.hook == "context":
+            result = context_hook.run(config_path, args.host, args.event, payload)
+        elif args.hook == "route":
+            result = route_hook.run(
+                args.host, args.event, payload, compact=args.compact
+            )
+        else:
+            result = closeout_hook.run(args.host, args.event, payload)
+        _print(result)
+        return 0
 
     try:
         config = load_config(config_path)

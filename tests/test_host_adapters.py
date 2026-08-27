@@ -108,7 +108,6 @@ def test_json_host_setup_is_idempotent_and_preserves_unrelated_config(
     else:
         assert "type" not in registration
     assert registration["env"] == {
-        "CUSTOM": "preserved",
         "KEEPYGAGA_CONFIG": str(config_path),
     }
     rules = rules_path.read_text(encoding="utf-8")
@@ -125,6 +124,44 @@ def test_json_host_setup_is_idempotent_and_preserves_unrelated_config(
     assert second["status"] == "no_op"
     assert second["mcp"]["status"] == "no_op"  # type: ignore[index]
     assert second["rules"]["status"] == "no_op"  # type: ignore[index]
+
+
+@pytest.mark.parametrize(
+    ("setup", "home_name", "mcp_relative"),
+    [
+        (setup_claude_code_host, ".claude", "../.claude.json"),
+        (setup_workbuddy_host, ".workbuddy", "mcp.json"),
+        (setup_antigravity_host, ".gemini", "config/mcp_config.json"),
+    ],
+)
+def test_json_host_setup_normalizes_legacy_registration_case(
+    tmp_path: Path,
+    setup: SetupFunction,
+    home_name: str,
+    mcp_relative: str,
+) -> None:
+    config_path, config = setup_source(tmp_path)
+    home = tmp_path / home_name
+    home.mkdir()
+    mcp_path = (home / mcp_relative).resolve()
+    mcp_path.parent.mkdir(parents=True, exist_ok=True)
+    mcp_path.write_text(
+        json.dumps({"mcpServers": {"Keepygaga": {"command": "old"}}}),
+        encoding="utf-8",
+    )
+
+    setup(
+        config_path,
+        config,
+        host_home=home,
+        python=Path(sys.executable),
+    )
+
+    registrations = json.loads(mcp_path.read_text(encoding="utf-8"))["mcpServers"]
+    assert "Keepygaga" not in registrations
+    assert list(key for key in registrations if key.casefold() == "keepygaga") == [
+        "keepygaga"
+    ]
 
 
 def test_workbuddy_migrates_existing_legacy_codebuddy_registration(
@@ -880,6 +917,43 @@ def test_grok_rejects_duplicate_user_registrations(
     assert calls == [["mcp", "list", "--json"]]
 
 
+def test_grok_noop_rejects_duplicate_added_after_preflight(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_path, config = setup_source(tmp_path)
+    home = tmp_path / ".grok"
+    home.mkdir()
+    registration = {
+        "name": "keepygaga",
+        "scope": "user",
+        "enabled": True,
+        "command": str(Path(sys.executable)),
+        "args": ["-m", "keepygaga.server"],
+        "env": {"KEEPYGAGA_CONFIG": str(config_path)},
+    }
+    calls = 0
+
+    def fake_run(
+        _binary: Path, _home: Path, arguments: list[str]
+    ) -> subprocess.CompletedProcess[str]:
+        nonlocal calls
+        assert arguments == ["mcp", "list", "--json"]
+        calls += 1
+        registrations = [registration] if calls == 1 else [registration, registration]
+        return subprocess.CompletedProcess(arguments, 0, json.dumps(registrations), "")
+
+    monkeypatch.setattr(host_adapters, "_run_grok", fake_run)
+
+    with pytest.raises(HostSetupError, match="duplicate"):
+        setup_grok_host(
+            config_path,
+            config,
+            host_home=home,
+            python=Path(sys.executable),
+            grok_binary=Path(sys.executable),
+        )
+
+
 def test_grok_rejects_managed_blocks_in_both_rules_candidates(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1133,11 +1207,24 @@ def test_hermes_rejects_malformed_yaml_before_writing_rules(tmp_path: Path) -> N
     assert config_file.read_text(encoding="utf-8") == original
     assert not (home / "SOUL.md").exists()
 
+
 @pytest.mark.parametrize(
     ("setup", "uninstall", "home_name", "mcp_relative", "rules_relative"),
     [
-        (setup_claude_code_host, uninstall_claude_code_host, ".claude", "../.claude.json", "CLAUDE.md"),
-        (setup_workbuddy_host, uninstall_workbuddy_host, ".workbuddy", "mcp.json", "CODEBUDDY.md"),
+        (
+            setup_claude_code_host,
+            uninstall_claude_code_host,
+            ".claude",
+            "../.claude.json",
+            "CLAUDE.md",
+        ),
+        (
+            setup_workbuddy_host,
+            uninstall_workbuddy_host,
+            ".workbuddy",
+            "mcp.json",
+            "CODEBUDDY.md",
+        ),
         (
             setup_antigravity_host,
             uninstall_antigravity_host,
@@ -1362,9 +1449,7 @@ def test_hermes_uninstall_removes_mcp_and_soul_block(tmp_path: Path) -> None:
     )
     (home / "SOUL.md").write_text("# Existing personality\n", encoding="utf-8")
 
-    setup_hermes_host(
-        config_path, config, host_home=home, python=Path(sys.executable)
-    )
+    setup_hermes_host(config_path, config, host_home=home, python=Path(sys.executable))
     first = uninstall_hermes_host(
         config_path, config, host_home=home, python=Path(sys.executable)
     )
@@ -1377,12 +1462,15 @@ def test_hermes_uninstall_removes_mcp_and_soul_block(tmp_path: Path) -> None:
     assert second["status"] == "no_op"
     assert loaded["model"] == "existing"
     assert loaded["mcp_servers"] == {"other": {"command": "other"}}
-    assert (home / "config.yaml").read_text(encoding="utf-8").startswith(
-        "# keep this comment\n"
+    assert (
+        (home / "config.yaml")
+        .read_text(encoding="utf-8")
+        .startswith("# keep this comment\n")
     )
     soul = (home / "SOUL.md").read_text(encoding="utf-8")
     assert soul.startswith("# Existing personality\n")
     assert "KEEPYGAGA:START" not in soul
+
 
 def test_json_host_uninstall_clears_disabled_keepygaga_without_servers(
     tmp_path: Path,
@@ -1426,6 +1514,7 @@ def test_grok_uninstall_is_noop_when_home_is_missing(
     assert result["status"] == "no_op"
     assert not home.exists()
 
+
 def test_workbuddy_uninstall_skips_rewrite_when_no_owned_hooks(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1464,6 +1553,7 @@ def test_workbuddy_uninstall_skips_rewrite_when_no_owned_hooks(
     assert settings.read_text(encoding="utf-8") == original
     assert not runtime_config.exists()
 
+
 def test_workbuddy_uninstall_skips_rewrite_when_hooks_target_is_absent(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1489,6 +1579,7 @@ def test_workbuddy_uninstall_skips_rewrite_when_hooks_target_is_absent(
 
     assert result["hooks"]["status"] == "no_op"  # type: ignore[index]
     assert settings.read_text(encoding="utf-8") == original
+
 
 def test_hermes_uninstall_skips_empty_hooks_target(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch

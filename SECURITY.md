@@ -2,13 +2,13 @@
 
 ## Supported versions
 
-Until Keepygaga reaches 1.0, security fixes are provided only for an unmodified
-checkout at the latest commit on the upstream `main` branch.
+Until Keepygaga reaches 1.0, security fixes are provided for the latest
+published release.
 
-| Source revision | Supported |
+| Release | Supported |
 | --- | --- |
-| Latest unmodified upstream `main` checkout | Yes |
-| Older commits, tags, forks, or locally modified checkouts | No |
+| Latest GitHub/PyPI release | Yes |
+| Older releases, development snapshots, forks, or local modifications | No |
 
 ## Reporting a vulnerability
 
@@ -18,7 +18,7 @@ open a public issue for a suspected vulnerability.
 
 Please include:
 
-- the exact affected commit SHA, plus the version if known;
+- the exact affected version and install channel;
 - the impact and conditions required to reproduce the issue;
 - minimal, sanitized reproduction steps;
 - any suggested mitigation, if known.
