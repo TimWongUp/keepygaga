@@ -510,7 +510,7 @@ def _prepare_codex_hooks(
             hook_config_original=None,
             hook_config_content=b"",
             memory_root=memory_root,
-            selected_python=Path(sys.executable).resolve(),
+            selected_python=Path(os.path.abspath(sys.executable)),
             selected_runtime=launcher,
             merged=merged,
             builtin=True,
@@ -656,7 +656,9 @@ def _run_hook_smoke(plan: CodexHookPlan) -> None:
         smoke_environment["AGENT_HOOK_RUNTIME_CONFIG"] = str(plan.hook_config_path)
     command = (
         [
-            str(plan.selected_runtime),
+            str(plan.selected_python),
+            "-m",
+            "keepygaga.cli",
             "--config",
             str(plan.config_path),
             "hook",
@@ -686,12 +688,20 @@ def _run_hook_smoke(plan: CodexHookPlan) -> None:
         )
     except (OSError, subprocess.SubprocessError) as exc:
         raise HostSetupError(f"Codex context Hook smoke could not run: {exc}") from exc
+    if smoke.returncode != 0:
+        detail = smoke.stderr.strip()[:500]
+        suffix = f": {detail}" if detail else ""
+        raise HostSetupError(f"Codex context Hook smoke failed{suffix}")
     try:
         smoke_payload = json.loads(smoke.stdout)
     except json.JSONDecodeError as exc:
-        raise HostSetupError("Codex context Hook smoke returned invalid JSON") from exc
-    if smoke.returncode != 0 or not isinstance(smoke_payload, dict):
-        raise HostSetupError("Codex context Hook smoke failed")
+        detail = smoke.stderr.strip()[:500]
+        suffix = f": {detail}" if detail else ""
+        raise HostSetupError(
+            f"Codex context Hook smoke returned invalid JSON{suffix}"
+        ) from exc
+    if not isinstance(smoke_payload, dict):
+        raise HostSetupError("Codex context Hook smoke returned a non-object")
 
 
 def _apply_codex_hooks_plan(plan: CodexHookPlan) -> dict[str, object]:
