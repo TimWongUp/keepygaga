@@ -52,6 +52,18 @@ _Avoid_: 已支持、已验证
 已在目标宿主的真实 MCP Tool 清单或官方诊断命令中确认当前安装生效的宿主；验证结论只覆盖所记录的宿主版本与环境。
 _Avoid_: 仅写入成功、仅临时目录通过
 
+**语义 Hook（Semantic Hook）**：
+Keepygaga 自身拥有的 Context Bootstrap、Memory Route 与 Memory Closeout 能力；宿主适配器只负责把能力投影为原生事件和 payload。
+_Avoid_: 外部 Hook Runtime、宿主事件名本身
+
+**安装状态（Install State）**：
+用于发现已选择宿主、安装渠道和协议版本的本机观察性记录；live 配置与官方诊断始终优先。
+_Avoid_: 配置真源、宿主注册 Authority
+
+**稳定启动器（Stable Launcher）**：
+随已发布包安装、供宿主长期注册的 `keepygaga-mcp` 与 `keepygaga hook run` 入口。
+_Avoid_: checkout 专属 Python 路径、源码目录
+
 **项目索引（Project Index）**：
 存于直属 `areas/` 页面、用于跨任务定位持续项目并了解重大进展的简短记录。它只包含项目存放位置与已完成的重大里程碑；项目详情、计划与当前状态仍由项目 Authority 或直接真源裁决。
 _Avoid_: 状态仪表板、项目日志、项目 Authority 副本

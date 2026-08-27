@@ -1,14 +1,38 @@
 from __future__ import annotations
 
 import os
+import sys
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_CONFIG_PATH = PROJECT_ROOT / "keepygaga.toml"
 CONFIG_ENV_VAR = "KEEPYGAGA_CONFIG"
+
+
+def _default_config_path() -> Path:
+    if os.name == "nt":
+        raw = os.environ.get("APPDATA", "").strip()
+        return (
+            Path(raw).expanduser() / "Keepygaga" / "config.toml"
+            if raw
+            else PROJECT_ROOT / "keepygaga.toml"
+        )
+    if sys.platform == "darwin":
+        return (
+            Path.home()
+            / "Library"
+            / "Application Support"
+            / "Keepygaga"
+            / "config.toml"
+        )
+    raw = os.environ.get("XDG_CONFIG_HOME", "").strip()
+    base = Path(raw).expanduser() if raw else Path.home() / ".config"
+    return base / "keepygaga" / "config.toml"
+
+
+DEFAULT_CONFIG_PATH = _default_config_path()
 
 
 @dataclass

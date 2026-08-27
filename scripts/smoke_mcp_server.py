@@ -91,6 +91,7 @@ root = "{memory_root.as_posix()}"
             async with stdio_client(parameters) as (read_stream, write_stream):
                 async with ClientSession(read_stream, write_stream) as session:
                     initialized_server = await session.initialize()
+                    instructions = initialized_server.instructions or ""
                     listed = await session.list_tools()
                     tool_names = sorted(tool.name for tool in listed.tools)
                     catalog = _payload(
@@ -168,6 +169,8 @@ root = "{memory_root.as_posix()}"
         status = (
             "ok"
             if set(tool_names) == REQUIRED_TOOLS
+            and "Page Snapshot" in instructions
+            and "Fact convergence" in instructions
             and catalog.get("status") == "ok"
             and read.get("status") == "ok"
             and added.get("status") == "applied"
@@ -180,6 +183,7 @@ root = "{memory_root.as_posix()}"
             "status": status,
             "server": initialized_server.serverInfo.name,
             "protocol_version": initialized_server.protocolVersion,
+            "instructions": "ok",
             "tool_count": len(tool_names),
             "tools": tool_names,
             "memory_status": updated.get("status"),

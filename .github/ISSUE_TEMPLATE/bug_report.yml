@@ -47,9 +47,9 @@ body:
     id: environment
     attributes:
       label: Environment
-      description: Include the exact Keepygaga commit SHA, OS, Python version, and MCP host.
+      description: Include the exact Keepygaga version, install channel, OS, Python version, and MCP host.
       placeholder: |
-        Commit: 0123456789abcdef0123456789abcdef01234567
+        Keepygaga: 0.4.0 (uv tool)
         OS: Ubuntu 24.04
         Python: 3.12.x
         MCP host: ...

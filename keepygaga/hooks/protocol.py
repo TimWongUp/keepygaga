@@ -1,0 +1,69 @@
+"""Model-visible payload shapes for supported Agent hook hosts."""
+
+from __future__ import annotations
+
+from typing import Literal
+
+Capability = Literal["bootstrap", "route", "closeout"]
+
+_PAYLOAD_KINDS: dict[Capability, dict[str, str]] = {
+    "bootstrap": {
+        "codex": "hook_specific",
+        "claude": "hook_specific",
+        "workbuddy": "hook_specific",
+        "agy_cli": "inject_steps",
+        "hermes": "context",
+    },
+    "route": {
+        "codex": "hook_specific",
+        "claude": "hook_specific",
+        "workbuddy": "hook_specific",
+        "agy_cli": "inject_steps",
+        "hermes": "context",
+    },
+    "closeout": {
+        "codex": "hook_specific",
+        "claude": "hook_specific",
+        "workbuddy": "hook_specific",
+        "grok": "hook_specific",
+        "hermes": "context",
+    },
+}
+
+_CLOSEOUT_EVENTS = {
+    "codex": "PostToolUse",
+    "claude": "PostToolUse",
+    "workbuddy": "PostToolUse",
+    "grok": "Stop",
+}
+
+
+def additional_context_payload(
+    platform: str,
+    event: str,
+    context: str,
+    *,
+    capability: Capability,
+) -> dict[str, object]:
+    kind = _PAYLOAD_KINDS[capability].get(platform)
+    if kind == "hook_specific":
+        return {
+            "hookSpecificOutput": {
+                "hookEventName": event,
+                "additionalContext": context,
+            }
+        }
+    if kind == "inject_steps":
+        return {"injectSteps": [{"ephemeralMessage": context}]}
+    if kind == "context":
+        return {"context": context}
+    return {}
+
+
+def closeout_payload(platform: str, context: str) -> dict[str, object]:
+    return additional_context_payload(
+        platform,
+        _CLOSEOUT_EVENTS.get(platform, ""),
+        context,
+        capability="closeout",
+    )

@@ -8,15 +8,16 @@ from pathlib import Path
 
 import pytest
 
-from keepygaga import __version__, host_common, host_setup
+from keepygaga import host_common, host_setup
 from keepygaga.config import KeepygagaConfig, MemoryFilesConfig
 from keepygaga.host_setup import HostSetupError
+from keepygaga.version import CONTRACT_VERSION
 
 
 def canonical() -> str:
     return (
         "<!-- KEEPYGAGA:START -->\n"
-        f"<!-- KEEPYGAGA:VERSION:{__version__} -->\n"
+        f"<!-- KEEPYGAGA:CONTRACT:{CONTRACT_VERSION} -->\n"
         "# Contract\n"
         "<!-- KEEPYGAGA:END -->\n"
     )
@@ -48,10 +49,10 @@ def minimal_hook_runtime(tmp_path: Path) -> tuple[Path, Path]:
     return runtime, Path(sys.executable)
 
 
-def test_canonical_contract_uses_version_only() -> None:
+def test_canonical_contract_uses_independent_contract_version() -> None:
     contract = host_setup.load_canonical_contract()
 
-    assert f"<!-- KEEPYGAGA:VERSION:{__version__} -->" in contract
+    assert f"<!-- KEEPYGAGA:CONTRACT:{CONTRACT_VERSION} -->" in contract
     assert "KEEPYGAGA:HASH" not in contract
     assert "SHA256" not in contract.upper()
 
@@ -63,25 +64,13 @@ def test_host_setup_preserves_public_common_symbols() -> None:
     )
 
 
-def test_canonical_contract_carries_agent_only_memory_policy() -> None:
+def test_canonical_contract_is_short_and_delegates_full_protocol() -> None:
     contract = host_setup.load_canonical_contract()
 
-    assert "a matching injected version makes each home page" in contract
-    assert "Page paths must come from the current Route Catalog" in contract
-    assert "an applied mutation's `files`" in contract
-    assert "After `write_conflict`, reclassify against `latest`" in contract
-    assert "Route Catalog descriptions and aliases" in contract
-    assert "clear owning page" in contract
-    assert "Add new Profile Facts only from the user's current explicit statements" in contract
-    assert "current visible context already contains repeated direct evidence" in contract
-    assert "project affiliations and project roles" in contract
-    assert "at most one mutation per home page per task" in contract
-    assert "ensure the Page Snapshot includes the current capacity signal" in contract
-    assert "explicit current-turn user authorization" in contract
-    assert "Fixed home pages cannot be renamed or deleted as pages" in contract
-    assert "Core-memory links may use Obsidian wikilinks" in contract
-    assert "The raw tools are exactly" not in contract
-    assert "The Store rejects repeated operations" not in contract
+    assert "MCP initialize instructions" in contract
+    assert "current Page Snapshot" in contract
+    assert "explicit current-turn user request" in contract
+    assert len(contract.splitlines()) < 20
 
 
 def test_merge_appends_first_block_without_changing_existing_bytes() -> None:
@@ -522,7 +511,6 @@ def test_mcp_registration_replaces_and_verifies_drift(
             "args": ["-m", "keepygaga.server"],
             "env": {
                 "KEEPYGAGA_CONFIG": str(config),
-                "KEEP_EXISTING": "1",
             },
             "env_vars": [],
             "cwd": None,
@@ -559,7 +547,7 @@ def test_mcp_registration_replaces_and_verifies_drift(
         "[mcp_servers.keepygaga]\n"
     )
     assert calls[1][:4] == ["mcp", "add", "keepygaga", "--env"]
-    assert "KEEP_EXISTING=1" in calls[1]
+    assert all("KEEP_EXISTING" not in argument for argument in calls[1])
     assert calls[2] == ["mcp", "get", "keepygaga", "--json"]
 
 
@@ -1130,7 +1118,7 @@ def test_setup_accepts_dynamic_page_limit_warning(
         config_path, config, codex_home=tmp_path / ".codex"
     )
 
-    assert result["status"] == "no_op"
+    assert result["status"] == "applied"
     assert result["doctor"] == "warning"
 
 
@@ -1243,13 +1231,23 @@ def test_setup_accepts_valid_soft_limit_warning(
         config_path, config, codex_home=tmp_path / ".codex"
     )
 
-    assert result["status"] == "no_op"
+    assert result["status"] == "applied"
     assert result["doctor"] == "warning"
 
 
-def test_setup_rejects_incomplete_hook_selection_before_writes(tmp_path: Path) -> None:
-    config = KeepygagaConfig(MemoryFilesConfig(root=str(tmp_path / "memory")))
+def test_setup_rejects_incomplete_hook_selection_before_writes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    memory_root = tmp_path / "memory"
+    memory_root.mkdir()
+    config = KeepygagaConfig(MemoryFilesConfig(root=str(memory_root)))
     codex_home = tmp_path / ".codex"
+
+    monkeypatch.setattr(
+        host_setup,
+        "validate_host_source",
+        lambda *_args, **_kwargs: (memory_root, {"status": "ok"}),
+    )
 
     with pytest.raises(HostSetupError, match="supplied together"):
         host_setup.setup_codex_host(
@@ -1677,7 +1675,7 @@ def test_uninstall_codex_does_not_require_doctor(
     assert isinstance(hooks, dict)
     assert rules["status"] == "applied"
     assert (home / "AGENTS.md").read_text(encoding="utf-8") == "# Existing\n"
-    assert hooks["status"] == "skipped"
+    assert hooks["status"] == "no_op"
 
 def test_uninstall_codex_refuses_corrupt_rules_before_writes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch

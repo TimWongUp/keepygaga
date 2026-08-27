@@ -79,10 +79,10 @@ def test_host_setup_rejects_options_for_another_host(arguments: list[str]) -> No
     "arguments",
     [
         ["host", "setup", "--host-home", "/tmp/host", "workbuddy"],
-        ["host", "setup", "--hook-runtime", "/tmp/runtime", "codex"],
+        ["host", "setup", "--codex-home", "/tmp/codex", "codex"],
         ["host", "setup", "--grok-binary", "/tmp/grok", "grok"],
         ["host", "uninstall", "--host-home", "/tmp/host", "workbuddy"],
-        ["host", "uninstall", "--hook-runtime", "/tmp/runtime", "codex"],
+        ["host", "uninstall", "--codex-home", "/tmp/codex", "codex"],
         ["host", "uninstall", "--grok-binary", "/tmp/grok", "grok"],
     ],
 )
@@ -105,10 +105,6 @@ def test_options_before_host_reach_selected_setup(
 
     monkeypatch.setattr(host_adapters, "setup_workbuddy_host", fake_setup)
     host_home = tmp_path / ".workbuddy"
-    hook_runtime = tmp_path / "runtime"
-    hook_python = tmp_path / "python"
-    hook_config = tmp_path / "hook-config.json"
-
     assert (
         cli.main(
             [
@@ -118,12 +114,6 @@ def test_options_before_host_reach_selected_setup(
                 "setup",
                 "--host-home",
                 str(host_home),
-                "--hook-runtime",
-                str(hook_runtime),
-                "--hook-python",
-                str(hook_python),
-                "--hook-config",
-                str(hook_config),
                 "workbuddy",
             ]
         )
@@ -131,9 +121,6 @@ def test_options_before_host_reach_selected_setup(
     )
     assert received == {
         "host_home": host_home,
-        "hook_runtime": hook_runtime,
-        "hook_python": hook_python,
-        "hook_config_path": hook_config,
     }
     assert json.loads(capsys.readouterr().out)["status"] == "no_op"
 
