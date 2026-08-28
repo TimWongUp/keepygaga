@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -338,3 +341,40 @@ def test_windows_hook_path_rejects_environment_expansion(
         assert "unsafe shell characters" in str(exc)
     else:
         raise AssertionError("expected unsafe Windows path rejection")
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows command shell regression")
+def test_windows_codex_command_executes_through_command_shell(tmp_path: Path) -> None:
+    launcher_value = shutil.which("keepygaga")
+    assert launcher_value is not None
+    launcher = Path(launcher_value).resolve()
+    assert " " not in str(launcher)
+
+    memory_root = tmp_path / "中文 memory root" / "agents-memory"
+    initialize_memory_tree(memory_root, MemoryFilesConfig(root=str(memory_root)))
+    config_path = tmp_path / "config with spaces" / "keepygaga.toml"
+    config_path.parent.mkdir()
+    config_path.write_text(
+        f"[memory]\nroot = {json.dumps(str(memory_root))}\n", encoding="utf-8"
+    )
+    fragment = build_fragment(
+        "codex", launcher=launcher, config_path=config_path.resolve()
+    )
+    command = fragment["payload"]["SessionStart"][0]["hooks"][0]["command"]
+
+    completed = subprocess.run(
+        command,
+        shell=True,
+        check=False,
+        capture_output=True,
+        encoding="utf-8",
+        input=json.dumps({"session_id": "windows-command-smoke"}),
+        timeout=15,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads(completed.stdout)
+    assert payload["hookSpecificOutput"]["hookEventName"] == "SessionStart"
+    assert "<keepygaga-bootstrap>" in payload["hookSpecificOutput"][
+        "additionalContext"
+    ]
