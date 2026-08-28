@@ -7,7 +7,25 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
+  release-policy:
+    runs-on: ubuntu-latest
+    outputs:
+      publish-pypi: ${{ steps.policy.outputs.publish-pypi }}
+    steps:
+      - name: Evaluate release policy
+        id: policy
+        env:
+          PYPI_PUBLISH_ENABLED: ${{ vars.PYPI_PUBLISH_ENABLED }}
+        run: |
+          if [ "$PYPI_PUBLISH_ENABLED" = "true" ]; then
+            echo "publish-pypi=enabled" >> "$GITHUB_OUTPUT"
+          fi
+
   build:
     runs-on: ubuntu-latest
     steps:
@@ -38,13 +56,50 @@ jobs:
         with:
           name: distributions
           path: dist
-      - name: Create GitHub Release
-        run: gh release create "$GITHUB_REF_NAME" dist/* --generate-notes
+      - name: Create or resume GitHub Release
+        run: |
+          asset_exists() {
+            gh release view "$GITHUB_REF_NAME" --json assets --jq '.assets[].name' \
+              | grep -Fqx "$1"
+          }
+
+          if ! gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release create "$GITHUB_REF_NAME" --draft --generate-notes --verify-tag
+          fi
+
+          for asset in dist/keepygaga-*; do
+            if ! asset_exists "${asset##*/}"; then
+              gh release upload "$GITHUB_REF_NAME" "$asset"
+            fi
+          done
+
+          verify_dir="$(mktemp -d)"
+          trap 'rm -rf "$verify_dir"' EXIT
+          gh release download "$GITHUB_REF_NAME" --pattern 'keepygaga-*' --dir "$verify_dir"
+          (
+            cd "$verify_dir"
+            sha256sum keepygaga-* > SHA256SUMS
+          )
+
+          if asset_exists SHA256SUMS; then
+            mkdir "$verify_dir/existing"
+            gh release download "$GITHUB_REF_NAME" --pattern SHA256SUMS \
+              --dir "$verify_dir/existing"
+            cmp "$verify_dir/SHA256SUMS" "$verify_dir/existing/SHA256SUMS"
+          else
+            gh release upload "$GITHUB_REF_NAME" "$verify_dir/SHA256SUMS"
+          fi
+
+          if [ "$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq '.isDraft')" = "true" ]; then
+            gh release edit "$GITHUB_REF_NAME" --draft=false
+          fi
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
 
   pypi:
-    needs: build
+    if: ${{ needs.release-policy.outputs.publish-pypi == 'enabled' }}
+    needs: [build, release-policy]
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
