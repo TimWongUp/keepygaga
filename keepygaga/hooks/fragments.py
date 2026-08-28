@@ -25,6 +25,12 @@ def _quote(value: str) -> str:
     return f'"{value}"' if os.name == "nt" else shlex.quote(value)
 
 
+def _quote_launcher(value: str) -> str:
+    if os.name == "nt" and not any(character.isspace() for character in value):
+        return value
+    return _quote(value)
+
+
 def _command(
     launcher: Path,
     config_path: Path,
@@ -49,7 +55,10 @@ def _command(
     ]
     if compact:
         arguments.append("--compact")
-    return " ".join(_quote(argument) for argument in arguments)
+    return " ".join(
+        _quote_launcher(argument) if index == 0 else _quote(argument)
+        for index, argument in enumerate(arguments)
+    )
 
 
 def _entry(command: str, timeout: int, **values: object) -> dict[str, object]:

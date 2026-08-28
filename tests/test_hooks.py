@@ -324,6 +324,23 @@ def test_windows_owner_marker_is_idempotent(tmp_path: Path, monkeypatch) -> None
     second = merge_hook_fragment(first, fragment)
 
     assert second == first
+    command = fragment["payload"]["SessionStart"][0]["hooks"][0]["command"]
+    assert command.startswith(str(tmp_path / "keepygaga.exe"))
+
+
+def test_windows_launcher_with_spaces_remains_quoted(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setattr(fragments.os, "name", "nt")
+
+    fragment = build_fragment(
+        "codex",
+        launcher=tmp_path / "Keepygaga Tool" / "keepygaga.exe",
+        config_path=tmp_path / "config.toml",
+    )
+
+    command = fragment["payload"]["SessionStart"][0]["hooks"][0]["command"]
+    assert command.startswith(f'"{tmp_path / "Keepygaga Tool" / "keepygaga.exe"}"')
 
 
 def test_windows_hook_path_rejects_environment_expansion(
@@ -344,7 +361,26 @@ def test_windows_hook_path_rejects_environment_expansion(
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows command shell regression")
-def test_windows_codex_command_executes_through_command_shell(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("event", "registration", "stdin_payload"),
+    [
+        ("SessionStart", 0, {"session_id": "windows-session-smoke"}),
+        (
+            "UserPromptSubmit",
+            0,
+            {
+                "session_id": "windows-prompt-smoke",
+                "prompt": "修复 Windows 安装",
+            },
+        ),
+    ],
+)
+def test_windows_codex_command_executes_through_command_shell(
+    tmp_path: Path,
+    event: str,
+    registration: int,
+    stdin_payload: dict[str, str],
+) -> None:
     launcher_value = shutil.which("keepygaga")
     assert launcher_value is not None
     launcher = Path(launcher_value).resolve()
@@ -360,7 +396,7 @@ def test_windows_codex_command_executes_through_command_shell(tmp_path: Path) ->
     fragment = build_fragment(
         "codex", launcher=launcher, config_path=config_path.resolve()
     )
-    command = fragment["payload"]["SessionStart"][0]["hooks"][0]["command"]
+    command = fragment["payload"][event][registration]["hooks"][0]["command"]
 
     command_shell = os.environ.get("COMSPEC", "cmd.exe")
     codex_arguments = subprocess.list2cmdline(["/C", command])
@@ -371,13 +407,15 @@ def test_windows_codex_command_executes_through_command_shell(tmp_path: Path) ->
         check=False,
         capture_output=True,
         encoding="utf-8",
-        input=json.dumps({"session_id": "windows-command-smoke"}),
+        input=json.dumps(stdin_payload),
         timeout=15,
     )
 
     assert completed.returncode == 0, completed.stderr
     payload = json.loads(completed.stdout)
-    assert payload["hookSpecificOutput"]["hookEventName"] == "SessionStart"
-    assert "<keepygaga-bootstrap>" in payload["hookSpecificOutput"][
-        "additionalContext"
-    ]
+    assert payload["hookSpecificOutput"]["hookEventName"] == event
+    additional_context = payload["hookSpecificOutput"]["additionalContext"]
+    expected = (
+        "<keepygaga-bootstrap>" if event == "SessionStart" else "记忆与资料路由规则"
+    )
+    assert expected in additional_context

@@ -35,7 +35,7 @@ Temporary homes prove only Config-tested behavior. Real host verification must i
 
 ## Hook diagnostics
 
-Built-in Hooks execute through `keepygaga --config CONFIG_PATH hook run context|route|closeout`. Verify that projected commands use the installed launcher and current absolute config path. Context failures return an explicit bootstrap-error payload; they must not silently substitute another memory source. Route state is transient, contains no raw prompt, and expires. Closeout is deduplicated and respects host re-entry signals.
+Built-in Hooks execute through `keepygaga --config CONFIG_PATH hook run context|route|closeout`. Codex setup must execute the final projected `SessionStart` command through the target platform's command interpreter, close stdin, and validate the Codex output envelope before writing `hooks.json`; calling the Python module through an argument array is not equivalent verification. This is protocol verification of the projected command, not live-host verification. Verify that projected commands use the installed launcher and current absolute config path. Context failures return an explicit bootstrap-error payload; they must not silently substitute another memory source. Route state is transient, contains no raw prompt, and expires. Closeout is deduplicated and respects host re-entry signals.
 
 If Hook setup fails, inspect the target host's native event schema, the Keepygaga ownership markers, the stable launcher, and the configured Memory Root. Do not add an external Hook runtime as a fallback.
 
