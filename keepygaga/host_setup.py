@@ -675,9 +675,7 @@ def _run_hook_smoke(plan: CodexHookPlan) -> None:
             raise HostSetupError("Codex context Hook smoke command is missing")
         if os.name == "nt":
             command_shell = os.environ.get("COMSPEC", "cmd.exe")
-            command: str | list[str] = (
-                f"{command_shell} /D /S /C {plan.smoke_command}"
-            )
+            command: str | list[str] = f"{command_shell} /D /S /C {plan.smoke_command}"
             executable = command_shell
         else:
             command = ["/bin/sh", "-c", plan.smoke_command]
