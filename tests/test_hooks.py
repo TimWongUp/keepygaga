@@ -362,9 +362,11 @@ def test_windows_codex_command_executes_through_command_shell(tmp_path: Path) ->
     )
     command = fragment["payload"]["SessionStart"][0]["hooks"][0]["command"]
 
+    command_shell = os.environ.get("COMSPEC", "cmd.exe")
+    codex_command_line = f'{command_shell} /C "{command}"'
     completed = subprocess.run(
-        command,
-        shell=True,
+        codex_command_line,
+        executable=command_shell,
         check=False,
         capture_output=True,
         encoding="utf-8",
