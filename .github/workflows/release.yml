@@ -54,8 +54,15 @@ jobs:
     steps:
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
-          name: distributions-${{ github.run_attempt }}
-          path: dist
+          pattern: distributions-*
+          path: artifacts
+      - name: Select canonical distributions
+        run: |
+          artifact_dir="$(find artifacts -mindepth 1 -maxdepth 1 \
+            -type d -name 'distributions-*' -print | sort -V | head -n 1)"
+          test -n "$artifact_dir"
+          mkdir dist
+          cp "$artifact_dir"/keepygaga-* dist/
       - name: Create or resume GitHub Release
         run: |
           asset_exists() {
@@ -101,7 +108,7 @@ jobs:
 
   pypi:
     if: ${{ needs.release-policy.outputs.publish-pypi == 'enabled' }}
-    needs: [build, release-policy]
+    needs: [github-release, release-policy]
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
@@ -109,6 +116,15 @@ jobs:
     steps:
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
-          name: distributions-${{ github.run_attempt }}
-          path: dist
+          pattern: distributions-*
+          path: artifacts
+      - name: Select canonical distributions
+        run: |
+          artifact_dir="$(find artifacts -mindepth 1 -maxdepth 1 \
+            -type d -name 'distributions-*' -print | sort -V | head -n 1)"
+          test -n "$artifact_dir"
+          mkdir dist
+          cp "$artifact_dir"/keepygaga-* dist/
       - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # release/v1
+        with:
+          skip-existing: true
