@@ -43,7 +43,7 @@ jobs:
       - run: uv run python scripts/check_distribution.py dist/*
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
-          name: distributions
+          name: distributions-${{ github.run_attempt }}
           path: dist/*
 
   github-release:
@@ -54,7 +54,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
-          name: distributions
+          name: distributions-${{ github.run_attempt }}
           path: dist
       - name: Create or resume GitHub Release
         run: |
@@ -90,7 +90,9 @@ jobs:
             gh release upload "$GITHUB_REF_NAME" "$verify_dir/SHA256SUMS"
           fi
 
-          if [ "$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq '.isDraft')" = "true" ]; then
+          release_is_draft="$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq '.isDraft')" \
+            || exit 1
+          if [ "$release_is_draft" = "true" ]; then
             gh release edit "$GITHUB_REF_NAME" --draft=false
           fi
         env:
@@ -107,6 +109,6 @@ jobs:
     steps:
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
-          name: distributions
+          name: distributions-${{ github.run_attempt }}
           path: dist
       - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # release/v1
