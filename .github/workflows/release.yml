@@ -7,9 +7,15 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
-  build:
+  release:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -23,35 +29,68 @@ jobs:
       - run: uv run pyright
       - run: uv build
       - run: uv run python scripts/check_distribution.py dist/*
-      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
-        with:
-          name: distributions
-          path: dist/*
+      - name: Create or resume GitHub Release
+        run: |
+          asset_exists() {
+            gh release view "$GITHUB_REF_NAME" --json assets --jq '.assets[].name' \
+              | grep -Fqx "$1"
+          }
 
-  github-release:
-    needs: build
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
-        with:
-          name: distributions
-          path: dist
-      - name: Create GitHub Release
-        run: gh release create "$GITHUB_REF_NAME" dist/* --generate-notes
+          if ! gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release create "$GITHUB_REF_NAME" --draft --generate-notes --verify-tag
+          fi
+
+          bundle_name="keepygaga-${GITHUB_REF_NAME#v}-distributions.zip"
+          if ! asset_exists "$bundle_name"; then
+            (
+              cd dist
+              uv run python -m zipfile -c "../$bundle_name" keepygaga-*
+            )
+            gh release upload "$GITHUB_REF_NAME" "$bundle_name"
+          fi
+
+          verify_dir="$(mktemp -d)"
+          trap 'rm -rf "$verify_dir"' EXIT
+          gh release download "$GITHUB_REF_NAME" --pattern "$bundle_name" --dir "$verify_dir"
+          mkdir "$verify_dir/canonical"
+          uv run python -m zipfile -e "$verify_dir/$bundle_name" "$verify_dir/canonical"
+          uv run python scripts/check_distribution.py "$verify_dir/canonical"/keepygaga-*
+
+          mkdir "$verify_dir/existing"
+          for asset in "$verify_dir/canonical"/keepygaga-*; do
+            asset_name="${asset##*/}"
+            if asset_exists "$asset_name"; then
+              gh release download "$GITHUB_REF_NAME" --pattern "$asset_name" \
+                --dir "$verify_dir/existing"
+              cmp "$asset" "$verify_dir/existing/$asset_name"
+            else
+              gh release upload "$GITHUB_REF_NAME" "$asset"
+            fi
+          done
+
+          mkdir "$verify_dir/checksums"
+          cp "$verify_dir/$bundle_name" "$verify_dir/canonical"/keepygaga-* \
+            "$verify_dir/checksums/"
+          (
+            cd "$verify_dir/checksums"
+            sha256sum keepygaga-* > SHA256SUMS
+          )
+
+          if asset_exists SHA256SUMS; then
+            mkdir "$verify_dir/existing-checksum"
+            gh release download "$GITHUB_REF_NAME" --pattern SHA256SUMS \
+              --dir "$verify_dir/existing-checksum"
+            cmp "$verify_dir/checksums/SHA256SUMS" \
+              "$verify_dir/existing-checksum/SHA256SUMS"
+          else
+            gh release upload "$GITHUB_REF_NAME" "$verify_dir/checksums/SHA256SUMS"
+          fi
+
+          release_is_draft="$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq '.isDraft')" \
+            || exit 1
+          if [ "$release_is_draft" = "true" ]; then
+            gh release edit "$GITHUB_REF_NAME" --draft=false
+          fi
         env:
           GH_TOKEN: ${{ github.token }}
-
-  pypi:
-    needs: build
-    runs-on: ubuntu-latest
-    environment: pypi
-    permissions:
-      id-token: write
-    steps:
-      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
-        with:
-          name: distributions
-          path: dist
-      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # release/v1
+          GH_REPO: ${{ github.repository }}
