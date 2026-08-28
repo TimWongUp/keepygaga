@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+import base64
+import binascii
 import importlib
 import json
 import sys
@@ -70,6 +72,21 @@ _OPTION_FLAGS = {
 }
 
 
+def _decode_config_path(value: str) -> Path:
+    try:
+        decoded = base64.b64decode(
+            value.encode("ascii"), altchars=b"-_", validate=True
+        ).decode("utf-8")
+    except (UnicodeError, ValueError, binascii.Error) as exc:
+        raise argparse.ArgumentTypeError("invalid encoded configuration path") from exc
+    if not decoded or "\x00" in decoded:
+        raise argparse.ArgumentTypeError("invalid encoded configuration path")
+    path = Path(decoded)
+    if not path.is_absolute():
+        raise argparse.ArgumentTypeError("encoded configuration path must be absolute")
+    return path
+
+
 def _validate_host_options(
     args: argparse.Namespace, parser: argparse.ArgumentParser
 ) -> None:
@@ -130,6 +147,12 @@ def _parser() -> argparse.ArgumentParser:
     )
     hook_run.add_argument("--event", required=True)
     hook_run.add_argument("--compact", action="store_true")
+    hook_run.add_argument(
+        "--config-base64",
+        type=_decode_config_path,
+        dest="hook_config",
+        help=argparse.SUPPRESS,
+    )
 
     host = commands.add_parser("host")
     host_commands = host.add_subparsers(dest="host_command", required=True)
@@ -197,7 +220,11 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "host" and args.host_command in {"setup", "uninstall"}:
         _validate_host_options(args, parser)
-    explicit_config = args.config.expanduser().resolve() if args.config else None
+    hook_config = getattr(args, "hook_config", None)
+    selected_config = hook_config or args.config
+    explicit_config = (
+        selected_config.expanduser().resolve() if selected_config else None
+    )
     config_path = resolve_config_path(explicit_config)
 
     if args.command in {"install", "status", "repair", "upgrade", "uninstall"}:

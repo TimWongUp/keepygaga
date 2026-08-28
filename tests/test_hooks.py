@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import base64
 import json
+import os
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -28,6 +32,11 @@ def _commands(value: object) -> list[str]:
     if isinstance(value, list):
         return [command for nested in value for command in _commands(nested)]
     return []
+
+
+def _decoded_config_path(command: str) -> str:
+    token = command.split("--config-base64 ", 1)[1].split(" ", 1)[0]
+    return base64.urlsafe_b64decode(token).decode("utf-8")
 
 
 def test_builtin_fragment_is_idempotent_and_preserves_unrelated(tmp_path: Path) -> None:
@@ -233,11 +242,68 @@ def test_route_state_stores_no_raw_prompt_and_closeout_deduplicates(
     state = route.state_path("codex", payload).read_text(encoding="utf-8")
 
     assert payload["prompt"] not in state
+    assert "prompt_hash" not in state
     assert closeout.run("codex", "PostToolUse", payload)
     assert closeout.run("codex", "PostToolUse", payload) == {}
 
     route.record("codex", payload)
     assert closeout.run("codex", "PostToolUse", payload)
+
+
+def test_route_scrubs_legacy_prompt_hash_when_state_is_rewritten(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("KEEPYGAGA_HOOK_STATE_ROOT", str(tmp_path))
+    payload = {"session_id": "legacy-s1"}
+    state_path = route.state_path("codex", payload)
+    legacy = {
+        "version": 1,
+        "updated_at": 9_999_999_999,
+        "prompt_hash": "legacy-hash",
+        "project_signal": True,
+        "memory_signal": False,
+        "reminded": False,
+    }
+    state_path.write_text(json.dumps(legacy), encoding="utf-8")
+
+    route.record("codex", payload)
+
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    assert "prompt_hash" not in state
+    state_path.write_text(json.dumps(legacy), encoding="utf-8")
+    assert route.consume_closeout("codex", payload)
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    assert "prompt_hash" not in state
+
+
+def test_route_accepts_windows_surrogate_prompt_without_hashing(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("KEEPYGAGA_HOOK_STATE_ROOT", str(tmp_path))
+    payload = {"session_id": "s1", "prompt": "修复 Windows \ud800"}
+
+    result = route.run("codex", "UserPromptSubmit", payload)
+
+    hook_output = result["hookSpecificOutput"]
+    assert isinstance(hook_output, dict)
+    assert hook_output["hookEventName"] == "UserPromptSubmit"
+    state = json.loads(route.state_path("codex", payload).read_text(encoding="utf-8"))
+    assert "prompt_hash" not in state
+    assert state["project_signal"] is True
+
+
+def test_route_accepts_windows_surrogate_session_identity(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("KEEPYGAGA_HOOK_STATE_ROOT", str(tmp_path))
+    payload = {"session_id": "windows-\ud800", "prompt": "修改代码"}
+
+    result = route.run("codex", "UserPromptSubmit", payload)
+
+    hook_output = result["hookSpecificOutput"]
+    assert isinstance(hook_output, dict)
+    assert hook_output["hookEventName"] == "UserPromptSubmit"
+    assert route.state_path("codex", payload).is_file()
 
 
 def test_compact_route_without_prompt_preserves_closeout_signal(
@@ -321,6 +387,33 @@ def test_windows_owner_marker_is_idempotent(tmp_path: Path, monkeypatch) -> None
     second = merge_hook_fragment(first, fragment)
 
     assert second == first
+    command = fragment["payload"]["SessionStart"][0]["hooks"][0]["command"]
+    assert command.startswith(str(tmp_path / "keepygaga.exe"))
+    assert '"' not in command
+    assert "--config-base64" in command
+    assert _decoded_config_path(command) == str(tmp_path / "config.toml")
+    hook = fragment["payload"]["SessionStart"][0]["hooks"][0]
+    assert "env" not in hook
+
+
+def test_windows_launcher_with_spaces_remains_quoted(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setattr(fragments.os, "name", "nt")
+
+    fragment = build_fragment(
+        "codex",
+        launcher=tmp_path / "Keepygaga Tool" / "keepygaga.exe",
+        config_path=tmp_path / "config.toml",
+    )
+
+    command = fragment["payload"]["SessionStart"][0]["hooks"][0]["command"]
+    assert command.startswith(f'"{tmp_path / "Keepygaga Tool" / "keepygaga.exe"}"')
+    assert command.count('"') == 2
+    assert "--config-base64" in command
+    assert _decoded_config_path(command) == str(tmp_path / "config.toml")
+    hook = fragment["payload"]["SessionStart"][0]["hooks"][0]
+    assert "env" not in hook
 
 
 def test_windows_hook_path_rejects_environment_expansion(
@@ -338,3 +431,80 @@ def test_windows_hook_path_rejects_environment_expansion(
         assert "unsafe shell characters" in str(exc)
     else:
         raise AssertionError("expected unsafe Windows path rejection")
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows command shell regression")
+@pytest.mark.parametrize(
+    ("event", "registration", "stdin_payload"),
+    [
+        ("SessionStart", 0, {"session_id": "windows-session-smoke"}),
+        (
+            "UserPromptSubmit",
+            0,
+            {
+                "session_id": "windows-prompt-smoke",
+                "prompt": "修复 Windows 安装",
+            },
+        ),
+    ],
+)
+@pytest.mark.parametrize("launcher_with_spaces", [False, True])
+def test_windows_codex_command_executes_through_command_shell(
+    tmp_path: Path,
+    event: str,
+    registration: int,
+    stdin_payload: dict[str, str],
+    launcher_with_spaces: bool,
+) -> None:
+    launcher_value = shutil.which("keepygaga")
+    assert launcher_value is not None
+    launcher = Path(launcher_value).resolve()
+    if launcher_with_spaces:
+        copied_launcher = tmp_path / "Keepygaga Tool" / "keepygaga.exe"
+        copied_launcher.parent.mkdir()
+        shutil.copy2(launcher, copied_launcher)
+        launcher = copied_launcher
+    else:
+        assert " " not in str(launcher)
+
+    memory_root = tmp_path / "中文 memory root" / "agents-memory"
+    initialize_memory_tree(memory_root, MemoryFilesConfig(root=str(memory_root)))
+    config_path = tmp_path / "config with spaces" / "keepygaga.toml"
+    config_path.parent.mkdir()
+    config_path.write_text(
+        f"[memory]\nroot = {json.dumps(str(memory_root))}\n", encoding="utf-8"
+    )
+    fragment = build_fragment(
+        "codex", launcher=launcher, config_path=config_path.resolve()
+    )
+    hook = fragment["payload"][event][registration]["hooks"][0]
+    command = hook["command"]
+    assert str(config_path.resolve()) not in command
+    assert _decoded_config_path(command) == str(config_path.resolve())
+    assert "env" not in hook
+    assert command.count('"') == (2 if launcher_with_spaces else 0)
+
+    command_shell = os.environ.get("COMSPEC", "cmd.exe")
+    codex_command_line = f'{command_shell} /C "{command}"'
+    environment = dict(os.environ)
+    environment.pop("KEEPYGAGA_CONFIG", None)
+    environment["PYTHONIOENCODING"] = "utf-8"
+    completed = subprocess.run(
+        codex_command_line,
+        executable=command_shell,
+        check=False,
+        capture_output=True,
+        encoding="utf-8",
+        input=json.dumps(stdin_payload),
+        env=environment,
+        timeout=15,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads(completed.stdout)
+    assert payload["hookSpecificOutput"]["hookEventName"] == event
+    additional_context = payload["hookSpecificOutput"]["additionalContext"]
+    expected = (
+        "<keepygaga-bootstrap>" if event == "SessionStart" else "记忆与资料路由规则"
+    )
+    assert expected in additional_context

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import os
 import shlex
 from pathlib import Path
@@ -22,7 +23,17 @@ LEGACY_HOOK_RELATIVE_ROOTS = (
 
 
 def _quote(value: str) -> str:
-    return f'"{value}"' if os.name == "nt" else shlex.quote(value)
+    if os.name == "nt":
+        return (
+            f'"{value}"'
+            if not value or any(character.isspace() for character in value)
+            else value
+        )
+    return shlex.quote(value)
+
+
+def _encode_config_path(config_path: Path) -> str:
+    return base64.urlsafe_b64encode(str(config_path).encode("utf-8")).decode("ascii")
 
 
 def _command(
@@ -34,19 +45,23 @@ def _command(
     *,
     compact: bool = False,
 ) -> str:
-    arguments = [
-        str(launcher),
-        "--config",
-        str(config_path),
-        "hook",
-        "run",
-        action,
-        f"--owner={OWNER}",
-        "--host",
-        platform,
-        "--event",
-        event,
-    ]
+    arguments = [str(launcher)]
+    if platform != "codex":
+        arguments.extend(("--config", str(config_path)))
+    arguments.extend(
+        (
+            "hook",
+            "run",
+            action,
+            f"--owner={OWNER}",
+            "--host",
+            platform,
+            "--event",
+            event,
+        )
+    )
+    if platform == "codex":
+        arguments.extend(("--config-base64", _encode_config_path(config_path)))
     if compact:
         arguments.append("--compact")
     return " ".join(_quote(argument) for argument in arguments)

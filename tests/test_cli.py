@@ -1,3 +1,4 @@
+import base64
 import json
 import subprocess
 import sys
@@ -401,6 +402,57 @@ def test_cli_uses_environment_config_path(tmp_path: Path, monkeypatch) -> None:
 
     assert cli.main(["memory", "init"]) == 0
     assert (memory_root / "profile.md").is_file()
+
+
+def test_hook_uses_encoded_absolute_config_path(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    config_path = tmp_path / "配置 with spaces" / "keepygaga.toml"
+    memory_root = tmp_path / "memory"
+    config_path.parent.mkdir()
+    config_path.write_text(
+        f'[memory]\nroot = "{memory_root.as_posix()}"\n',
+        encoding="utf-8",
+    )
+    assert cli.main(["--config", str(config_path), "memory", "init"]) == 0
+    capsys.readouterr()
+    token = base64.urlsafe_b64encode(str(config_path).encode("utf-8")).decode("ascii")
+    monkeypatch.setattr(sys.stdin, "read", lambda: '{"session_id":"encoded-config"}')
+
+    result = cli.main(
+        [
+            "hook",
+            "run",
+            "context",
+            "--host",
+            "codex",
+            "--event",
+            "SessionStart",
+            "--config-base64",
+            token,
+        ]
+    )
+
+    assert result == 0
+    assert "<keepygaga-bootstrap>" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("token", ["not+urlsafe", "cmVsYXRpdmUudG9tbA=="])
+def test_hook_rejects_invalid_encoded_config_path(token: str) -> None:
+    with pytest.raises(SystemExit, match="2"):
+        cli.main(
+            [
+                "hook",
+                "run",
+                "context",
+                "--host",
+                "codex",
+                "--event",
+                "SessionStart",
+                "--config-base64",
+                token,
+            ]
+        )
 
 
 def test_memory_init_reports_permission_error_as_json(

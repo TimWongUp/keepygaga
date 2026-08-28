@@ -104,7 +104,8 @@ def state_path(host: str, payload: dict[str, Any]) -> Path:
     )
     if identity is None:
         raise OSError("Hook event has no stable session identity")
-    digest = hashlib.sha256(f"{host}\0{identity}".encode()).hexdigest()[:32]
+    identity_bytes = f"{host}\0{identity}".encode("utf-8", errors="surrogatepass")
+    digest = hashlib.sha256(identity_bytes).hexdigest()[:32]
     return _state_root() / f"{digest}.json"
 
 
@@ -116,7 +117,13 @@ def _load(path: Path) -> dict[str, Any] | None:
             or time.time() - float(value.get("updated_at", 0)) > STATE_TTL_SECONDS
         ):
             return None
-        return value
+        return {
+            "version": 1,
+            "updated_at": float(value.get("updated_at", 0)),
+            "project_signal": value.get("project_signal") is True,
+            "memory_signal": value.get("memory_signal") is True,
+            "reminded": value.get("reminded") is True,
+        }
     except (
         FileNotFoundError,
         OSError,
@@ -165,13 +172,11 @@ def record(host: str, payload: dict[str, Any]) -> None:
             previous["updated_at"] = time.time()
             _save(path, previous)
         return
-    prompt_hash = hashlib.sha256(text.encode()).hexdigest()
     _save(
         path,
         {
             "version": 1,
             "updated_at": time.time(),
-            "prompt_hash": prompt_hash,
             "project_signal": bool(PROJECT_SIGNAL_RE.search(text)),
             "memory_signal": bool(MEMORY_SIGNAL_RE.search(text)),
             "reminded": False,

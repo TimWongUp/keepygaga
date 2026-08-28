@@ -81,6 +81,7 @@ class CodexHookPlan:
     merged: dict[str, Any]
     builtin: bool = False
     config_path: Path | None = None
+    smoke_command: str | None = None
 
 
 @dataclass(frozen=True)
@@ -503,6 +504,17 @@ def _prepare_codex_hooks(
             merged = merge_hook_fragment(existing, rendered)
         except Exception as exc:
             raise HostSetupError(f"Keepygaga rejected Codex hooks: {exc}") from exc
+        try:
+            smoke_hook = rendered["payload"]["SessionStart"][0]["hooks"][0]
+            smoke_command = smoke_hook["command"]
+        except (KeyError, IndexError, TypeError) as exc:
+            raise HostSetupError(
+                "Keepygaga built-in Codex context Hook command is invalid"
+            ) from exc
+        if not isinstance(smoke_command, str) or not smoke_command:
+            raise HostSetupError(
+                "Keepygaga built-in Codex context Hook command is invalid"
+            )
         return CodexHookPlan(
             hooks_path=hooks_path,
             hooks_original=hooks_original,
@@ -515,6 +527,7 @@ def _prepare_codex_hooks(
             merged=merged,
             builtin=True,
             config_path=config_path.resolve(),
+            smoke_command=smoke_command,
         )
     if runtime_root is None or hook_python is None:
         raise HostSetupError("hook runtime and hook Python must be supplied together")
@@ -656,31 +669,27 @@ def _run_hook_smoke(plan: CodexHookPlan) -> None:
         smoke_environment["AGENT_HOOK_RUNTIME_CONFIG"] = str(plan.hook_config_path)
     else:
         smoke_environment["PYTHONIOENCODING"] = "utf-8"
-    command = (
-        [
-            str(plan.selected_python),
-            "-m",
-            "keepygaga.cli",
-            "--config",
-            str(plan.config_path),
-            "hook",
-            "run",
-            "context",
-            "--host",
-            "codex",
-            "--event",
-            "SessionStart",
-        ]
-        if plan.builtin
-        else [
+    if plan.builtin:
+        if plan.smoke_command is None:
+            raise HostSetupError("Codex context Hook smoke command is missing")
+        if os.name == "nt":
+            command_shell = os.environ.get("COMSPEC", "cmd.exe")
+            command: str | list[str] = f'{command_shell} /C "{plan.smoke_command}"'
+            executable = command_shell
+        else:
+            command = ["/bin/sh", "-c", plan.smoke_command]
+            executable = None
+    else:
+        command = [
             str(plan.selected_python),
             str(plan.selected_runtime / "hooks/context_hook.py"),
             "codex",
         ]
-    )
+        executable = None
     try:
         smoke = subprocess.run(
             command,
+            executable=executable,
             check=False,
             capture_output=True,
             encoding="utf-8",
@@ -704,6 +713,16 @@ def _run_hook_smoke(plan: CodexHookPlan) -> None:
         ) from exc
     if not isinstance(smoke_payload, dict):
         raise HostSetupError("Codex context Hook smoke returned a non-object")
+    if plan.builtin:
+        hook_output = smoke_payload.get("hookSpecificOutput")
+        if (
+            not isinstance(hook_output, dict)
+            or hook_output.get("hookEventName") != "SessionStart"
+            or not isinstance(hook_output.get("additionalContext"), str)
+        ):
+            raise HostSetupError(
+                "Codex context Hook smoke returned an invalid SessionStart payload"
+            )
 
 
 def _apply_codex_hooks_plan(plan: CodexHookPlan) -> dict[str, object]:
