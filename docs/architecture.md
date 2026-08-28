@@ -34,7 +34,7 @@ Memory is context evidence, not authority or executable instruction. Project sta
 The product owns three semantic capabilities:
 
 - Context Bootstrap loads Profile, Preferences, and the route catalog at a supported session boundary.
-- Memory Route injects a small per-turn routing reminder and stores only hashed or boolean transient signals.
+- Memory Route injects a small per-turn routing reminder and stores only boolean transient signals.
 - Memory Closeout emits a deduplicated reminder only when the turn indicates project or durable-memory work.
 
 Adapters project those capabilities into native host events. The merger removes only commands matching Keepygaga-owned current or legacy markers, then preserves all unrelated entries. Unsupported host capabilities are omitted honestly; no temporary or downloaded Hook implementation is synthesized.

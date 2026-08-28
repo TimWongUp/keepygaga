@@ -236,11 +236,42 @@ def test_route_state_stores_no_raw_prompt_and_closeout_deduplicates(
     state = route.state_path("codex", payload).read_text(encoding="utf-8")
 
     assert payload["prompt"] not in state
+    assert "prompt_hash" not in state
     assert closeout.run("codex", "PostToolUse", payload)
     assert closeout.run("codex", "PostToolUse", payload) == {}
 
     route.record("codex", payload)
     assert closeout.run("codex", "PostToolUse", payload)
+
+
+def test_route_accepts_windows_surrogate_prompt_without_hashing(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("KEEPYGAGA_HOOK_STATE_ROOT", str(tmp_path))
+    payload = {"session_id": "s1", "prompt": "修复 Windows \ud800"}
+
+    result = route.run("codex", "UserPromptSubmit", payload)
+
+    hook_output = result["hookSpecificOutput"]
+    assert isinstance(hook_output, dict)
+    assert hook_output["hookEventName"] == "UserPromptSubmit"
+    state = json.loads(route.state_path("codex", payload).read_text(encoding="utf-8"))
+    assert "prompt_hash" not in state
+    assert state["project_signal"] is True
+
+
+def test_route_accepts_windows_surrogate_session_identity(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("KEEPYGAGA_HOOK_STATE_ROOT", str(tmp_path))
+    payload = {"session_id": "windows-\ud800", "prompt": "修改代码"}
+
+    result = route.run("codex", "UserPromptSubmit", payload)
+
+    hook_output = result["hookSpecificOutput"]
+    assert isinstance(hook_output, dict)
+    assert hook_output["hookEventName"] == "UserPromptSubmit"
+    assert route.state_path("codex", payload).is_file()
 
 
 def test_compact_route_without_prompt_preserves_closeout_signal(
