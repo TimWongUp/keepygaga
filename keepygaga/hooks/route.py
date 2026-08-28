@@ -117,7 +117,13 @@ def _load(path: Path) -> dict[str, Any] | None:
             or time.time() - float(value.get("updated_at", 0)) > STATE_TTL_SECONDS
         ):
             return None
-        return value
+        return {
+            "version": 1,
+            "updated_at": float(value.get("updated_at", 0)),
+            "project_signal": value.get("project_signal") is True,
+            "memory_signal": value.get("memory_signal") is True,
+            "reminded": value.get("reminded") is True,
+        }
     except (
         FileNotFoundError,
         OSError,

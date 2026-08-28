@@ -244,6 +244,32 @@ def test_route_state_stores_no_raw_prompt_and_closeout_deduplicates(
     assert closeout.run("codex", "PostToolUse", payload)
 
 
+def test_route_scrubs_legacy_prompt_hash_when_state_is_rewritten(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("KEEPYGAGA_HOOK_STATE_ROOT", str(tmp_path))
+    payload = {"session_id": "legacy-s1"}
+    state_path = route.state_path("codex", payload)
+    legacy = {
+        "version": 1,
+        "updated_at": 9_999_999_999,
+        "prompt_hash": "legacy-hash",
+        "project_signal": True,
+        "memory_signal": False,
+        "reminded": False,
+    }
+    state_path.write_text(json.dumps(legacy), encoding="utf-8")
+
+    route.record("codex", payload)
+
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    assert "prompt_hash" not in state
+    state_path.write_text(json.dumps(legacy), encoding="utf-8")
+    assert route.consume_closeout("codex", payload)
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    assert "prompt_hash" not in state
+
+
 def test_route_accepts_windows_surrogate_prompt_without_hashing(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -357,6 +383,10 @@ def test_windows_owner_marker_is_idempotent(tmp_path: Path, monkeypatch) -> None
     assert second == first
     command = fragment["payload"]["SessionStart"][0]["hooks"][0]["command"]
     assert command.startswith(str(tmp_path / "keepygaga.exe"))
+    assert '"' not in command
+    assert "--config" not in command
+    hook = fragment["payload"]["SessionStart"][0]["hooks"][0]
+    assert hook["env"] == {"KEEPYGAGA_CONFIG": str(tmp_path / "config.toml")}
 
 
 def test_windows_launcher_with_spaces_remains_quoted(
@@ -372,6 +402,10 @@ def test_windows_launcher_with_spaces_remains_quoted(
 
     command = fragment["payload"]["SessionStart"][0]["hooks"][0]["command"]
     assert command.startswith(f'"{tmp_path / "Keepygaga Tool" / "keepygaga.exe"}"')
+    assert command.count('"') == 2
+    assert "--config" not in command
+    hook = fragment["payload"]["SessionStart"][0]["hooks"][0]
+    assert hook["env"] == {"KEEPYGAGA_CONFIG": str(tmp_path / "config.toml")}
 
 
 def test_windows_hook_path_rejects_environment_expansion(
@@ -406,16 +440,24 @@ def test_windows_hook_path_rejects_environment_expansion(
         ),
     ],
 )
+@pytest.mark.parametrize("launcher_with_spaces", [False, True])
 def test_windows_codex_command_executes_through_command_shell(
     tmp_path: Path,
     event: str,
     registration: int,
     stdin_payload: dict[str, str],
+    launcher_with_spaces: bool,
 ) -> None:
     launcher_value = shutil.which("keepygaga")
     assert launcher_value is not None
     launcher = Path(launcher_value).resolve()
-    assert " " not in str(launcher)
+    if launcher_with_spaces:
+        copied_launcher = tmp_path / "Keepygaga Tool" / "keepygaga.exe"
+        copied_launcher.parent.mkdir()
+        shutil.copy2(launcher, copied_launcher)
+        launcher = copied_launcher
+    else:
+        assert " " not in str(launcher)
 
     memory_root = tmp_path / "中文 memory root" / "agents-memory"
     initialize_memory_tree(memory_root, MemoryFilesConfig(root=str(memory_root)))
@@ -427,10 +469,17 @@ def test_windows_codex_command_executes_through_command_shell(
     fragment = build_fragment(
         "codex", launcher=launcher, config_path=config_path.resolve()
     )
-    command = fragment["payload"][event][registration]["hooks"][0]["command"]
+    hook = fragment["payload"][event][registration]["hooks"][0]
+    command = hook["command"]
+    assert str(config_path.resolve()) not in command
+    assert hook["env"] == {"KEEPYGAGA_CONFIG": str(config_path.resolve())}
+    assert command.count('"') == (2 if launcher_with_spaces else 0)
 
     command_shell = os.environ.get("COMSPEC", "cmd.exe")
-    codex_command_line = f"{command_shell} /D /S /C {command}"
+    codex_command_line = f'{command_shell} /C "{command}"'
+    environment = dict(os.environ)
+    environment.update(hook["env"])
+    environment["PYTHONIOENCODING"] = "utf-8"
     completed = subprocess.run(
         codex_command_line,
         executable=command_shell,
@@ -438,6 +487,7 @@ def test_windows_codex_command_executes_through_command_shell(
         capture_output=True,
         encoding="utf-8",
         input=json.dumps(stdin_payload),
+        env=environment,
         timeout=15,
     )
 

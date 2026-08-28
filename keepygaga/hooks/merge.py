@@ -105,15 +105,20 @@ def _has_owned_command(
         for tokens in suffix_sets
         for candidate in parsed_candidates
     )
-    signature_match = any(
-        candidate
-        and candidate[0].rsplit("/", 1)[-1].lower() == executable.lower()
-        and candidate[1:3] == ["--config", candidate[2]]
-        and candidate[3:9] == ["hook", "run", action, owner, "--host", host]
-        for executable, action, owner, host in signatures
-        for candidate in parsed_candidates
-        if len(candidate) >= 9
-    )
+    signature_match = False
+    for executable, action, owner, host in signatures:
+        for candidate in parsed_candidates:
+            if (
+                not candidate
+                or candidate[0].rsplit("/", 1)[-1].lower() != executable.lower()
+            ):
+                continue
+            command = candidate[3:] if candidate[1:2] == ["--config"] else candidate[1:]
+            if command[:6] == ["hook", "run", action, owner, "--host", host]:
+                signature_match = True
+                break
+        if signature_match:
+            break
     return exact_match or suffix_match or signature_match
 
 

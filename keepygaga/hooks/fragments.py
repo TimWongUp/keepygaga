@@ -22,13 +22,13 @@ LEGACY_HOOK_RELATIVE_ROOTS = (
 
 
 def _quote(value: str) -> str:
-    return f'"{value}"' if os.name == "nt" else shlex.quote(value)
-
-
-def _quote_launcher(value: str) -> str:
-    if os.name == "nt" and not any(character.isspace() for character in value):
-        return value
-    return _quote(value)
+    if os.name == "nt":
+        return (
+            f'"{value}"'
+            if not value or any(character.isspace() for character in value)
+            else value
+        )
+    return shlex.quote(value)
 
 
 def _command(
@@ -40,25 +40,24 @@ def _command(
     *,
     compact: bool = False,
 ) -> str:
-    arguments = [
-        str(launcher),
-        "--config",
-        str(config_path),
-        "hook",
-        "run",
-        action,
-        f"--owner={OWNER}",
-        "--host",
-        platform,
-        "--event",
-        event,
-    ]
+    arguments = [str(launcher)]
+    if platform != "codex":
+        arguments.extend(("--config", str(config_path)))
+    arguments.extend(
+        (
+            "hook",
+            "run",
+            action,
+            f"--owner={OWNER}",
+            "--host",
+            platform,
+            "--event",
+            event,
+        )
+    )
     if compact:
         arguments.append("--compact")
-    return " ".join(
-        _quote_launcher(argument) if index == 0 else _quote(argument)
-        for index, argument in enumerate(arguments)
-    )
+    return " ".join(_quote(argument) for argument in arguments)
 
 
 def _entry(command: str, timeout: int, **values: object) -> dict[str, object]:
@@ -129,6 +128,7 @@ def build_fragment(
                                 "SessionStart",
                             ),
                             10,
+                            env={"KEEPYGAGA_CONFIG": str(config_path)},
                             additionalContextLimit=0,
                         )
                     ]
@@ -146,6 +146,7 @@ def build_fragment(
                                 compact=True,
                             ),
                             2,
+                            env={"KEEPYGAGA_CONFIG": str(config_path)},
                             additionalContextLimit=180,
                         )
                     ],
@@ -163,6 +164,7 @@ def build_fragment(
                                 "UserPromptSubmit",
                             ),
                             2,
+                            env={"KEEPYGAGA_CONFIG": str(config_path)},
                             additionalContextLimit=120,
                         )
                     ]
@@ -181,6 +183,7 @@ def build_fragment(
                                 "PostToolUse",
                             ),
                             2,
+                            env={"KEEPYGAGA_CONFIG": str(config_path)},
                         )
                     ],
                 }
@@ -197,6 +200,7 @@ def build_fragment(
                                 "SubagentStart",
                             ),
                             10,
+                            env={"KEEPYGAGA_CONFIG": str(config_path)},
                         )
                     ]
                 }
