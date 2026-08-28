@@ -676,8 +676,7 @@ def _run_hook_smoke(plan: CodexHookPlan) -> None:
         if os.name == "nt":
             command_shell = os.environ.get("COMSPEC", "cmd.exe")
             command: str | list[str] = (
-                f"{command_shell} "
-                f"{subprocess.list2cmdline(['/D', '/S', '/C', plan.smoke_command])}"
+                f"{command_shell} /D /S /C {plan.smoke_command}"
             )
             executable = command_shell
         else:
