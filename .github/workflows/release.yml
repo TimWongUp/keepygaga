@@ -12,22 +12,10 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  release-policy:
+  release:
     runs-on: ubuntu-latest
-    outputs:
-      publish-pypi: ${{ steps.policy.outputs.publish-pypi }}
-    steps:
-      - name: Evaluate release policy
-        id: policy
-        env:
-          PYPI_PUBLISH_ENABLED: ${{ vars.PYPI_PUBLISH_ENABLED }}
-        run: |
-          if [ "$PYPI_PUBLISH_ENABLED" = "true" ]; then
-            echo "publish-pypi=enabled" >> "$GITHUB_OUTPUT"
-          fi
-
-  build:
-    runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -41,28 +29,6 @@ jobs:
       - run: uv run pyright
       - run: uv build
       - run: uv run python scripts/check_distribution.py dist/*
-      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
-        with:
-          name: distributions-${{ github.run_attempt }}
-          path: dist/*
-
-  github-release:
-    needs: build
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
-        with:
-          pattern: distributions-*
-          path: artifacts
-      - name: Select canonical distributions
-        run: |
-          artifact_dir="$(find artifacts -mindepth 1 -maxdepth 1 \
-            -type d -name 'distributions-*' -print | sort -V | head -n 1)"
-          test -n "$artifact_dir"
-          mkdir dist
-          cp "$artifact_dir"/keepygaga-* dist/
       - name: Create or resume GitHub Release
         run: |
           asset_exists() {
@@ -74,27 +40,50 @@ jobs:
             gh release create "$GITHUB_REF_NAME" --draft --generate-notes --verify-tag
           fi
 
-          for asset in dist/keepygaga-*; do
-            if ! asset_exists "${asset##*/}"; then
+          bundle_name="keepygaga-${GITHUB_REF_NAME#v}-distributions.zip"
+          if ! asset_exists "$bundle_name"; then
+            (
+              cd dist
+              uv run python -m zipfile -c "../$bundle_name" keepygaga-*
+            )
+            gh release upload "$GITHUB_REF_NAME" "$bundle_name"
+          fi
+
+          verify_dir="$(mktemp -d)"
+          trap 'rm -rf "$verify_dir"' EXIT
+          gh release download "$GITHUB_REF_NAME" --pattern "$bundle_name" --dir "$verify_dir"
+          mkdir "$verify_dir/canonical"
+          uv run python -m zipfile -e "$verify_dir/$bundle_name" "$verify_dir/canonical"
+          uv run python scripts/check_distribution.py "$verify_dir/canonical"/keepygaga-*
+
+          mkdir "$verify_dir/existing"
+          for asset in "$verify_dir/canonical"/keepygaga-*; do
+            asset_name="${asset##*/}"
+            if asset_exists "$asset_name"; then
+              gh release download "$GITHUB_REF_NAME" --pattern "$asset_name" \
+                --dir "$verify_dir/existing"
+              cmp "$asset" "$verify_dir/existing/$asset_name"
+            else
               gh release upload "$GITHUB_REF_NAME" "$asset"
             fi
           done
 
-          verify_dir="$(mktemp -d)"
-          trap 'rm -rf "$verify_dir"' EXIT
-          gh release download "$GITHUB_REF_NAME" --pattern 'keepygaga-*' --dir "$verify_dir"
+          mkdir "$verify_dir/checksums"
+          cp "$verify_dir/$bundle_name" "$verify_dir/canonical"/keepygaga-* \
+            "$verify_dir/checksums/"
           (
-            cd "$verify_dir"
+            cd "$verify_dir/checksums"
             sha256sum keepygaga-* > SHA256SUMS
           )
 
           if asset_exists SHA256SUMS; then
-            mkdir "$verify_dir/existing"
+            mkdir "$verify_dir/existing-checksum"
             gh release download "$GITHUB_REF_NAME" --pattern SHA256SUMS \
-              --dir "$verify_dir/existing"
-            cmp "$verify_dir/SHA256SUMS" "$verify_dir/existing/SHA256SUMS"
+              --dir "$verify_dir/existing-checksum"
+            cmp "$verify_dir/checksums/SHA256SUMS" \
+              "$verify_dir/existing-checksum/SHA256SUMS"
           else
-            gh release upload "$GITHUB_REF_NAME" "$verify_dir/SHA256SUMS"
+            gh release upload "$GITHUB_REF_NAME" "$verify_dir/checksums/SHA256SUMS"
           fi
 
           release_is_draft="$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq '.isDraft')" \
@@ -105,26 +94,3 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-
-  pypi:
-    if: ${{ needs.release-policy.outputs.publish-pypi == 'enabled' }}
-    needs: [github-release, release-policy]
-    runs-on: ubuntu-latest
-    environment: pypi
-    permissions:
-      id-token: write
-    steps:
-      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
-        with:
-          pattern: distributions-*
-          path: artifacts
-      - name: Select canonical distributions
-        run: |
-          artifact_dir="$(find artifacts -mindepth 1 -maxdepth 1 \
-            -type d -name 'distributions-*' -print | sort -V | head -n 1)"
-          test -n "$artifact_dir"
-          mkdir dist
-          cp "$artifact_dir"/keepygaga-* dist/
-      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # release/v1
-        with:
-          skip-existing: true
