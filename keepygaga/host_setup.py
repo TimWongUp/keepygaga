@@ -82,7 +82,6 @@ class CodexHookPlan:
     builtin: bool = False
     config_path: Path | None = None
     smoke_command: str | None = None
-    smoke_environment: dict[str, str] | None = None
 
 
 @dataclass(frozen=True)
@@ -508,7 +507,6 @@ def _prepare_codex_hooks(
         try:
             smoke_hook = rendered["payload"]["SessionStart"][0]["hooks"][0]
             smoke_command = smoke_hook["command"]
-            smoke_environment = smoke_hook["env"]
         except (KeyError, IndexError, TypeError) as exc:
             raise HostSetupError(
                 "Keepygaga built-in Codex context Hook command is invalid"
@@ -516,13 +514,6 @@ def _prepare_codex_hooks(
         if not isinstance(smoke_command, str) or not smoke_command:
             raise HostSetupError(
                 "Keepygaga built-in Codex context Hook command is invalid"
-            )
-        if not isinstance(smoke_environment, dict) or not all(
-            isinstance(key, str) and isinstance(value, str)
-            for key, value in smoke_environment.items()
-        ):
-            raise HostSetupError(
-                "Keepygaga built-in Codex context Hook environment is invalid"
             )
         return CodexHookPlan(
             hooks_path=hooks_path,
@@ -537,7 +528,6 @@ def _prepare_codex_hooks(
             builtin=True,
             config_path=config_path.resolve(),
             smoke_command=smoke_command,
-            smoke_environment=smoke_environment,
         )
     if runtime_root is None or hook_python is None:
         raise HostSetupError("hook runtime and hook Python must be supplied together")
@@ -679,7 +669,6 @@ def _run_hook_smoke(plan: CodexHookPlan) -> None:
         smoke_environment["AGENT_HOOK_RUNTIME_CONFIG"] = str(plan.hook_config_path)
     else:
         smoke_environment["PYTHONIOENCODING"] = "utf-8"
-        smoke_environment.update(plan.smoke_environment or {})
     if plan.builtin:
         if plan.smoke_command is None:
             raise HostSetupError("Codex context Hook smoke command is missing")

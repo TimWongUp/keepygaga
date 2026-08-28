@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import os
 import shlex
 from pathlib import Path
@@ -31,6 +32,10 @@ def _quote(value: str) -> str:
     return shlex.quote(value)
 
 
+def _encode_config_path(config_path: Path) -> str:
+    return base64.urlsafe_b64encode(str(config_path).encode("utf-8")).decode("ascii")
+
+
 def _command(
     launcher: Path,
     config_path: Path,
@@ -55,6 +60,8 @@ def _command(
             event,
         )
     )
+    if platform == "codex":
+        arguments.extend(("--config-base64", _encode_config_path(config_path)))
     if compact:
         arguments.append("--compact")
     return " ".join(_quote(argument) for argument in arguments)
@@ -128,7 +135,6 @@ def build_fragment(
                                 "SessionStart",
                             ),
                             10,
-                            env={"KEEPYGAGA_CONFIG": str(config_path)},
                             additionalContextLimit=0,
                         )
                     ]
@@ -146,7 +152,6 @@ def build_fragment(
                                 compact=True,
                             ),
                             2,
-                            env={"KEEPYGAGA_CONFIG": str(config_path)},
                             additionalContextLimit=180,
                         )
                     ],
@@ -164,7 +169,6 @@ def build_fragment(
                                 "UserPromptSubmit",
                             ),
                             2,
-                            env={"KEEPYGAGA_CONFIG": str(config_path)},
                             additionalContextLimit=120,
                         )
                     ]
@@ -183,7 +187,6 @@ def build_fragment(
                                 "PostToolUse",
                             ),
                             2,
-                            env={"KEEPYGAGA_CONFIG": str(config_path)},
                         )
                     ],
                 }
@@ -200,7 +203,6 @@ def build_fragment(
                                 "SubagentStart",
                             ),
                             10,
-                            env={"KEEPYGAGA_CONFIG": str(config_path)},
                         )
                     ]
                 }

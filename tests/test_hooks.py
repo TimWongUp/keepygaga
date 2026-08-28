@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import os
 import shutil
@@ -31,6 +32,11 @@ def _commands(value: object) -> list[str]:
     if isinstance(value, list):
         return [command for nested in value for command in _commands(nested)]
     return []
+
+
+def _decoded_config_path(command: str) -> str:
+    token = command.split("--config-base64 ", 1)[1].split(" ", 1)[0]
+    return base64.urlsafe_b64decode(token).decode("utf-8")
 
 
 def test_builtin_fragment_is_idempotent_and_preserves_unrelated(tmp_path: Path) -> None:
@@ -384,9 +390,10 @@ def test_windows_owner_marker_is_idempotent(tmp_path: Path, monkeypatch) -> None
     command = fragment["payload"]["SessionStart"][0]["hooks"][0]["command"]
     assert command.startswith(str(tmp_path / "keepygaga.exe"))
     assert '"' not in command
-    assert "--config" not in command
+    assert "--config-base64" in command
+    assert _decoded_config_path(command) == str(tmp_path / "config.toml")
     hook = fragment["payload"]["SessionStart"][0]["hooks"][0]
-    assert hook["env"] == {"KEEPYGAGA_CONFIG": str(tmp_path / "config.toml")}
+    assert "env" not in hook
 
 
 def test_windows_launcher_with_spaces_remains_quoted(
@@ -403,9 +410,10 @@ def test_windows_launcher_with_spaces_remains_quoted(
     command = fragment["payload"]["SessionStart"][0]["hooks"][0]["command"]
     assert command.startswith(f'"{tmp_path / "Keepygaga Tool" / "keepygaga.exe"}"')
     assert command.count('"') == 2
-    assert "--config" not in command
+    assert "--config-base64" in command
+    assert _decoded_config_path(command) == str(tmp_path / "config.toml")
     hook = fragment["payload"]["SessionStart"][0]["hooks"][0]
-    assert hook["env"] == {"KEEPYGAGA_CONFIG": str(tmp_path / "config.toml")}
+    assert "env" not in hook
 
 
 def test_windows_hook_path_rejects_environment_expansion(
@@ -472,13 +480,14 @@ def test_windows_codex_command_executes_through_command_shell(
     hook = fragment["payload"][event][registration]["hooks"][0]
     command = hook["command"]
     assert str(config_path.resolve()) not in command
-    assert hook["env"] == {"KEEPYGAGA_CONFIG": str(config_path.resolve())}
+    assert _decoded_config_path(command) == str(config_path.resolve())
+    assert "env" not in hook
     assert command.count('"') == (2 if launcher_with_spaces else 0)
 
     command_shell = os.environ.get("COMSPEC", "cmd.exe")
     codex_command_line = f'{command_shell} /C "{command}"'
     environment = dict(os.environ)
-    environment.update(hook["env"])
+    environment.pop("KEEPYGAGA_CONFIG", None)
     environment["PYTHONIOENCODING"] = "utf-8"
     completed = subprocess.run(
         codex_command_line,
