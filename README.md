@@ -20,6 +20,10 @@ Host-native memories can continue to own host-specific conversation recall and p
 
 The public MCP surface is exactly `list`, `read`, `create`, `add`, `update`, `move`, `rename`, and `delete`.
 
+### Upgrading to 0.5
+
+Version 0.5 changes each `move` operation from a single `fact` field to a required `facts` array. Clients that cache MCP schemas must reconnect or refresh the Tool schema after upgrading, then group all exact Facts for one source/destination pair into that array. This is an MCP request-shape change only; the Markdown memory format and existing memory files are unchanged.
+
 ## Install
 
 Requirements: Python 3.12+ and [`uv`](https://docs.astral.sh/uv/).
