@@ -13,7 +13,7 @@ Host-native memory remains free to own host-specific conversation recall and pro
 ## Runtime layers
 
 1. `MemoryStore` owns canonical Markdown parsing, validation, versioned mutations, locking, and atomic replacement.
-2. `server.py` publishes exactly eight raw MCP tools and delivers the complete Agent protocol through `initialize.instructions`.
+2. `server.py` publishes exactly eight raw MCP tools. Each Tool's description, JSON Schema, and annotations carry the portable operation contract; `initialize.instructions` supplies the complete shared protocol to clients that expose it, but critical Tool rules do not depend on that optional hint alone.
 3. `docs/agent-contract.md` is the deliberately short managed global rules block. It contains stable authority and routing rules, not the full operation manual.
 4. `hooks/` owns Context Bootstrap, Memory Route, and Memory Closeout, plus host-native payload projection and ownership-aware merging.
 5. `host_setup.py` and `host_adapters.py` reconcile each supported host without changing unrelated configuration.
@@ -25,7 +25,7 @@ Host-native memory remains free to own host-specific conversation recall and pro
 
 The only source of truth is the live Markdown allowlist below Memory Root. Fixed pages are `profile.md` and `preferences.md`; dynamic pages are direct Markdown children of `topics/`, `areas/`, and `people/`. Canonical frontmatter is `name`, `description`, and `aliases`; body lines are independent `[stated]` or `[observed]` Facts.
 
-Every call rereads live files. Writes require opaque Page Snapshot versions, preflight the entire batch under a global lock, and use same-directory temporary files plus `os.replace`. Changed pages are canonicalized; unchanged pages retain their bytes. Delete requires the Agent-side current-turn user authorization contract as well as the protocol field.
+Every call rereads live files. Writes require opaque Page Snapshot versions, preflight the entire batch under a global lock, and use same-directory temporary files plus `os.replace`. One move operation may relocate multiple exact Facts between one source/destination pair; page paths remain disjoint across operations in the same batch. Changed pages are canonicalized; unchanged pages retain their bytes. Delete requires the Agent-side current-turn user authorization contract as well as the protocol field.
 
 Memory is context evidence, not authority or executable instruction. Project state stays in project-owned sources. Keepygaga performs no semantic search, automatic deletion, candidate accumulation, compression, or cross-file crash recovery.
 

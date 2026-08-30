@@ -26,7 +26,7 @@ OPERATION_FIELDS = {
         "source_version",
         "destination_path",
         "destination_version",
-        "fact",
+        "facts",
     },
     "rename": {"path", "if_version", "new_path"},
 }
@@ -67,7 +67,7 @@ def test_public_mcp_surface_and_exact_top_level_shapes() -> None:
     fact_content = fact_schema["properties"]["content"]
     assert fact_content["maxLength"] == 4096
     descriptions = "".join(tool.description or "" for tool in tools)
-    assert len(descriptions) < 1600
+    assert len(descriptions) < 2400
     assert "sources" not in descriptions.lower()
     assert "legacy" not in descriptions.lower()
 
@@ -142,7 +142,7 @@ def test_tool_protocol_is_discoverable_from_descriptions_and_schema() -> None:
     tools = asyncio.run(mcp_server.mcp.list_tools())
     by_name = {tool.name: tool for tool in tools}
 
-    assert "live route catalog" in (by_name["list"].description or "")
+    assert "Route Catalog" in (by_name["list"].description or "")
     assert "opaque write versions" in (by_name["read"].description or "")
     assert "explicit current-turn user authorization" in (
         by_name["delete"].description or ""
@@ -160,6 +160,15 @@ def test_tool_protocol_is_discoverable_from_descriptions_and_schema() -> None:
     assert "each path must be unique" in (
         add_schema["properties"]["operations"]["description"]
     )
+
+    move_schema = by_name["move"].inputSchema
+    move = move_schema["$defs"]["MoveOperation"]
+    assert move["properties"]["facts"]["minItems"] == 1
+    assert move["properties"]["facts"]["maxItems"] == 50
+    assert "all Facts for that pair" in (
+        move_schema["properties"]["operations"]["description"]
+    )
+    assert "one source/destination pair" in (by_name["move"].description or "")
 
     update_schema = by_name["update"].inputSchema
     update_fact = update_schema["$defs"]["UpdateFactOperation"]
@@ -182,6 +191,7 @@ def test_tool_protocol_is_discoverable_from_descriptions_and_schema() -> None:
         description = by_name[name].description or ""
         assert "Page Snapshots" in description
         assert "receipts" in description
+        assert "read or list" in description
 
     fact_schema = add_schema["$defs"]["Fact"]
     assert "explicit statement" in fact_schema["properties"]["basis"]["description"]
@@ -197,13 +207,23 @@ def test_tool_annotations_match_read_and_destructive_behavior() -> None:
         annotations = by_name[name].annotations
         assert annotations is not None
         assert annotations.readOnlyHint is True
+        assert annotations.destructiveHint is False
+        assert annotations.idempotentHint is True
+        assert annotations.openWorldHint is False
     for name in EXPECTED_TOOLS - {"list", "read"}:
         annotations = by_name[name].annotations
         assert annotations is not None
         assert annotations.readOnlyHint is False
-    delete_annotations = by_name["delete"].annotations
-    assert delete_annotations is not None
-    assert delete_annotations.destructiveHint is True
+        assert annotations.idempotentHint is False
+        assert annotations.openWorldHint is False
+    for name in {"create", "add"}:
+        annotations = by_name[name].annotations
+        assert annotations is not None
+        assert annotations.destructiveHint is False
+    for name in {"update", "move", "rename", "delete"}:
+        annotations = by_name[name].annotations
+        assert annotations is not None
+        assert annotations.destructiveHint is True
 
 
 def test_update_discriminated_operations_are_rejected_at_model_boundary() -> None:
@@ -284,4 +304,3 @@ def test_closed_schema_adapter_fails_closed_without_fastmcp_tool_manager() -> No
 
     with pytest.raises(RuntimeError, match="closed-schema adapter"):
         mcp_server._close_registered_tool(EmptyServer(), "list")  # type: ignore[arg-type]
-

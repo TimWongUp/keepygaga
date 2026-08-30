@@ -94,6 +94,24 @@ root = "{memory_root.as_posix()}"
                     instructions = initialized_server.instructions or ""
                     listed = await session.list_tools()
                     tool_names = sorted(tool.name for tool in listed.tools)
+                    tools_by_name = {tool.name: tool for tool in listed.tools}
+                    move_schema = tools_by_name["move"].inputSchema
+                    move_operations = move_schema["properties"]["operations"]
+                    move_reference = move_operations["items"]["$ref"]
+                    move_definition = move_schema["$defs"][
+                        move_reference.rsplit("/", 1)[-1]
+                    ]
+                    move_facts = move_definition["properties"].get("facts")
+                    move_schema_ok = (
+                        isinstance(move_facts, dict)
+                        and move_facts.get("minItems") == 1
+                        and "fact" not in move_definition["properties"]
+                    )
+                    annotations_ok = all(
+                        tool.annotations is not None
+                        and tool.annotations.openWorldHint is False
+                        for tool in listed.tools
+                    )
                     catalog = _payload(
                         await session.call_tool(
                             "list",
@@ -171,6 +189,9 @@ root = "{memory_root.as_posix()}"
             if set(tool_names) == REQUIRED_TOOLS
             and "Page Snapshot" in instructions
             and "Fact convergence" in instructions
+            and "Tool workflow" in instructions
+            and move_schema_ok
+            and annotations_ok
             and catalog.get("status") == "ok"
             and read.get("status") == "ok"
             and added.get("status") == "applied"

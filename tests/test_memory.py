@@ -620,7 +620,7 @@ def test_move_fact(memory_store: tuple[Path, MemoryStore]) -> None:
                 source_version=version(store, "topics/source.md"),
                 destination_path="areas/destination.md",
                 destination_version=version(store, "areas/destination.md"),
-                fact=fact("Move me."),
+                facts=[fact("Move me.")],
             )
         ]
     )
@@ -643,6 +643,128 @@ def test_move_fact(memory_store: tuple[Path, MemoryStore]) -> None:
         ]
     )
     assert chained["status"] == "applied"
+
+
+def test_move_multiple_facts_between_same_pages_in_one_operation(
+    memory_store: tuple[Path, MemoryStore],
+) -> None:
+    _, store = memory_store
+    assert store.create(
+        [
+            CreateOperation(
+                path="topics/source.md",
+                description="Move related facts together.",
+                aliases=[],
+                facts=[fact("Move one."), fact("Move two.")],
+            ),
+            create("areas/destination.md", "Keep me."),
+        ]
+    )["status"] == "applied"
+
+    moved = store.move(
+        [
+            MoveOperation(
+                source_path="topics/source.md",
+                source_version=version(store, "topics/source.md"),
+                destination_path="areas/destination.md",
+                destination_version=version(store, "areas/destination.md"),
+                facts=[fact("Move one."), fact("Move two.")],
+            )
+        ]
+    )
+
+    assert moved["status"] == "applied"
+    assert read_file(store, "topics/source.md")["facts"] == []
+    destination_facts = read_file(store, "areas/destination.md")["facts"]
+    assert isinstance(destination_facts, list)
+    assert [item["content"] for item in destination_facts] == [
+        "Keep me.",
+        "Move one.",
+        "Move two.",
+    ]
+    assert moved["mutations"][0]["receipt"] == (  # type: ignore[index]
+        "`🧠 move [topics/source.md]: Move one. · Move two.`"
+    )
+
+
+def test_move_duplicate_page_in_batch_explains_recovery(
+    memory_store: tuple[Path, MemoryStore],
+) -> None:
+    _, store = memory_store
+    assert store.create(
+        [
+            CreateOperation(
+                path="topics/source.md",
+                description="Source.",
+                aliases=[],
+                facts=[fact("Move one."), fact("Move two.")],
+            ),
+            create("areas/destination.md", "Keep me."),
+        ]
+    )["status"] == "applied"
+    source_version = version(store, "topics/source.md")
+    destination_version = version(store, "areas/destination.md")
+
+    result = store.move(
+        [
+            MoveOperation(
+                source_path="topics/source.md",
+                source_version=source_version,
+                destination_path="areas/destination.md",
+                destination_version=destination_version,
+                facts=[fact("Move one.")],
+            ),
+            MoveOperation(
+                source_path="topics/source.md",
+                source_version=source_version,
+                destination_path="areas/destination.md",
+                destination_version=destination_version,
+                facts=[fact("Move two.")],
+            ),
+        ]
+    )
+
+    assert result["status"] == "duplicate_target"
+    assert "all exact Facts" in str(result["recovery"])
+    source_facts = read_file(store, "topics/source.md")["facts"]
+    assert isinstance(source_facts, list)
+    assert [item["content"] for item in source_facts] == [
+        "Move one.",
+        "Move two.",
+    ]
+
+
+def test_move_multiple_facts_is_preflighted_before_commit(
+    memory_store: tuple[Path, MemoryStore],
+) -> None:
+    _, store = memory_store
+    assert store.create(
+        [
+            create("topics/source.md", "Move me."),
+            create("areas/destination.md", "Keep me."),
+        ]
+    )["status"] == "applied"
+
+    result = store.move(
+        [
+            MoveOperation(
+                source_path="topics/source.md",
+                source_version=version(store, "topics/source.md"),
+                destination_path="areas/destination.md",
+                destination_version=version(store, "areas/destination.md"),
+                facts=[fact("Move me."), fact("Missing fact.")],
+            )
+        ]
+    )
+
+    assert result["status"] == "not_found"
+    assert "latest source Page Snapshot" in str(result["recovery"])
+    source_facts = read_file(store, "topics/source.md")["facts"]
+    destination_facts = read_file(store, "areas/destination.md")["facts"]
+    assert isinstance(source_facts, list)
+    assert isinstance(destination_facts, list)
+    assert [item["content"] for item in source_facts] == ["Move me."]
+    assert [item["content"] for item in destination_facts] == ["Keep me."]
 
 
 def test_rename_is_local_and_preserves_old_name_as_alias(
@@ -942,7 +1064,7 @@ def test_interrupted_move_duplicates_before_it_can_lose_a_fact(
                 source_version=version(store, "topics/source.md"),
                 destination_path="areas/destination.md",
                 destination_version=version(store, "areas/destination.md"),
-                fact=fact("Move safely."),
+                facts=[fact("Move safely.")],
             )
         ]
     )
@@ -1139,4 +1261,3 @@ def test_existing_tree_over_dynamic_page_limit_remains_readable(
     assert renamed["status"] == "applied"
     blocked = store.create([create("topics/another.md", "Still blocked.")])
     assert blocked["status"] == "capacity_exceeded"
-

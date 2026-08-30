@@ -7,7 +7,7 @@ import unicodedata
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import PurePosixPath
-from typing import Literal
+from typing import Any, Literal
 
 import frontmatter
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -166,9 +166,7 @@ def validate_document(document: MemoryDocument, path: str) -> MemoryDocument:
     )
 
 
-def parse_memory_file(text: str, path: str) -> MemoryDocument:
-    canonical_memory_path(path)
-    normalized = normalize_text(text)
+def _parse_frontmatter(normalized: str, path: str) -> tuple[dict[str, Any], str]:
     if not normalized.startswith("---\n"):
         raise MemoryValidationError(
             "invalid_source", f"{path} must begin with YAML frontmatter", path=path
@@ -224,9 +222,12 @@ def parse_memory_file(text: str, path: str) -> MemoryDocument:
         )
     if "sources" in metadata:
         _string_array(metadata["sources"], "sources")
-    aliases = _string_array(metadata["aliases"], "aliases", maximum=8)
+    return metadata, post.content
+
+
+def _parse_facts(body_text: str, path: str) -> tuple[Fact, ...]:
     facts: list[Fact] = []
-    body = normalize_text(post.content).strip()
+    body = normalize_text(body_text).strip()
     if body:
         for line in body.splitlines():
             if not line.strip():
@@ -248,12 +249,19 @@ def parse_memory_file(text: str, path: str) -> MemoryDocument:
                     f"{path} contains a fact that violates the page schema",
                     path=path,
                 ) from exc
+    return tuple(facts)
+
+
+def parse_memory_file(text: str, path: str) -> MemoryDocument:
+    canonical_memory_path(path)
+    metadata, body = _parse_frontmatter(normalize_text(text), path)
+    aliases = _string_array(metadata["aliases"], "aliases", maximum=8)
     return validate_document(
         MemoryDocument(
             name=metadata["name"],
             description=metadata["description"],
             aliases=aliases,
-            facts=tuple(facts),
+            facts=_parse_facts(body, path),
         ),
         path,
     )
