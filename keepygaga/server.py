@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from copy import deepcopy
 from importlib.resources import files
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
-from mcp.server.fastmcp import FastMCP
-from mcp.types import AnyFunction, Icon, ToolAnnotations
+from mcp.server import MCPServer
+from mcp.server.mcpserver.exceptions import ToolError
+from mcp.types import Tool as MCPTool
+from mcp.types import ToolAnnotations
 
 from keepygaga.config import load_config
 from keepygaga.memory import (
@@ -20,86 +23,62 @@ from keepygaga.memory import (
     UpdateOperations,
 )
 
-COMPATIBLE_MCP_NOTE = "compatible with MCP SDK 1.12-1.28 closed-schema adapter"
 READ_ONLY_ANNOTATIONS = ToolAnnotations(
-    readOnlyHint=True,
-    destructiveHint=False,
-    idempotentHint=True,
-    openWorldHint=False,
+    read_only_hint=True,
+    destructive_hint=False,
+    idempotent_hint=True,
+    open_world_hint=False,
 )
 ADDITIVE_ANNOTATIONS = ToolAnnotations(
-    readOnlyHint=False,
-    destructiveHint=False,
-    idempotentHint=False,
-    openWorldHint=False,
+    read_only_hint=False,
+    destructive_hint=False,
+    idempotent_hint=False,
+    open_world_hint=False,
 )
 MUTATING_ANNOTATIONS = ToolAnnotations(
-    readOnlyHint=False,
-    destructiveHint=True,
-    idempotentHint=False,
-    openWorldHint=False,
+    read_only_hint=False,
+    destructive_hint=True,
+    idempotent_hint=False,
+    open_world_hint=False,
 )
 
 
-def _close_registered_tool(server: FastMCP, tool_name: str) -> None:
-    manager = getattr(server, "_tool_manager", None)
-    get_tool = getattr(manager, "get_tool", None)
-    if not callable(get_tool):
-        raise RuntimeError(
-            f"FastMCP closed-schema adapter cannot find {tool_name}; {COMPATIBLE_MCP_NOTE}"
-        )
-    tool = get_tool(tool_name)
-    if tool is None:
-        raise RuntimeError(f"tool registration failed: {tool_name}")
-    fn_metadata = getattr(tool, "fn_metadata", None)
-    arguments = getattr(fn_metadata, "arg_model", None)
-    config = getattr(arguments, "model_config", None)
-    rebuild = getattr(arguments, "model_rebuild", None)
-    schema = getattr(arguments, "model_json_schema", None)
-    if not isinstance(config, dict) or not callable(rebuild) or not callable(schema):
-        raise RuntimeError(
-            f"FastMCP closed-schema adapter cannot close {tool_name}; {COMPATIBLE_MCP_NOTE}"
-        )
-    config["extra"] = "forbid"
-    rebuild(force=True)
-    generated = schema(by_alias=True)
-    if not isinstance(generated, dict):
-        raise RuntimeError(
-            f"FastMCP closed-schema adapter cannot publish {tool_name}; {COMPATIBLE_MCP_NOTE}"
-        )
-    try:
-        cast(Any, tool).parameters = generated
-    except Exception as exc:
-        raise RuntimeError(
-            f"FastMCP closed-schema adapter cannot publish {tool_name}; {COMPATIBLE_MCP_NOTE}"
-        ) from exc
+class StrictMCPServer(MCPServer):
+    """Expose closed top-level input schemas and enforce them at call time.
 
+    MCPServer's generated argument models intentionally accept unknown fields for
+    compatibility. Keepygaga's public contract is closed, so this small public
+    boundary adapter publishes a copied schema with ``additionalProperties``
+    disabled and rejects unknown top-level keys before dispatch.
+    """
 
-class StrictFastMCP(FastMCP):
-    """FastMCP with closed top-level argument models."""
+    async def list_tools(self) -> list[MCPTool]:
+        tools = await super().list_tools()
+        closed: list[MCPTool] = []
+        for tool in tools:
+            schema = deepcopy(tool.input_schema)
+            schema["additionalProperties"] = False
+            closed.append(tool.model_copy(update={"input_schema": schema}))
+        return closed
 
-    def add_tool(
+    async def call_tool(
         self,
-        fn: AnyFunction,
-        name: str | None = None,
-        title: str | None = None,
-        description: str | None = None,
-        annotations: ToolAnnotations | None = None,
-        icons: list[Icon] | None = None,
-        meta: dict[str, Any] | None = None,
-        structured_output: bool | None = None,
-    ) -> None:
-        super().add_tool(
-            fn,
-            name=name,
-            title=title,
-            description=description,
-            annotations=annotations,
-            icons=icons,
-            meta=meta,
-            structured_output=structured_output,
-        )
-        _close_registered_tool(self, name or fn.__name__)
+        name: str,
+        arguments: dict[str, Any],
+        context: Any = None,
+    ) -> Any:
+        tools = await self.list_tools()
+        tool = next((candidate for candidate in tools if candidate.name == name), None)
+        if tool is not None:
+            properties = tool.input_schema.get("properties", {})
+            if isinstance(properties, dict):
+                unexpected = sorted(set(arguments) - set(properties))
+                if unexpected:
+                    joined = ", ".join(unexpected)
+                    raise ToolError(
+                        f"Error executing tool {name}: unexpected top-level argument(s): {joined}"
+                    )
+        return await super().call_tool(name, arguments, context)
 
 
 
@@ -107,7 +86,7 @@ def _server_instructions() -> str:
     return files("keepygaga").joinpath("mcp_instructions.md").read_text(encoding="utf-8")
 
 
-mcp = StrictFastMCP("Keepygaga", instructions=_server_instructions())
+mcp = StrictMCPServer("Keepygaga", instructions=_server_instructions())
 
 
 def _with_memory_store(

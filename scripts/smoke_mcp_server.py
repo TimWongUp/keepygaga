@@ -10,8 +10,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from mcp import ClientSession, StdioServerParameters
-from mcp.client.stdio import stdio_client
+from mcp import Client, StdioServerParameters
 
 from keepygaga.config import MemoryFilesConfig
 from keepygaga.diagnostics import run_doctor
@@ -43,7 +42,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def _payload(result: Any) -> dict[str, object]:
-    structured = getattr(result, "structuredContent", None)
+    structured = getattr(result, "structured_content", None)
     if isinstance(structured, dict):
         if isinstance(structured.get("result"), dict):
             return structured["result"]
@@ -88,110 +87,114 @@ root = "{memory_root.as_posix()}"
             env=environment,
         )
         async with asyncio.timeout(timeout):
-            async with stdio_client(parameters) as (read_stream, write_stream):
-                async with ClientSession(read_stream, write_stream) as session:
-                    initialized_server = await session.initialize()
-                    instructions = initialized_server.instructions or ""
-                    listed = await session.list_tools()
-                    tool_names = sorted(tool.name for tool in listed.tools)
-                    tools_by_name = {tool.name: tool for tool in listed.tools}
-                    move_schema = tools_by_name["move"].inputSchema
-                    move_operations = move_schema["properties"]["operations"]
-                    move_reference = move_operations["items"]["$ref"]
-                    move_definition = move_schema["$defs"][
-                        move_reference.rsplit("/", 1)[-1]
-                    ]
-                    move_facts = move_definition["properties"].get("facts")
-                    move_schema_ok = (
-                        isinstance(move_facts, dict)
-                        and move_facts.get("minItems") == 1
-                        and "fact" not in move_definition["properties"]
-                    )
-                    annotations_ok = all(
-                        tool.annotations is not None
-                        and tool.annotations.openWorldHint is False
-                        for tool in listed.tools
-                    )
-                    catalog = _payload(
-                        await session.call_tool(
-                            "list",
-                            {},
-                        )
-                    )
-                    read = _payload(
-                        await session.call_tool(
-                            "read",
-                            {"paths": ["preferences.md"]},
-                        )
-                    )
-                    files = read.get("files")
-                    if not isinstance(files, list) or not files:
-                        raise RuntimeError(f"memory read failed: {read}")
-                    first = files[0]
-                    if not isinstance(first, dict) or not isinstance(
-                        first.get("version"), str
-                    ):
-                        raise RuntimeError(f"memory read has no version: {read}")
-                    added = _payload(
-                        await session.call_tool(
-                            "add",
-                            {
-                                "operations": [
-                                    {
-                                        "path": "preferences.md",
-                                        "if_version": first["version"],
-                                        "facts": [
-                                            {
-                                                "basis": "stated",
-                                                "content": (
-                                                    "Temporary smoke-test memory."
-                                                ),
-                                            }
-                                        ],
-                                    }
-                                ]
-                            },
-                        )
-                    )
-                    added_files = added.get("files")
-                    if not isinstance(added_files, list) or not added_files:
-                        raise RuntimeError(f"memory add failed: {added}")
-                    updated = _payload(
-                        await session.call_tool(
-                            "update",
-                            {
-                                "operations": [
-                                    {
-                                        "path": "preferences.md",
-                                        "if_version": added_files[0]["version"],
-                                        "target": "fact",
-                                        "old_fact": {
+            async with Client(parameters, mode="auto") as client:
+                protocol_version = client.protocol_version
+                instructions = client.instructions or ""
+                server_name = client.server_info.name if client.server_info else None
+                listed = await client.list_tools()
+                tool_names = sorted(tool.name for tool in listed.tools)
+                tools_by_name = {tool.name: tool for tool in listed.tools}
+                closed_schema_ok = all(
+                    tool.input_schema.get("additionalProperties") is False
+                    for tool in listed.tools
+                )
+                move_schema = tools_by_name["move"].input_schema
+                move_operations = move_schema["properties"]["operations"]
+                move_reference = move_operations["items"]["$ref"]
+                move_definition = move_schema["$defs"][
+                    move_reference.rsplit("/", 1)[-1]
+                ]
+                move_facts = move_definition["properties"].get("facts")
+                move_schema_ok = (
+                    isinstance(move_facts, dict)
+                    and move_facts.get("minItems") == 1
+                    and "fact" not in move_definition["properties"]
+                )
+                annotations_ok = all(
+                    tool.annotations is not None
+                    and tool.annotations.open_world_hint is False
+                    for tool in listed.tools
+                )
+                invalid = await client.call_tool("list", {"unexpected": True})
+                invalid_top_level_ok = invalid.is_error is True
+                catalog = _payload(await client.call_tool("list", {}))
+                read = _payload(
+                    await client.call_tool("read", {"paths": ["preferences.md"]})
+                )
+                files = read.get("files")
+                if not isinstance(files, list) or not files:
+                    raise RuntimeError(f"memory read failed: {read}")
+                first = files[0]
+                if not isinstance(first, dict) or not isinstance(
+                    first.get("version"), str
+                ):
+                    raise RuntimeError(f"memory read has no version: {read}")
+                added = _payload(
+                    await client.call_tool(
+                        "add",
+                        {
+                            "operations": [
+                                {
+                                    "path": "preferences.md",
+                                    "if_version": first["version"],
+                                    "facts": [
+                                        {
                                             "basis": "stated",
-                                            "content": (
-                                                "Temporary smoke-test memory."
-                                            ),
-                                        },
-                                        "new_fact": {
-                                            "basis": "stated",
-                                            "content": (
-                                                "Temporary smoke-test memory "
-                                                "updated."
-                                            ),
-                                        },
-                                    }
-                                ]
-                            },
-                        )
+                                            "content": "Temporary smoke-test memory.",
+                                        }
+                                    ],
+                                }
+                            ]
+                        },
                     )
+                )
+                added_files = added.get("files")
+                if not isinstance(added_files, list) or not added_files:
+                    raise RuntimeError(f"memory add failed: {added}")
+                updated = _payload(
+                    await client.call_tool(
+                        "update",
+                        {
+                            "operations": [
+                                {
+                                    "path": "preferences.md",
+                                    "if_version": added_files[0]["version"],
+                                    "target": "fact",
+                                    "old_fact": {
+                                        "basis": "stated",
+                                        "content": "Temporary smoke-test memory.",
+                                    },
+                                    "new_fact": {
+                                        "basis": "stated",
+                                        "content": (
+                                            "Temporary smoke-test memory updated."
+                                        ),
+                                    },
+                                }
+                            ]
+                        },
+                    )
+                )
+            async with Client(parameters, mode="legacy") as legacy_client:
+                legacy_protocol_version = legacy_client.protocol_version
+                legacy_instructions = legacy_client.instructions or ""
+                legacy_listed = await legacy_client.list_tools()
+                legacy_tool_names = sorted(tool.name for tool in legacy_listed.tools)
         doctor = run_doctor(config_path, project_root=workspace)
         status = (
             "ok"
             if set(tool_names) == REQUIRED_TOOLS
+            and protocol_version == "2026-07-28"
+            and legacy_protocol_version == "2025-11-25"
             and "Page Snapshot" in instructions
+            and "Page Snapshot" in legacy_instructions
             and "Fact convergence" in instructions
             and "Tool workflow" in instructions
+            and closed_schema_ok
             and move_schema_ok
             and annotations_ok
+            and invalid_top_level_ok
+            and legacy_tool_names == sorted(REQUIRED_TOOLS)
             and catalog.get("status") == "ok"
             and read.get("status") == "ok"
             and added.get("status") == "applied"
@@ -200,10 +203,10 @@ root = "{memory_root.as_posix()}"
             else "error"
         )
         return {
-            "schema": "keepygaga-mcp-smoke-v4",
+            "schema": "keepygaga-mcp-smoke-v5",
             "status": status,
-            "server": initialized_server.serverInfo.name,
-            "protocol_version": initialized_server.protocolVersion,
+            "server": server_name,
+            "protocol_version": protocol_version,
             "instructions": "ok",
             "tool_count": len(tool_names),
             "tools": tool_names,
@@ -218,7 +221,7 @@ def main() -> int:
         report = asyncio.run(run_smoke(args.timeout, args.server_command))
     except Exception as exc:
         report = {
-            "schema": "keepygaga-mcp-smoke-v4",
+            "schema": "keepygaga-mcp-smoke-v5",
             "status": "error",
             "error": f"{type(exc).__name__}: {exc}",
         }

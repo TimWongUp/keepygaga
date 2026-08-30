@@ -2,8 +2,7 @@ from __future__ import annotations
 
 import asyncio
 
-import pytest
-from pydantic import ValidationError
+from mcp import Client
 
 from keepygaga import server as mcp_server
 
@@ -37,15 +36,15 @@ def test_public_mcp_surface_and_exact_top_level_shapes() -> None:
     by_name = {tool.name: tool for tool in tools}
     assert set(by_name) == EXPECTED_TOOLS
     for tool in tools:
-        assert tool.inputSchema["additionalProperties"] is False
-    assert by_name["list"].inputSchema["properties"] == {}
-    assert set(by_name["read"].inputSchema["properties"]) == {"paths"}
-    assert by_name["read"].inputSchema["required"] == ["paths"]
-    assert by_name["read"].inputSchema["properties"]["paths"]["minItems"] == 1
-    assert by_name["read"].inputSchema["properties"]["paths"]["maxItems"] == 20
+        assert tool.input_schema["additionalProperties"] is False
+    assert by_name["list"].input_schema["properties"] == {}
+    assert set(by_name["read"].input_schema["properties"]) == {"paths"}
+    assert by_name["read"].input_schema["required"] == ["paths"]
+    assert by_name["read"].input_schema["properties"]["paths"]["minItems"] == 1
+    assert by_name["read"].input_schema["properties"]["paths"]["maxItems"] == 20
 
     for tool_name, expected_fields in OPERATION_FIELDS.items():
-        schema = by_name[tool_name].inputSchema
+        schema = by_name[tool_name].input_schema
         assert set(schema["properties"]) == {"operations"}
         assert schema["required"] == ["operations"]
         assert schema["properties"]["operations"]["minItems"] == 1
@@ -55,7 +54,7 @@ def test_public_mcp_surface_and_exact_top_level_shapes() -> None:
         assert set(definition["properties"]) == expected_fields
         assert definition["additionalProperties"] is False
 
-    create_schema = by_name["create"].inputSchema
+    create_schema = by_name["create"].input_schema
     create = create_schema["$defs"]["CreateOperation"]
     assert set(create["required"]) == {"path", "description", "aliases", "facts"}
     assert create["properties"]["aliases"]["maxItems"] == 8
@@ -71,7 +70,7 @@ def test_public_mcp_surface_and_exact_top_level_shapes() -> None:
     assert "sources" not in descriptions.lower()
     assert "legacy" not in descriptions.lower()
 
-    update_schema = by_name["update"].inputSchema
+    update_schema = by_name["update"].input_schema
     update_items = update_schema["properties"]["operations"]["items"]
     assert update_items["discriminator"]["propertyName"] == "target"
     update_definitions = {
@@ -108,7 +107,7 @@ def test_public_mcp_surface_and_exact_top_level_shapes() -> None:
     }
     assert set(update_page["required"]) == {"path", "if_version", "target"}
 
-    delete_schema = by_name["delete"].inputSchema
+    delete_schema = by_name["delete"].input_schema
     delete_items = delete_schema["properties"]["operations"]["items"]
     assert delete_items["discriminator"]["propertyName"] == "target"
     delete_definitions = {
@@ -148,12 +147,12 @@ def test_tool_protocol_is_discoverable_from_descriptions_and_schema() -> None:
         by_name["delete"].description or ""
     )
 
-    read_paths = by_name["read"].inputSchema["properties"]["paths"]
+    read_paths = by_name["read"].input_schema["properties"]["paths"]
     assert read_paths["description"] == (
         "Unique canonical page paths from the current Route Catalog."
     )
 
-    add_schema = by_name["add"].inputSchema
+    add_schema = by_name["add"].input_schema
     add = add_schema["$defs"]["AddOperation"]
     assert "latest Page Snapshot" in add["properties"]["if_version"]["description"]
     assert "exact duplicates only" in add["properties"]["facts"]["description"]
@@ -161,7 +160,7 @@ def test_tool_protocol_is_discoverable_from_descriptions_and_schema() -> None:
         add_schema["properties"]["operations"]["description"]
     )
 
-    move_schema = by_name["move"].inputSchema
+    move_schema = by_name["move"].input_schema
     move = move_schema["$defs"]["MoveOperation"]
     assert move["properties"]["facts"]["minItems"] == 1
     assert move["properties"]["facts"]["maxItems"] == 50
@@ -170,7 +169,7 @@ def test_tool_protocol_is_discoverable_from_descriptions_and_schema() -> None:
     )
     assert "one source/destination pair" in (by_name["move"].description or "")
 
-    update_schema = by_name["update"].inputSchema
+    update_schema = by_name["update"].input_schema
     update_fact = update_schema["$defs"]["UpdateFactOperation"]
     update_page = update_schema["$defs"]["UpdatePageOperation"]
     assert "Fact replacement" in update_fact["properties"]["target"]["description"]
@@ -181,7 +180,7 @@ def test_tool_protocol_is_discoverable_from_descriptions_and_schema() -> None:
         update_page["properties"]["target"]["description"]
     )
 
-    delete_schema = by_name["delete"].inputSchema
+    delete_schema = by_name["delete"].input_schema
     delete_fact = delete_schema["$defs"]["DeleteFactOperation"]
     assert "current-turn user authorization" in (
         delete_fact["properties"]["authorization"]["description"]
@@ -206,101 +205,72 @@ def test_tool_annotations_match_read_and_destructive_behavior() -> None:
     for name in {"list", "read"}:
         annotations = by_name[name].annotations
         assert annotations is not None
-        assert annotations.readOnlyHint is True
-        assert annotations.destructiveHint is False
-        assert annotations.idempotentHint is True
-        assert annotations.openWorldHint is False
+        assert annotations.read_only_hint is True
+        assert annotations.destructive_hint is False
+        assert annotations.idempotent_hint is True
+        assert annotations.open_world_hint is False
     for name in EXPECTED_TOOLS - {"list", "read"}:
         annotations = by_name[name].annotations
         assert annotations is not None
-        assert annotations.readOnlyHint is False
-        assert annotations.idempotentHint is False
-        assert annotations.openWorldHint is False
+        assert annotations.read_only_hint is False
+        assert annotations.idempotent_hint is False
+        assert annotations.open_world_hint is False
     for name in {"create", "add"}:
         annotations = by_name[name].annotations
         assert annotations is not None
-        assert annotations.destructiveHint is False
+        assert annotations.destructive_hint is False
     for name in {"update", "move", "rename", "delete"}:
         annotations = by_name[name].annotations
         assert annotations is not None
-        assert annotations.destructiveHint is True
+        assert annotations.destructive_hint is True
 
 
-def test_update_discriminated_operations_are_rejected_at_model_boundary() -> None:
-    update_tool = mcp_server.mcp._tool_manager.get_tool("update")
-    assert update_tool is not None
-    with pytest.raises(ValidationError):
-        update_tool.fn_metadata.arg_model.model_validate(
-            {
-                "operations": [
-                    {
-                        "path": "topics/example.md",
-                        "if_version": "opaque",
-                        "target": "fact",
-                        "old_fact": {"basis": "stated", "content": "Same."},
-                        "new_fact": {"basis": "stated", "content": "Same."},
-                    }
-                ]
-            }
-        )
-    with pytest.raises(ValidationError):
-        update_tool.fn_metadata.arg_model.model_validate(
-            {
-                "operations": [
-                    {
-                        "path": "topics/example.md",
-                        "if_version": "opaque",
-                        "target": "page",
-                    }
-                ]
-            }
-        )
-    with pytest.raises(ValidationError):
-        update_tool.fn_metadata.arg_model.model_validate(
-            {
-                "operations": [
-                    {
-                        "path": "topics/example.md",
-                        "if_version": "opaque",
-                        "target": "fact",
-                        "old_fact": {"basis": "stated", "content": "Old."},
-                        "new_fact": {"basis": "stated", "content": "New."},
-                        "unexpected": True,
-                    }
-                ]
-            }
-        )
+async def _call_tool(name: str, arguments: dict[str, object]):
+    async with Client(mcp_server.mcp) as client:
+        return await client.call_tool(name, arguments)
+
+
+def test_update_discriminated_operations_are_rejected_at_public_boundary() -> None:
+    for operation in (
+        {
+            "path": "topics/example.md",
+            "if_version": "opaque",
+            "target": "fact",
+            "old_fact": {"basis": "stated", "content": "Same."},
+            "new_fact": {"basis": "stated", "content": "Same."},
+        },
+        {
+            "path": "topics/example.md",
+            "if_version": "opaque",
+            "target": "page",
+        },
+        {
+            "path": "topics/example.md",
+            "if_version": "opaque",
+            "target": "fact",
+            "old_fact": {"basis": "stated", "content": "Old."},
+            "new_fact": {"basis": "stated", "content": "New."},
+            "unexpected": True,
+        },
+    ):
+        result = asyncio.run(_call_tool("update", {"operations": [operation]}))
+        assert result.is_error is True
 
 
 def test_runtime_rejects_unexpected_top_level_arguments() -> None:
-    for tool in mcp_server.mcp._tool_manager.list_tools():
-        with pytest.raises(ValidationError):
-            tool.fn_metadata.arg_model.model_validate(
-                {
-                    **(
-                        {"paths": ["profile.md"]}
-                        if tool.name == "read"
-                        else {}
-                    ),
-                    "unexpected": True,
-                }
-            )
+    tools = asyncio.run(mcp_server.mcp.list_tools())
+    for tool in tools:
+        arguments = {"paths": ["profile.md"]} if tool.name == "read" else {}
+        result = asyncio.run(
+            _call_tool(tool.name, {**arguments, "unexpected": True})
+        )
+        assert result.is_error is True
 
 
 def test_runtime_rejects_more_than_twenty_read_paths() -> None:
-    tool = next(
-        tool
-        for tool in mcp_server.mcp._tool_manager.list_tools()
-        if tool.name == "read"
-    )
-    with pytest.raises(ValidationError):
-        tool.fn_metadata.arg_model.model_validate(
-            {"paths": [f"topics/page-{index}.md" for index in range(21)]}
+    result = asyncio.run(
+        _call_tool(
+            "read", {"paths": [f"topics/page-{index}.md" for index in range(21)]}
         )
-
-def test_closed_schema_adapter_fails_closed_without_fastmcp_tool_manager() -> None:
-    class EmptyServer:
-        pass
-
-    with pytest.raises(RuntimeError, match="closed-schema adapter"):
-        mcp_server._close_registered_tool(EmptyServer(), "list")  # type: ignore[arg-type]
+    )
+    assert result.is_error is True
