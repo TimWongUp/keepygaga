@@ -19,7 +19,7 @@
 ## Project constraints
 
 - Python `3.12+`；优先使用 repo `.venv/`。
-- 产品、发行包、Python 包、CLI、配置、环境变量、schema 与代码标识统一使用 Keepygaga / `keepygaga`；MCP 客户端配置约定使用注册 key `keepygaga`，它不等同于 FastMCP `serverInfo.name`。
+- 产品、发行包、Python 包、CLI、配置、环境变量、schema 与代码标识统一使用 Keepygaga / `keepygaga`；MCP 客户端配置约定使用注册 key `keepygaga`，它不等同于 MCP 协议中的 `serverInfo.name`。
 - 公开 raw MCP Tool 必须且只能是 `list`、`read`、`create`、`add`、`update`、`move`、`rename`、`delete`；不保留旧 `memory_*` 或 Knowledge Tool 别名。
 - `update` 与 `delete` 使用 `target=fact|page` 判别式操作；`delete` 只在当前用户当轮明确授权后调用并要求 `authorization=user_requested`。
 - 固定页只有 `profile.md` 与 `preferences.md`；动态页只允许 `topics/*.md`、`areas/*.md`、`people/*.md` 的直属 Markdown。

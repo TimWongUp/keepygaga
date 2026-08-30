@@ -67,7 +67,7 @@ def test_host_setup_preserves_public_common_symbols() -> None:
 def test_canonical_contract_is_short_and_delegates_full_protocol() -> None:
     contract = host_setup.load_canonical_contract()
 
-    assert "MCP initialize instructions" in contract
+    assert "MCP server instructions" in contract
     assert "current Page Snapshot" in contract
     assert "explicit current-turn user request" in contract
     assert len(contract.splitlines()) < 20

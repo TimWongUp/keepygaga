@@ -13,7 +13,7 @@ Host-native memory remains free to own host-specific conversation recall and pro
 ## Runtime layers
 
 1. `MemoryStore` owns canonical Markdown parsing, validation, versioned mutations, locking, and atomic replacement.
-2. `server.py` publishes exactly eight raw MCP tools. Each Tool's description, JSON Schema, and annotations carry the portable operation contract; `initialize.instructions` supplies the complete shared protocol to clients that expose it, but critical Tool rules do not depend on that optional hint alone.
+2. `server.py` publishes exactly eight raw MCP tools. Each Tool's description, JSON Schema, and annotations carry the portable operation contract; negotiated server instructions (modern discovery or the legacy initialize handshake) supply the complete shared protocol to clients that expose them, but critical Tool rules do not depend on that optional hint alone.
 3. `docs/agent-contract.md` is the deliberately short managed global rules block. It contains stable authority and routing rules, not the full operation manual.
 4. `hooks/` owns Context Bootstrap, Memory Route, and Memory Closeout, plus host-native payload projection and ownership-aware merging.
 5. `host_setup.py` and `host_adapters.py` reconcile each supported host without changing unrelated configuration.

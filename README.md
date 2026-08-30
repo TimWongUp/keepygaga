@@ -61,7 +61,7 @@ Advanced deterministic host commands remain available as `keepygaga host setup|u
 
 - `keepygaga-mcp` is the stable MCP launcher used by host registrations.
 - The short managed Agent Contract contains only durable safety and routing rules.
-- The full read, convergence, mutation, conflict, and receipt protocol is delivered through MCP `initialize.instructions`.
+- The full read, convergence, mutation, conflict, and receipt protocol is delivered through negotiated MCP server instructions (modern discovery or the legacy initialize handshake).
 - Built-in Context Bootstrap, Memory Route, and Memory Closeout Hooks are projected into each host's native event schema.
 - Application, Agent Contract, Hook protocol, installer state, and memory schema versions evolve independently.
 

@@ -61,7 +61,7 @@ keepygaga uninstall --yes
 
 - 宿主 MCP 注册统一指向稳定启动器 `keepygaga-mcp`。
 - 精简 Agent Contract 只保留稳定安全与路由规则。
-- 完整读取、收敛、mutation、冲突与 receipt 协议由 MCP `initialize.instructions` 下发。
+- 完整读取、收敛、mutation、冲突与 receipt 协议由协商后的 MCP Server instructions 下发（现代 discovery 或旧式 initialize 握手）。
 - 内置 Context Bootstrap、Memory Route、Memory Closeout 三个语义 Hook，再投影为各宿主的原生事件格式。
 - 应用、Agent Contract、Hook 协议、安装状态和记忆 schema 分别演进版本。
 
