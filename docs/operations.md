@@ -27,7 +27,7 @@ uv build
 uv run python scripts/check_distribution.py dist/*
 ```
 
-The MCP smoke must prove the exact eight-tool surface, initialize instructions, a real versioned mutation cycle, and Doctor. Distribution inspection must prove that built-in Hook and MCP instruction assets are present and that split Knowledge/dashboard code is absent.
+The MCP schema tests must prove the exact eight-tool surface, closed input schemas, action-oriented descriptions, and read/destructive/idempotent/open-world annotations. The MCP smoke must prove initialize instructions for clients that expose them, a real versioned mutation cycle, and Doctor. Distribution inspection must prove that built-in Hook and MCP instruction assets are present and that split Knowledge/dashboard code is absent. Ruff gates cyclomatic complexity at 10 so orchestration functions remain split at observable workflow boundaries.
 
 Host-adapter changes additionally need temporary-home setup/setup and uninstall/uninstall cycles. The second invocation must be `no_op`; unrelated MCP registrations, global-rule bytes outside the managed block, and unrelated Hooks must survive. Corrupt files, duplicate keys, symlinks, concurrent drift, and partial-commit evidence remain required risk cases.
 

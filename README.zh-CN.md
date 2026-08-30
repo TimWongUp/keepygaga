@@ -20,6 +20,10 @@ Keepygaga 独立提供完整运行时：八个 raw Tool 的 MCP Server、精简�
 
 公开 MCP Tool 固定为 `list`、`read`、`create`、`add`、`update`、`move`、`rename`、`delete`。
 
+### 升级到 0.5
+
+0.5 将每个 `move` operation 的单个 `fact` 字段改为必填的 `facts` 数组。升级后，缓存过 MCP schema 的客户端需要重新连接或刷新 Tool schema，并把同一源页/目标页的全部精确 Fact 放进该数组。这只改变 MCP 请求结构，不改变 Markdown 记忆格式，也不需要迁移现有记忆文件。
+
 ## 安装
 
 要求 Python 3.12+ 和 [`uv`](https://docs.astral.sh/uv/)。

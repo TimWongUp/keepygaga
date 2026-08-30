@@ -21,6 +21,24 @@ from keepygaga.memory import (
 )
 
 COMPATIBLE_MCP_NOTE = "compatible with MCP SDK 1.12-1.28 closed-schema adapter"
+READ_ONLY_ANNOTATIONS = ToolAnnotations(
+    readOnlyHint=True,
+    destructiveHint=False,
+    idempotentHint=True,
+    openWorldHint=False,
+)
+ADDITIVE_ANNOTATIONS = ToolAnnotations(
+    readOnlyHint=False,
+    destructiveHint=False,
+    idempotentHint=False,
+    openWorldHint=False,
+)
+MUTATING_ANNOTATIONS = ToolAnnotations(
+    readOnlyHint=False,
+    destructiveHint=True,
+    idempotentHint=False,
+    openWorldHint=False,
+)
 
 
 def _close_registered_tool(server: FastMCP, tool_name: str) -> None:
@@ -111,51 +129,51 @@ def _with_memory_store(
     return operation(store)
 
 
-@mcp.tool(name="list", annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False))
+@mcp.tool(name="list", annotations=READ_ONLY_ANNOTATIONS)
 def list_memory() -> dict[str, object]:
-    """List the live route catalog: canonical paths, descriptions, and aliases."""
+    """Use when the current Route Catalog is missing or stale. Returns live canonical page paths, descriptions, and aliases; it does not return Facts or write versions."""
     return _with_memory_store(MemoryStore.list_files)
 
 
-@mcp.tool(name="read", annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False))
+@mcp.tool(name="read", annotations=READ_ONLY_ANNOTATIONS)
 def read_memory(paths: ReadPaths) -> dict[str, object]:
-    """Read listed canonical pages; returns Facts, opaque write versions, and capacity signals."""
+    """Use before mutation unless current Page Snapshots are already available. Read unique canonical paths together; returned files contain Facts, opaque write versions, and capacity signals."""
     return _with_memory_store(lambda store: store.read(paths))
 
 
-@mcp.tool(name="create", annotations=ToolAnnotations(readOnlyHint=False))
+@mcp.tool(name="create", annotations=ADDITIVE_ANNOTATIONS)
 def create_pages(operations: CreateOperations) -> dict[str, object]:
-    """Create dynamic pages after full-batch validation; applied results include Page Snapshots and receipts."""
+    """Create new dynamic pages after full-batch validation. On applied, reuse returned Page Snapshots and receipts; do not call read or list solely to verify success."""
     return _with_memory_store(lambda store: store.create(operations))
 
 
-@mcp.tool(name="add", annotations=ToolAnnotations(readOnlyHint=False))
+@mcp.tool(name="add", annotations=ADDITIVE_ANNOTATIONS)
 def add_facts(operations: AddOperations) -> dict[str, object]:
-    """Add independent Facts using each page's latest Page Snapshot; applied results include current Page Snapshots and receipts."""
+    """Add independent Facts using each page's latest Page Snapshot. Group Facts for one page in one operation. On applied, reuse returned Page Snapshots and receipts; do not verify with read or list."""
     return _with_memory_store(lambda store: store.add(operations))
 
 
-@mcp.tool(name="update", annotations=ToolAnnotations(readOnlyHint=False))
+@mcp.tool(name="update", annotations=MUTATING_ANNOTATIONS)
 def update_memory(operations: UpdateOperations) -> dict[str, object]:
-    """Replace an exact Fact or page metadata; applied results include current Page Snapshots and receipts."""
+    """Replace an exact Fact or page metadata using the latest Page Snapshot. Use one operation per page. On applied, reuse returned Page Snapshots and receipts; do not verify with read or list."""
     return _with_memory_store(lambda store: store.update(operations))
 
 
-@mcp.tool(name="move", annotations=ToolAnnotations(readOnlyHint=False))
+@mcp.tool(name="move", annotations=MUTATING_ANNOTATIONS)
 def move_fact(operations: MoveOperations) -> dict[str, object]:
-    """Move exact Facts using both latest Page Snapshots; applied results include current Page Snapshots and receipts."""
+    """Move one or more exact Facts between existing pages using both latest Page Snapshots. Put all Facts for one source/destination pair in one operation. On applied, reuse returned Page Snapshots and receipts; do not verify with read or list."""
     return _with_memory_store(lambda store: store.move(operations))
 
 
-@mcp.tool(name="rename", annotations=ToolAnnotations(readOnlyHint=False))
+@mcp.tool(name="rename", annotations=MUTATING_ANNOTATIONS)
 def rename_page(operations: RenameOperations) -> dict[str, object]:
-    """Rename dynamic pages using latest Page Snapshots; applied results include current Page Snapshots and receipts."""
+    """Rename dynamic pages using latest Page Snapshots, one operation per page. On applied, reuse returned Page Snapshots and receipts; do not verify with read or list."""
     return _with_memory_store(lambda store: store.rename(operations))
 
 
-@mcp.tool(name="delete", annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True))
+@mcp.tool(name="delete", annotations=MUTATING_ANNOTATIONS)
 def delete_memory(operations: DeleteOperations) -> dict[str, object]:
-    """Delete exact Facts or dynamic pages after explicit current-turn user authorization; applied results include surviving Page Snapshots and receipts."""
+    """Delete exact Facts or dynamic pages only after explicit current-turn user authorization. On applied, reuse surviving Page Snapshots and receipts; do not verify with read or list."""
     return _with_memory_store(lambda store: store.delete(operations))
 
 

@@ -10,7 +10,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from io import StringIO
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 from filelock import FileLock
 from filelock import Timeout as FileLockTimeout
@@ -415,8 +415,33 @@ def _prepare_existing_json_mcp(
             f"multiple case-insensitive Keepygaga MCP registrations: {path}"
         )
     current_key = matching_keys[0]
-    updated = _updated_mcp_entry(
+    server_map["keepygaga"] = _legacy_mcp_entry(
         server_map[current_key],
+        invocation=invocation,
+        config_path=config_path,
+        fixed_fields=fixed_fields,
+    )
+    if current_key != "keepygaga":
+        server_map.pop(current_key)
+    merged = {**loaded, "mcpServers": server_map}
+    normalized_disabled = _normalized_disabled_servers(loaded, path)
+    if normalized_disabled is not None:
+        merged["disabledMcpServers"] = normalized_disabled
+    content = _json_bytes(merged)
+    if merged == loaded and original is not None:
+        content = original
+    return ExistingJsonMcpPlan(path, original, FilePlan(path, original, content))
+
+
+def _legacy_mcp_entry(
+    current: object,
+    *,
+    invocation: McpInvocation,
+    config_path: Path,
+    fixed_fields: Mapping[str, object],
+) -> dict[str, object]:
+    updated = _updated_mcp_entry(
+        current,
         invocation=invocation,
         config_path=config_path,
         fixed_fields=fixed_fields,
@@ -430,28 +455,25 @@ def _prepare_existing_json_mcp(
     updated["env"] = environment
     updated["args"] = ["-I", "-m", "keepygaga.server"] if invocation.args else []
     updated.pop("cwd", None)
-    if current_key == "keepygaga":
-        server_map[current_key] = updated
-    else:
-        server_map.pop(current_key)
-        server_map["keepygaga"] = updated
-    merged = {**loaded, "mcpServers": server_map}
+    return updated
+
+
+def _normalized_disabled_servers(
+    loaded: Mapping[str, Any], path: Path
+) -> list[str] | None:
     disabled_servers = loaded.get("disabledMcpServers")
-    if disabled_servers is not None:
-        if not isinstance(disabled_servers, list) or not all(
-            isinstance(key, str) for key in disabled_servers
-        ):
-            raise HostSetupError(f"disabledMcpServers must be a string list: {path}")
-        normalized_disabled: list[str] = []
-        for key in disabled_servers:
-            normalized = "keepygaga" if key.casefold() == "keepygaga" else key
-            if normalized not in normalized_disabled:
-                normalized_disabled.append(normalized)
-        merged["disabledMcpServers"] = normalized_disabled
-    content = _json_bytes(merged)
-    if merged == loaded and original is not None:
-        content = original
-    return ExistingJsonMcpPlan(path, original, FilePlan(path, original, content))
+    if disabled_servers is None:
+        return None
+    if not isinstance(disabled_servers, list) or not all(
+        isinstance(key, str) for key in disabled_servers
+    ):
+        raise HostSetupError(f"disabledMcpServers must be a string list: {path}")
+    normalized: list[str] = []
+    for key in disabled_servers:
+        canonical = "keepygaga" if key.casefold() == "keepygaga" else key
+        if canonical not in normalized:
+            normalized.append(canonical)
+    return normalized
 
 
 def _apply_existing_json_mcp(plan: ExistingJsonMcpPlan) -> dict[str, object]:
@@ -472,16 +494,7 @@ def _apply_existing_json_mcp(plan: ExistingJsonMcpPlan) -> dict[str, object]:
     return _apply_file(plan.update)
 
 
-def _load_hook_runtime(
-    host: str,
-    runtime_root: Path,
-    hook_python: Path,
-) -> tuple[
-    dict[str, Any],
-    Callable[[dict[str, Any], dict[str, Any]], dict[str, Any]],
-    Path,
-    Path,
-]:
+def _select_hook_runtime(runtime_root: Path, hook_python: Path) -> tuple[Path, Path]:
     raw_runtime = runtime_root.expanduser()
     if raw_runtime.is_symlink():
         raise HostSetupError(
@@ -502,6 +515,12 @@ def _load_hook_runtime(
             raise HostSetupError(
                 f"Agent Hook Runtime entrypoint is missing: {entrypoint}"
             )
+    return runtime, selected_python
+
+
+def _render_host_hook_fragment(
+    host: str, runtime: Path, selected_python: Path
+) -> dict[str, Any]:
     fragment_path = runtime / "config" / "hooks" / f"{host}.json"
     if fragment_path.is_symlink():
         raise HostSetupError(
@@ -525,6 +544,21 @@ def _load_hook_runtime(
     if not isinstance(markers, list):
         raise HostSetupError(f"rendered {host} Hook ownership markers are invalid")
     markers.extend(str(runtime / relative) for relative in HOOK_ENTRYPOINTS)
+    return rendered
+
+
+def _load_hook_runtime(
+    host: str,
+    runtime_root: Path,
+    hook_python: Path,
+) -> tuple[
+    dict[str, Any],
+    Callable[[dict[str, Any], dict[str, Any]], dict[str, Any]],
+    Path,
+    Path,
+]:
+    runtime, selected_python = _select_hook_runtime(runtime_root, hook_python)
+    rendered = _render_host_hook_fragment(host, runtime, selected_python)
     return rendered, _load_hook_merger(runtime), runtime, selected_python
 
 
@@ -646,10 +680,7 @@ def _apply_hooks(host_plan: FilePlan, selection: HookSelection) -> dict[str, obj
         host = _apply_file(host_plan)
         parts["host_config"] = host
     except Exception as exc:
-        if any(
-            isinstance(value, Mapping) and value.get("status") == "applied"
-            for value in parts.values()
-        ):
+        if _has_applied_component(parts):
             raise HostSetupPartialError(
                 f"Hook setup partially applied: {exc}",
                 {"hooks": _json_result("applied", **parts)},
@@ -657,15 +688,31 @@ def _apply_hooks(host_plan: FilePlan, selection: HookSelection) -> dict[str, obj
         if isinstance(exc, HostSetupError):
             raise
         raise HostSetupError(str(exc)) from exc
-    status = (
-        "applied"
-        if any(
-            isinstance(value, Mapping) and value.get("status") == "applied"
-            for value in parts.values()
-        )
-        else "no_op"
+    return _json_result(_component_status(parts), **parts)
+
+
+def _has_applied_component(components: Mapping[str, object]) -> bool:
+    return any(
+        isinstance(value, Mapping) and value.get("status") == "applied"
+        for value in components.values()
     )
-    return _json_result(status, **parts)
+
+
+def _component_status(components: Mapping[str, object]) -> str:
+    return "applied" if _has_applied_component(components) else "no_op"
+
+
+def _raise_component_failure(
+    exc: Exception, components: dict[str, object]
+) -> NoReturn:
+    if isinstance(exc, HostSetupPartialError):
+        components.update(exc.components)
+        raise HostSetupPartialError(str(exc), components) from exc
+    if _has_applied_component(components):
+        raise HostSetupPartialError(str(exc), components) from exc
+    if isinstance(exc, HostSetupError):
+        raise exc
+    raise HostSetupError(str(exc)) from exc
 
 
 def _run_components(
@@ -691,25 +738,10 @@ def _run_components(
                 "skipped", reason="compatible Agent Hook Runtime was not selected"
             )
         )
-    except HostSetupPartialError as exc:
-        components.update(exc.components)
-        raise HostSetupPartialError(str(exc), components) from exc
     except Exception as exc:
-        if any(
-            isinstance(value, Mapping) and value.get("status") == "applied"
-            for value in components.values()
-        ):
-            raise HostSetupPartialError(str(exc), components) from exc
-        if isinstance(exc, HostSetupError):
-            raise
-        raise HostSetupError(str(exc)) from exc
-    statuses = {
-        value.get("status")
-        for value in components.values()
-        if isinstance(value, Mapping)
-    }
+        _raise_component_failure(exc, components)
     return _json_result(
-        "applied" if "applied" in statuses else "no_op",
+        _component_status(components),
         host=host,
         version=__version__,
         doctor=doctor.get("status", "unknown"),
@@ -1144,27 +1176,12 @@ def setup_grok_host(
                     kind="legacy hooks file",
                 )
             )
-        except HostSetupPartialError as exc:
-            components.update(exc.components)
-            raise HostSetupPartialError(str(exc), components) from exc
         except Exception as exc:
-            if any(
-                isinstance(value, Mapping) and value.get("status") == "applied"
-                for value in components.values()
-            ):
-                raise HostSetupPartialError(str(exc), components) from exc
-            if isinstance(exc, HostSetupError):
-                raise
-            raise HostSetupError(str(exc)) from exc
+            _raise_component_failure(exc, components)
     finally:
         lock.release()
-    statuses = {
-        value.get("status")
-        for value in components.values()
-        if isinstance(value, Mapping)
-    }
     return _json_result(
-        "applied" if "applied" in statuses else "no_op",
+        _component_status(components),
         host="grok",
         version=__version__,
         doctor=doctor.get("status", "unknown"),
@@ -1299,23 +1316,15 @@ def setup_hermes_host(
                 if runtime["status"] == "applied":
                     hook_result["status"] = "applied"
         except Exception as exc:
-            if any(
-                isinstance(value, Mapping) and value.get("status") == "applied"
-                for value in components.values()
-            ):
+            if _has_applied_component(components):
                 raise HostSetupPartialError(str(exc), components) from exc
             if isinstance(exc, HostSetupError):
                 raise
             raise HostSetupError(str(exc)) from exc
     finally:
         lock.release()
-    statuses = {
-        value.get("status")
-        for value in components.values()
-        if isinstance(value, Mapping)
-    }
     return _json_result(
-        "applied" if "applied" in statuses else "no_op",
+        _component_status(components),
         host="hermes",
         version=__version__,
         doctor=doctor.get("status", "unknown"),
@@ -1478,25 +1487,10 @@ def _run_uninstall_components(
             if mcp_plan is not None
             else _absent_component(mcp_path, kind="MCP config")
         )
-    except HostSetupPartialError as exc:
-        components.update(exc.components)
-        raise HostSetupPartialError(str(exc), components) from exc
     except Exception as exc:
-        if any(
-            isinstance(value, Mapping) and value.get("status") == "applied"
-            for value in components.values()
-        ):
-            raise HostSetupPartialError(str(exc), components) from exc
-        if isinstance(exc, HostSetupError):
-            raise
-        raise HostSetupError(str(exc)) from exc
-    statuses = {
-        value.get("status")
-        for value in components.values()
-        if isinstance(value, Mapping)
-    }
+        _raise_component_failure(exc, components)
     return _json_result(
-        "applied" if "applied" in statuses else "no_op",
+        _component_status(components),
         host=host,
         version=__version__,
         **components,
@@ -1822,28 +1816,13 @@ def uninstall_grok_host(
                     reason="Grok home was not found",
                 )
             )
-        except HostSetupPartialError as exc:
-            components.update(exc.components)
-            raise HostSetupPartialError(str(exc), components) from exc
         except Exception as exc:
-            if any(
-                isinstance(value, Mapping) and value.get("status") == "applied"
-                for value in components.values()
-            ):
-                raise HostSetupPartialError(str(exc), components) from exc
-            if isinstance(exc, HostSetupError):
-                raise
-            raise HostSetupError(str(exc)) from exc
+            _raise_component_failure(exc, components)
     finally:
         if lock is not None:
             lock.release()
-    statuses = {
-        value.get("status")
-        for value in components.values()
-        if isinstance(value, Mapping)
-    }
     return _json_result(
-        "applied" if "applied" in statuses else "no_op",
+        _component_status(components),
         host="grok",
         version=__version__,
         **components,
@@ -1851,17 +1830,7 @@ def uninstall_grok_host(
     )
 
 
-def _prepare_hermes_config_removal(
-    path: Path,
-    *,
-    fragment: Mapping[str, Any] | None,
-    merger: Callable[[dict[str, Any], dict[str, Any]], dict[str, Any]] | None,
-) -> HermesConfigPlan | None:
-    original, loaded = _load_yaml_object(path)
-    if original is None:
-        return None
-    merged = deepcopy(loaded)
-    mcp_changed = False
+def _remove_hermes_mcp(merged: MutableMapping[str, Any], path: Path) -> bool:
     raw_servers = merged.get("mcp_servers")
     if isinstance(raw_servers, MutableMapping) and any(
         isinstance(key, str) and key.casefold() == "keepygaga" for key in raw_servers
@@ -1876,31 +1845,53 @@ def _prepare_hermes_config_removal(
                 f"multiple case-insensitive Keepygaga MCP registrations: {path}"
             )
         raw_servers.pop(matching[0])
-        mcp_changed = True
+        return True
     elif raw_servers is not None and not isinstance(raw_servers, MutableMapping):
         raise HostSetupError(f"mcp_servers must be a mapping: {path}")
-    hooks_changed = False
-    if fragment is not None and merger is not None:
-        before_hooks = deepcopy(merged.get("hooks"))
-        strip_fragment = dict(fragment)
-        strip_fragment["payload"] = {}
-        try:
-            hook_merged = merger(_plain_data(merged), strip_fragment)
-        except Exception as exc:
-            raise HostSetupError(
-                f"Agent Hook Runtime rejected Hermes hooks: {exc}"
-            ) from exc
-        if not isinstance(hook_merged, dict):
-            raise HostSetupError("Agent Hook Runtime merger must return a mapping")
-        desired_hooks = hook_merged.get("hooks")
-        if before_hooks is None and desired_hooks in ({}, []):
-            desired_hooks = None
-        hooks_changed = _plain_data(before_hooks) != _plain_data(desired_hooks)
-        if hooks_changed:
-            if desired_hooks is None:
-                merged.pop("hooks", None)
-            else:
-                merged["hooks"] = desired_hooks
+    return False
+
+
+def _remove_hermes_hooks(
+    merged: MutableMapping[str, Any],
+    fragment: Mapping[str, Any] | None,
+    merger: Callable[[dict[str, Any], dict[str, Any]], dict[str, Any]] | None,
+) -> bool:
+    if fragment is None or merger is None:
+        return False
+    before_hooks = deepcopy(merged.get("hooks"))
+    strip_fragment = dict(fragment)
+    strip_fragment["payload"] = {}
+    try:
+        hook_merged = merger(_plain_data(merged), strip_fragment)
+    except Exception as exc:
+        raise HostSetupError(
+            f"Agent Hook Runtime rejected Hermes hooks: {exc}"
+        ) from exc
+    if not isinstance(hook_merged, dict):
+        raise HostSetupError("Agent Hook Runtime merger must return a mapping")
+    desired_hooks = hook_merged.get("hooks")
+    if before_hooks is None and desired_hooks in ({}, []):
+        desired_hooks = None
+    changed = _plain_data(before_hooks) != _plain_data(desired_hooks)
+    if changed and desired_hooks is None:
+        merged.pop("hooks", None)
+    elif changed:
+        merged["hooks"] = desired_hooks
+    return changed
+
+
+def _prepare_hermes_config_removal(
+    path: Path,
+    *,
+    fragment: Mapping[str, Any] | None,
+    merger: Callable[[dict[str, Any], dict[str, Any]], dict[str, Any]] | None,
+) -> HermesConfigPlan | None:
+    original, loaded = _load_yaml_object(path)
+    if original is None:
+        return None
+    merged = deepcopy(loaded)
+    mcp_changed = _remove_hermes_mcp(merged, path)
+    hooks_changed = _remove_hermes_hooks(merged, fragment, merger)
     content = _yaml_bytes(merged)
     if not mcp_changed and not hooks_changed and original is not None:
         content = original
@@ -1997,10 +1988,7 @@ def uninstall_hermes_host(
                         },
                     )
         except Exception as exc:
-            if any(
-                isinstance(value, Mapping) and value.get("status") == "applied"
-                for value in components.values()
-            ):
+            if _has_applied_component(components):
                 raise HostSetupPartialError(str(exc), components) from exc
             if isinstance(exc, HostSetupError):
                 raise
@@ -2008,13 +1996,8 @@ def uninstall_hermes_host(
     finally:
         if lock is not None:
             lock.release()
-    statuses = {
-        value.get("status")
-        for value in components.values()
-        if isinstance(value, Mapping)
-    }
     return _json_result(
-        "applied" if "applied" in statuses else "no_op",
+        _component_status(components),
         host="hermes",
         version=__version__,
         **components,

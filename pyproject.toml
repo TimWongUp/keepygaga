@@ -62,8 +62,11 @@ version = { attr = "keepygaga.version.APPLICATION_VERSION" }
 target-version = "py312"
 
 [tool.ruff.lint]
-select = ["B", "E", "F", "I", "SIM", "UP"]
+select = ["B", "C90", "E", "F", "I", "SIM", "UP"]
 ignore = ["E501"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
 
 [tool.pyright]
 include = ["keepygaga", "scripts", "tests"]

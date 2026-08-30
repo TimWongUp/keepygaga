@@ -13,6 +13,35 @@ class HookFragmentError(ValueError):
     pass
 
 
+def _valid_token_sets(value: object, *, length: int | None = None) -> bool:
+    return isinstance(value, list) and all(
+        isinstance(tokens, list)
+        and tokens
+        and (length is None or len(tokens) == length)
+        and all(isinstance(token, str) and token for token in tokens)
+        for tokens in value
+    )
+
+
+def _validate_ownership(fragment: dict[str, Any]) -> None:
+    markers = fragment.get("owned_command_markers")
+    if not isinstance(markers, list) or not all(
+        isinstance(marker, str) and marker for marker in markers
+    ):
+        raise HookFragmentError("owned command markers are invalid")
+    token_sets = fragment.get("owned_command_token_sets", [])
+    if not _valid_token_sets(token_sets):
+        raise HookFragmentError("owned command token sets are invalid")
+    suffix_sets = fragment.get("owned_command_suffix_token_sets", [])
+    if not _valid_token_sets(suffix_sets):
+        raise HookFragmentError("owned command suffix token sets are invalid")
+    signatures = fragment.get("owned_command_signatures", [])
+    if not _valid_token_sets(signatures, length=4):
+        raise HookFragmentError("owned command signatures are invalid")
+    if not markers and not token_sets and not suffix_sets and not signatures:
+        raise HookFragmentError("fragment must declare owned commands")
+
+
 def _validate_fragment(fragment: dict[str, Any]) -> None:
     if fragment.get("schema") != FRAGMENT_SCHEMA:
         raise HookFragmentError("unsupported hook fragment schema")
@@ -24,37 +53,7 @@ def _validate_fragment(fragment: dict[str, Any]) -> None:
     required = fragment.get("required_top_level", {})
     if not isinstance(required, dict) or target in required:
         raise HookFragmentError("required_top_level is invalid")
-    markers = fragment.get("owned_command_markers")
-    if not isinstance(markers, list) or not all(
-        isinstance(marker, str) and marker for marker in markers
-    ):
-        raise HookFragmentError("owned command markers are invalid")
-    token_sets = fragment.get("owned_command_token_sets", [])
-    if not isinstance(token_sets, list) or not all(
-        isinstance(tokens, list)
-        and tokens
-        and all(isinstance(token, str) and token for token in tokens)
-        for tokens in token_sets
-    ):
-        raise HookFragmentError("owned command token sets are invalid")
-    suffix_sets = fragment.get("owned_command_suffix_token_sets", [])
-    if not isinstance(suffix_sets, list) or not all(
-        isinstance(tokens, list)
-        and tokens
-        and all(isinstance(token, str) and token for token in tokens)
-        for tokens in suffix_sets
-    ):
-        raise HookFragmentError("owned command suffix token sets are invalid")
-    signatures = fragment.get("owned_command_signatures", [])
-    if not isinstance(signatures, list) or not all(
-        isinstance(signature, list)
-        and len(signature) == 4
-        and all(isinstance(token, str) and token for token in signature)
-        for signature in signatures
-    ):
-        raise HookFragmentError("owned command signatures are invalid")
-    if not markers and not token_sets and not suffix_sets and not signatures:
-        raise HookFragmentError("fragment must declare owned commands")
+    _validate_ownership(fragment)
     payload = fragment.get("payload")
     if not isinstance(payload, dict) or not all(
         isinstance(event, str) and isinstance(entries, list)

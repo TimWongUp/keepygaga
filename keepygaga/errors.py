@@ -14,6 +14,7 @@ class MemoryValidationError(ValueError):
         applied_paths: Sequence[str] | None = None,
         current: int | None = None,
         limit: int | None = None,
+        recovery: str | None = None,
     ):
         self.status = status
         self.path = path
@@ -21,6 +22,7 @@ class MemoryValidationError(ValueError):
         self.applied_paths = list(applied_paths or [])
         self.current = current
         self.limit = limit
+        self.recovery = recovery
         super().__init__(message)
 
     def response(self) -> dict[str, object]:
@@ -35,4 +37,6 @@ class MemoryValidationError(ValueError):
             payload["current"] = self.current
         if self.limit is not None:
             payload["limit"] = self.limit
+        if self.recovery is not None:
+            payload["recovery"] = self.recovery
         return payload

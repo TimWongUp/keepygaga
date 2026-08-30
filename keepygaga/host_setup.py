@@ -326,30 +326,79 @@ def _prepare_codex_mcp(
     )
 
 
-def _apply_codex_mcp_plan(plan: CodexMcpPlan) -> dict[str, object]:
-    if not plan.needs_update:
-        current = _run_codex(
+def _verify_unchanged_codex_mcp(plan: CodexMcpPlan) -> None:
+    current = _run_codex(
+        plan.selected_codex,
+        plan.codex_home,
+        ["mcp", "get", "keepygaga", "--json"],
+    )
+    try:
+        current_payload = json.loads(current.stdout)
+    except json.JSONDecodeError as exc:
+        raise HostSetupError(
+            "Keepygaga MCP registration changed after preflight"
+        ) from exc
+    if (
+        current.returncode != 0
+        or not isinstance(current_payload, Mapping)
+        or not _matching_mcp_registration(
+            current_payload,
+            plan.selected_python,
+            plan.selected_args,
+            plan.desired_env,
+        )
+    ):
+        raise HostSetupError("Keepygaga MCP registration changed after preflight")
+
+
+def _verify_codex_mcp_update(plan: CodexMcpPlan) -> None:
+    verified = _run_codex(
+        plan.selected_codex,
+        plan.codex_home,
+        ["mcp", "get", "keepygaga", "--json"],
+    )
+    verified_payload = json.loads(verified.stdout)
+    if verified.returncode != 0 or not isinstance(verified_payload, Mapping):
+        raise HostSetupError("Codex MCP registration could not be verified")
+    if not _matching_mcp_registration(
+        verified_payload,
+        plan.selected_python,
+        plan.selected_args,
+        plan.desired_env,
+    ):
+        raise HostSetupError(
+            "Codex MCP registration does not match the requested transport"
+        )
+
+
+def _codex_mcp_recovery(
+    plan: CodexMcpPlan, config_backup: Path | None
+) -> dict[str, object]:
+    if config_backup is not None:
+        return {
+            "action": "restore_file",
+            "source": str(config_backup),
+            "destination": str(plan.codex_config),
+        }
+    if plan.current_payload is None:
+        removed = _run_codex(
             plan.selected_codex,
             plan.codex_home,
-            ["mcp", "get", "keepygaga", "--json"],
+            ["mcp", "remove", "keepygaga"],
         )
-        try:
-            current_payload = json.loads(current.stdout)
-        except json.JSONDecodeError as exc:
-            raise HostSetupError(
-                "Keepygaga MCP registration changed after preflight"
-            ) from exc
-        if (
-            current.returncode != 0
-            or not isinstance(current_payload, Mapping)
-            or not _matching_mcp_registration(
-                current_payload,
-                plan.selected_python,
-                plan.selected_args,
-                plan.desired_env,
-            )
-        ):
-            raise HostSetupError("Keepygaga MCP registration changed after preflight")
+        return {
+            "action": "remove_new_registration",
+            "status": "applied" if removed.returncode == 0 else "failed",
+        }
+    return {
+        "action": "manual_restore_required",
+        "reason": "the previous registration came from outside config.toml",
+    }
+
+
+def _apply_codex_mcp_plan(plan: CodexMcpPlan) -> dict[str, object]:
+    if not plan.needs_update:
+        _verify_unchanged_codex_mcp(plan)
         return _json_result("no_op", key="keepygaga")
     live_config = plan.codex_config.read_bytes() if plan.codex_config.exists() else None
     if live_config != plan.config_original:
@@ -382,46 +431,8 @@ def _apply_codex_mcp_plan(plan: CodexMcpPlan) -> dict[str, object]:
         detail = added.stderr.strip() or added.stdout.strip() or "unknown Codex error"
         raise HostSetupError(f"Codex MCP registration failed: {detail}")
     try:
-        verified = _run_codex(
-            plan.selected_codex,
-            plan.codex_home,
-            ["mcp", "get", "keepygaga", "--json"],
-        )
-        verified_payload = json.loads(verified.stdout)
-        if verified.returncode != 0 or not isinstance(verified_payload, Mapping):
-            raise HostSetupError("Codex MCP registration could not be verified")
-        if not _matching_mcp_registration(
-            verified_payload,
-            plan.selected_python,
-            plan.selected_args,
-            plan.desired_env,
-        ):
-            raise HostSetupError(
-                "Codex MCP registration does not match the requested transport"
-            )
+        _verify_codex_mcp_update(plan)
     except (HostSetupError, json.JSONDecodeError) as exc:
-        recovery: dict[str, object]
-        if config_backup is not None:
-            recovery = {
-                "action": "restore_file",
-                "source": str(config_backup),
-                "destination": str(plan.codex_config),
-            }
-        elif plan.current_payload is None:
-            removed = _run_codex(
-                plan.selected_codex,
-                plan.codex_home,
-                ["mcp", "remove", "keepygaga"],
-            )
-            recovery = {
-                "action": "remove_new_registration",
-                "status": "applied" if removed.returncode == 0 else "failed",
-            }
-        else:
-            recovery = {
-                "action": "manual_restore_required",
-                "reason": "the previous registration came from outside config.toml",
-            }
         raise HostSetupPartialError(
             f"Codex accepted the MCP update but verification failed: {exc}",
             {
@@ -430,7 +441,7 @@ def _apply_codex_mcp_plan(plan: CodexMcpPlan) -> dict[str, object]:
                     key="keepygaga",
                     verified=False,
                     backup=str(config_backup) if config_backup else None,
-                    recovery=recovery,
+                    recovery=_codex_mcp_recovery(plan, config_backup),
                 )
             },
         ) from exc
@@ -463,133 +474,110 @@ def _reconcile_hook_runtime_config(path: Path, memory_root: Path) -> dict[str, o
     return _json_result(status, path=str(path), backup=backup)
 
 
-def _prepare_codex_hooks(
+def _load_codex_hooks(path: Path) -> tuple[bytes | None, dict[str, Any]]:
+    _ensure_regular_target(path)
+    original = path.read_bytes() if path.exists() else None
+    if original is None:
+        return None, {}
+    try:
+        loaded = json.loads(original.decode("utf-8"))
+    except (UnicodeError, json.JSONDecodeError) as exc:
+        raise HostSetupError(f"Codex hooks file is invalid JSON: {path}") from exc
+    if not isinstance(loaded, dict):
+        raise HostSetupError(f"Codex hooks file must be an object: {path}")
+    return original, loaded
+
+
+def _prepare_builtin_codex_hooks(
     codex_home: Path,
     memory_root: Path,
-    runtime_root: Path | None,
-    hook_python: Path | None,
-    *,
-    config_path: Path | None = None,
-    hook_config_path: Path | None = None,
+    config_path: Path,
 ) -> CodexHookPlan:
-    if runtime_root is None and hook_python is None:
-        if config_path is None:
-            raise HostSetupError("config path is required for built-in Keepygaga Hooks")
-        try:
-            launcher = resolve_launcher("keepygaga")
-        except RuntimeError as exc:
-            raise HostSetupError(str(exc)) from exc
-        rendered = build_fragment(
-            "codex",
-            launcher=launcher,
-            config_path=config_path.resolve(),
-        )
-        hooks_path = codex_home / "hooks.json"
-        _ensure_regular_target(hooks_path)
-        hooks_original = hooks_path.read_bytes() if hooks_path.exists() else None
-        existing: dict[str, Any] = {}
-        if hooks_original is not None:
-            try:
-                loaded = json.loads(hooks_original.decode("utf-8"))
-            except (UnicodeError, json.JSONDecodeError) as exc:
-                raise HostSetupError(
-                    f"Codex hooks file is invalid JSON: {hooks_path}"
-                ) from exc
-            if not isinstance(loaded, dict):
-                raise HostSetupError(
-                    f"Codex hooks file must be an object: {hooks_path}"
-                )
-            existing = loaded
-        try:
-            merged = merge_hook_fragment(existing, rendered)
-        except Exception as exc:
-            raise HostSetupError(f"Keepygaga rejected Codex hooks: {exc}") from exc
-        try:
-            smoke_hook = rendered["payload"]["SessionStart"][0]["hooks"][0]
-            smoke_command = smoke_hook["command"]
-        except (KeyError, IndexError, TypeError) as exc:
-            raise HostSetupError(
-                "Keepygaga built-in Codex context Hook command is invalid"
-            ) from exc
-        if not isinstance(smoke_command, str) or not smoke_command:
-            raise HostSetupError(
-                "Keepygaga built-in Codex context Hook command is invalid"
-            )
-        return CodexHookPlan(
-            hooks_path=hooks_path,
-            hooks_original=hooks_original,
-            hook_config_path=Path("."),
-            hook_config_original=None,
-            hook_config_content=b"",
-            memory_root=memory_root,
-            selected_python=Path(os.path.abspath(sys.executable)),
-            selected_runtime=launcher,
-            merged=merged,
-            builtin=True,
-            config_path=config_path.resolve(),
-            smoke_command=smoke_command,
-        )
-    if runtime_root is None or hook_python is None:
-        raise HostSetupError("hook runtime and hook Python must be supplied together")
-    raw_runtime = runtime_root.expanduser()
-    if raw_runtime.is_symlink():
-        raise HostSetupError(
-            f"Agent Hook Runtime root must not be a symlink: {raw_runtime}"
-        )
-    selected_runtime = raw_runtime.resolve()
-    selected_python = Path(os.path.abspath(hook_python.expanduser()))
-    if not selected_runtime.is_dir():
-        raise HostSetupError(f"Agent Hook Runtime root is invalid: {selected_runtime}")
-    if not selected_python.is_file():
-        raise HostSetupError(f"Hook Python is invalid: {selected_python}")
-    _probe_hook_python(selected_python)
-    _validate_hook_command_path(selected_runtime, label="Agent Hook Runtime root")
-    _validate_hook_command_path(selected_python, label="Hook Python")
-    for relative in HOOK_ENTRYPOINTS:
-        entrypoint = selected_runtime / relative
-        if not entrypoint.is_file() or entrypoint.is_symlink():
-            raise HostSetupError(
-                f"Agent Hook Runtime entrypoint is missing: {entrypoint}"
-            )
-
-    fragment_path = selected_runtime / HOOK_FRAGMENT_RELATIVE_PATH
-    if fragment_path.is_symlink() or not fragment_path.is_file():
-        raise HostSetupError(
-            f"Codex Hook fragment must be a regular file: {fragment_path}"
-        )
     try:
-        fragment = json.loads(fragment_path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
-        raise HostSetupError(
-            f"Codex Hook fragment could not be loaded: {fragment_path}"
-        ) from exc
-    if not isinstance(fragment, dict) or fragment.get("host") != "codex":
-        raise HostSetupError("Agent Hook Runtime Codex fragment is invalid")
-    rendered = _render_fragment(
-        fragment,
-        {"{{PYTHON}}": str(selected_python), "{{RUNTIME_ROOT}}": str(selected_runtime)},
+        launcher = resolve_launcher("keepygaga")
+    except RuntimeError as exc:
+        raise HostSetupError(str(exc)) from exc
+    rendered = build_fragment(
+        "codex", launcher=launcher, config_path=config_path.resolve()
     )
-    if not isinstance(rendered, dict):
-        raise HostSetupError("rendered Codex Hook fragment is invalid")
-    markers = rendered.get("owned_command_markers")
-    if not isinstance(markers, list):
-        raise HostSetupError("rendered Codex Hook ownership markers are invalid")
-    markers.extend(str(selected_runtime / relative) for relative in HOOK_ENTRYPOINTS)
+    hooks_path = codex_home / "hooks.json"
+    hooks_original, existing = _load_codex_hooks(hooks_path)
+    try:
+        merged = merge_hook_fragment(existing, rendered)
+    except Exception as exc:
+        raise HostSetupError(f"Keepygaga rejected Codex hooks: {exc}") from exc
+    try:
+        smoke_command = rendered["payload"]["SessionStart"][0]["hooks"][0][
+            "command"
+        ]
+    except (KeyError, IndexError, TypeError) as exc:
+        raise HostSetupError(
+            "Keepygaga built-in Codex context Hook command is invalid"
+        ) from exc
+    if not isinstance(smoke_command, str) or not smoke_command:
+        raise HostSetupError("Keepygaga built-in Codex context Hook command is invalid")
+    return CodexHookPlan(
+        hooks_path=hooks_path,
+        hooks_original=hooks_original,
+        hook_config_path=Path("."),
+        hook_config_original=None,
+        hook_config_content=b"",
+        memory_root=memory_root,
+        selected_python=Path(os.path.abspath(sys.executable)),
+        selected_runtime=launcher,
+        merged=merged,
+        builtin=True,
+        config_path=config_path.resolve(),
+        smoke_command=smoke_command,
+    )
 
+
+def _prepare_external_codex_hooks(
+    codex_home: Path,
+    memory_root: Path,
+    runtime_root: Path,
+    hook_python: Path,
+    hook_config_path: Path | None,
+) -> CodexHookPlan:
+    selected_runtime, selected_python = _select_hook_runtime(
+        runtime_root, hook_python
+    )
+    rendered = _read_codex_hook_fragment(selected_runtime, selected_python)
+    selected_hook_config, hook_config_original, hook_config_content = (
+        _prepare_external_hook_config(hook_config_path, memory_root)
+    )
+    hooks_path = codex_home / "hooks.json"
+    hooks_original, existing = _load_codex_hooks(hooks_path)
+    merger = _load_hook_merger(selected_runtime)
+    merged = _merge_external_codex_hooks(existing, rendered, merger)
+
+    return CodexHookPlan(
+        hooks_path=hooks_path,
+        hooks_original=hooks_original,
+        hook_config_path=selected_hook_config,
+        hook_config_original=hook_config_original,
+        hook_config_content=hook_config_content,
+        memory_root=memory_root,
+        selected_python=selected_python,
+        selected_runtime=selected_runtime,
+        merged=merged,
+    )
+
+
+def _prepare_external_hook_config(
+    hook_config_path: Path | None, memory_root: Path
+) -> tuple[Path, bytes | None, bytes]:
     default_hook_config = _default_hook_config_path()
-    selected_hook_config = (
+    selected = (
         Path(os.path.abspath(hook_config_path.expanduser()))
         if hook_config_path is not None
         else default_hook_config
     )
-    if selected_hook_config != default_hook_config:
+    if selected != default_hook_config:
         raise HostSetupError(
             "selected Hook config is not the path Agent Hook Runtime will load; "
             "set AGENT_HOOK_RUNTIME_CONFIG to the same absolute path"
         )
-    hook_config_original, hook_config_content = prepare_hook_runtime_config(
-        selected_hook_config, memory_root
-    )
     environment_root = os.environ.get("AGENT_HOOK_RUNTIME_MEMORY_ROOT", "").strip()
     if environment_root:
         environment_path = Path(environment_root).expanduser()
@@ -599,22 +587,13 @@ def _prepare_codex_hooks(
             raise HostSetupError(
                 "AGENT_HOOK_RUNTIME_MEMORY_ROOT conflicts with configured memory.root"
             )
+    original, content = prepare_hook_runtime_config(selected, memory_root)
+    return selected, original, content
 
-    hooks_path = codex_home / "hooks.json"
-    _ensure_regular_target(hooks_path)
-    hooks_original = hooks_path.read_bytes() if hooks_path.exists() else None
-    existing: dict[str, Any] = {}
-    if hooks_path.exists():
-        try:
-            loaded = json.loads(_read_utf8(hooks_path))
-        except json.JSONDecodeError as exc:
-            raise HostSetupError(
-                f"Codex hooks file is invalid JSON: {hooks_path}"
-            ) from exc
-        if not isinstance(loaded, dict):
-            raise HostSetupError(f"Codex hooks file must be an object: {hooks_path}")
-        existing = loaded
-    merger = _load_hook_merger(selected_runtime)
+
+def _merge_external_codex_hooks(
+    existing: dict[str, Any], rendered: dict[str, Any], merger: Any
+) -> dict[str, Any]:
     try:
         merged = merger(existing, rendered)
     except Exception as exc:
@@ -630,75 +609,46 @@ def _prepare_codex_hooks(
     try:
         json.dumps(merged, ensure_ascii=False)
     except (TypeError, ValueError) as exc:
-        raise HostSetupError(
-            "Agent Hook Runtime merger returned non-JSON data"
-        ) from exc
+        raise HostSetupError("Agent Hook Runtime merger returned non-JSON data") from exc
+    return merged
 
-    return CodexHookPlan(
-        hooks_path=hooks_path,
-        hooks_original=hooks_original,
-        hook_config_path=selected_hook_config,
-        hook_config_original=hook_config_original,
-        hook_config_content=hook_config_content,
-        memory_root=memory_root,
-        selected_python=selected_python,
-        selected_runtime=selected_runtime,
-        merged=merged,
+
+def _prepare_codex_hooks(
+    codex_home: Path,
+    memory_root: Path,
+    runtime_root: Path | None,
+    hook_python: Path | None,
+    *,
+    config_path: Path | None = None,
+    hook_config_path: Path | None = None,
+) -> CodexHookPlan:
+    if runtime_root is None and hook_python is None:
+        if config_path is None:
+            raise HostSetupError("config path is required for built-in Keepygaga Hooks")
+        return _prepare_builtin_codex_hooks(codex_home, memory_root, config_path)
+    if runtime_root is None or hook_python is None:
+        raise HostSetupError("hook runtime and hook Python must be supplied together")
+    return _prepare_external_codex_hooks(
+        codex_home, memory_root, runtime_root, hook_python, hook_config_path
     )
 
 
-def _run_hook_smoke(plan: CodexHookPlan) -> None:
-    smoke_environment = {
-        key: value
-        for key in (
-            "APPDATA",
-            "HOME",
-            "LOCALAPPDATA",
-            "PATH",
-            "SYSTEMROOT",
-            "TEMP",
-            "TMP",
-            "TMPDIR",
-            "USERPROFILE",
-            "WINDIR",
-            "XDG_CONFIG_HOME",
-        )
-        if (value := os.environ.get(key)) is not None
-    }
+def _hook_smoke_command(plan: CodexHookPlan) -> tuple[str | list[str], str | None]:
     if not plan.builtin:
-        smoke_environment["AGENT_HOOK_RUNTIME_CONFIG"] = str(plan.hook_config_path)
-    else:
-        smoke_environment["PYTHONIOENCODING"] = "utf-8"
-    if plan.builtin:
-        if plan.smoke_command is None:
-            raise HostSetupError("Codex context Hook smoke command is missing")
-        if os.name == "nt":
-            command_shell = os.environ.get("COMSPEC", "cmd.exe")
-            command: str | list[str] = f'{command_shell} /C "{plan.smoke_command}"'
-            executable = command_shell
-        else:
-            command = ["/bin/sh", "-c", plan.smoke_command]
-            executable = None
-    else:
-        command = [
+        return [
             str(plan.selected_python),
             str(plan.selected_runtime / "hooks/context_hook.py"),
             "codex",
-        ]
-        executable = None
-    try:
-        smoke = subprocess.run(
-            command,
-            executable=executable,
-            check=False,
-            capture_output=True,
-            encoding="utf-8",
-            input="{}",
-            env=smoke_environment,
-            timeout=15,
-        )
-    except (OSError, subprocess.SubprocessError) as exc:
-        raise HostSetupError(f"Codex context Hook smoke could not run: {exc}") from exc
+        ], None
+    if plan.smoke_command is None:
+        raise HostSetupError("Codex context Hook smoke command is missing")
+    if os.name == "nt":
+        command_shell = os.environ.get("COMSPEC", "cmd.exe")
+        return f'{command_shell} /C "{plan.smoke_command}"', command_shell
+    return ["/bin/sh", "-c", plan.smoke_command], None
+
+
+def _validate_hook_smoke(plan: CodexHookPlan, smoke: subprocess.CompletedProcess[str]) -> None:
     if smoke.returncode != 0:
         detail = smoke.stderr.strip()[:500]
         suffix = f": {detail}" if detail else ""
@@ -723,6 +673,45 @@ def _run_hook_smoke(plan: CodexHookPlan) -> None:
             raise HostSetupError(
                 "Codex context Hook smoke returned an invalid SessionStart payload"
             )
+
+
+def _run_hook_smoke(plan: CodexHookPlan) -> None:
+    smoke_environment = {
+        key: value
+        for key in (
+            "APPDATA",
+            "HOME",
+            "LOCALAPPDATA",
+            "PATH",
+            "SYSTEMROOT",
+            "TEMP",
+            "TMP",
+            "TMPDIR",
+            "USERPROFILE",
+            "WINDIR",
+            "XDG_CONFIG_HOME",
+        )
+        if (value := os.environ.get(key)) is not None
+    }
+    if not plan.builtin:
+        smoke_environment["AGENT_HOOK_RUNTIME_CONFIG"] = str(plan.hook_config_path)
+    else:
+        smoke_environment["PYTHONIOENCODING"] = "utf-8"
+    command, executable = _hook_smoke_command(plan)
+    try:
+        smoke = subprocess.run(
+            command,
+            executable=executable,
+            check=False,
+            capture_output=True,
+            encoding="utf-8",
+            input="{}",
+            env=smoke_environment,
+            timeout=15,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise HostSetupError(f"Codex context Hook smoke could not run: {exc}") from exc
+    _validate_hook_smoke(plan, smoke)
 
 
 def _apply_codex_hooks_plan(plan: CodexHookPlan) -> dict[str, object]:
@@ -900,10 +889,7 @@ def setup_codex_host(
     )
 
 
-def _load_codex_hook_fragment(
-    runtime_root: Path,
-    hook_python: Path,
-) -> tuple[Path, Path, dict[str, Any], Any]:
+def _select_hook_runtime(runtime_root: Path, hook_python: Path) -> tuple[Path, Path]:
     raw_runtime = runtime_root.expanduser()
     if raw_runtime.is_symlink():
         raise HostSetupError(
@@ -924,6 +910,12 @@ def _load_codex_hook_fragment(
             raise HostSetupError(
                 f"Agent Hook Runtime entrypoint is missing: {entrypoint}"
             )
+    return selected_runtime, selected_python
+
+
+def _read_codex_hook_fragment(
+    selected_runtime: Path, selected_python: Path
+) -> dict[str, Any]:
     fragment_path = selected_runtime / HOOK_FRAGMENT_RELATIVE_PATH
     if fragment_path.is_symlink() or not fragment_path.is_file():
         raise HostSetupError(
@@ -947,21 +939,27 @@ def _load_codex_hook_fragment(
     if not isinstance(markers, list):
         raise HostSetupError("rendered Codex Hook ownership markers are invalid")
     markers.extend(str(selected_runtime / relative) for relative in HOOK_ENTRYPOINTS)
+    return rendered
+
+
+def _load_codex_hook_fragment(
+    runtime_root: Path,
+    hook_python: Path,
+) -> tuple[Path, Path, dict[str, Any], Any]:
+    selected_runtime, selected_python = _select_hook_runtime(
+        runtime_root, hook_python
+    )
+    rendered = _read_codex_hook_fragment(selected_runtime, selected_python)
     merger = _load_hook_merger(selected_runtime)
     return selected_runtime, selected_python, rendered, merger
 
 
-def _prepare_codex_hook_strip(
-    codex_home: Path,
+def _codex_hook_strip_material(
     runtime_root: Path | None,
     hook_python: Path | None,
-    *,
     config_path: Path,
-    hook_config_path: Path | None = None,
-) -> CodexHookPlan:
-    del hook_config_path
-    builtin = runtime_root is None and hook_python is None
-    if builtin:
+) -> tuple[Path, Path, dict[str, Any], Any, bool]:
+    if runtime_root is None and hook_python is None:
         try:
             selected_runtime = resolve_launcher("keepygaga")
         except RuntimeError as exc:
@@ -974,28 +972,42 @@ def _prepare_codex_hook_strip(
             enabled=False,
         )
         merger = merge_hook_fragment
-    else:
-        if runtime_root is None or hook_python is None:
-            raise HostSetupError(
-                "hook runtime and hook Python must be supplied together"
-            )
-        selected_runtime, selected_python, rendered, merger = _load_codex_hook_fragment(
-            runtime_root, hook_python
-        )
+        return selected_runtime, selected_python, rendered, merger, True
+    if runtime_root is None or hook_python is None:
+        raise HostSetupError("hook runtime and hook Python must be supplied together")
+    selected_runtime, selected_python, rendered, merger = _load_codex_hook_fragment(
+        runtime_root, hook_python
+    )
+    return selected_runtime, selected_python, rendered, merger, False
+
+
+def _remove_unused_codex_hook_keys(
+    existing: dict[str, Any], merged: dict[str, Any], rendered: dict[str, Any]
+) -> None:
+    required = rendered.get("required_top_level", {})
+    if isinstance(required, dict):
+        for key, value in required.items():
+            if key not in existing and merged.get(key) == value:
+                merged.pop(key, None)
+    target = rendered.get("merge_target")
+    if isinstance(target, str) and target not in existing and merged.get(target) in ({}, []):
+        merged.pop(target, None)
+
+
+def _prepare_codex_hook_strip(
+    codex_home: Path,
+    runtime_root: Path | None,
+    hook_python: Path | None,
+    *,
+    config_path: Path,
+    hook_config_path: Path | None = None,
+) -> CodexHookPlan:
+    del hook_config_path
+    selected_runtime, selected_python, rendered, merger, builtin = (
+        _codex_hook_strip_material(runtime_root, hook_python, config_path)
+    )
     hooks_path = codex_home / "hooks.json"
-    _ensure_regular_target(hooks_path)
-    hooks_original = hooks_path.read_bytes() if hooks_path.exists() else None
-    existing: dict[str, Any] = {}
-    if hooks_original is not None:
-        try:
-            loaded = json.loads(hooks_original.decode("utf-8"))
-        except (UnicodeError, json.JSONDecodeError) as exc:
-            raise HostSetupError(
-                f"Codex hooks file is invalid JSON: {hooks_path}"
-            ) from exc
-        if not isinstance(loaded, dict):
-            raise HostSetupError(f"Codex hooks file must be an object: {hooks_path}")
-        existing = loaded
+    hooks_original, existing = _load_codex_hooks(hooks_path)
     strip_fragment = dict(rendered)
     strip_fragment["payload"] = {}
     try:
@@ -1004,18 +1016,7 @@ def _prepare_codex_hook_strip(
         raise HostSetupError(f"Agent Hook Runtime rejected Codex hooks: {exc}") from exc
     if not isinstance(merged, dict):
         raise HostSetupError("Agent Hook Runtime merger must return a JSON object")
-    required = rendered.get("required_top_level", {})
-    if isinstance(required, dict):
-        for key, value in required.items():
-            if key not in existing and merged.get(key) == value:
-                merged.pop(key, None)
-    target = rendered.get("merge_target")
-    if (
-        isinstance(target, str)
-        and target not in existing
-        and merged.get(target) in ({}, [])
-    ):
-        merged.pop(target, None)
+    _remove_unused_codex_hook_keys(existing, merged, rendered)
     return CodexHookPlan(
         hooks_path=hooks_path,
         hooks_original=hooks_original,

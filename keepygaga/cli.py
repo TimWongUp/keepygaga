@@ -212,6 +212,154 @@ def _interactive_memory_root(default: Path) -> Path:
     return Path(raw).expanduser().resolve() if raw else default
 
 
+def _install_payload(
+    args: argparse.Namespace,
+    parser: argparse.ArgumentParser,
+    config_path: Path,
+) -> Mapping[str, object]:
+    from keepygaga import installer
+
+    interactive = sys.stdin.isatty()
+    if not args.yes and not interactive:
+        parser.error("non-interactive install requires --yes and explicit --host")
+    configured_root = _configured_memory_root(config_path)
+    if args.memory_root:
+        memory_root = args.memory_root.expanduser().resolve()
+    elif configured_root is not None:
+        memory_root = configured_root
+        if interactive:
+            print(f"Using configured Memory Root: {memory_root}")
+    elif interactive:
+        memory_root = _interactive_memory_root(installer.default_memory_root().resolve())
+    else:
+        memory_root = installer.default_memory_root().resolve()
+    hosts = args.hosts or (_interactive_hosts() if interactive else [])
+    return installer.install(config_path, memory_root, hosts)
+
+
+def _installer_payload(
+    args: argparse.Namespace,
+    parser: argparse.ArgumentParser,
+    config_path: Path,
+) -> Mapping[str, object]:
+    from keepygaga import installer
+
+    if args.command == "install":
+        return _install_payload(args, parser, config_path)
+    if args.command == "status":
+        return installer.status(config_path)
+    if args.command == "repair":
+        if not args.yes:
+            parser.error("repair requires --yes")
+        return installer.repair(config_path)
+    if args.command == "upgrade":
+        return installer.upgrade(config_path, apply=args.yes)
+    if not args.yes:
+        parser.error("uninstall requires --yes")
+    return installer.uninstall(config_path, args.hosts or [])
+
+
+def _run_installer_command(
+    args: argparse.Namespace,
+    parser: argparse.ArgumentParser,
+    config_path: Path,
+) -> int:
+    from keepygaga.host_common import HostSetupError, HostSetupPartialError
+
+    try:
+        payload = _installer_payload(args, parser, config_path)
+    except HostSetupPartialError as exc:
+        _print(
+            {
+                "status": "partial_commit",
+                "message": str(exc),
+                "components": exc.components,
+            }
+        )
+        return 1
+    except (HostSetupError, ValueError) as exc:
+        _print({"status": "invalid_source", "message": str(exc)})
+        return 1
+    _print(payload)
+    return 1 if payload.get("status") == "error" else 0
+
+
+def _run_hook_command(args: argparse.Namespace, config_path: Path) -> int:
+    from keepygaga.hooks import closeout as closeout_hook
+    from keepygaga.hooks import context as context_hook
+    from keepygaga.hooks import route as route_hook
+
+    payload = context_hook.loads_stdin(sys.stdin.read())
+    if args.hook == "context":
+        result = context_hook.run(config_path, args.host, args.event, payload)
+    elif args.hook == "route":
+        result = route_hook.run(args.host, args.event, payload, compact=args.compact)
+    else:
+        result = closeout_hook.run(args.host, args.event, payload)
+    _print(result)
+    return 0
+
+
+def _load_command_config(config_path: Path):
+    try:
+        return load_config(config_path)
+    except Exception as exc:
+        _print(
+            {
+                "status": "invalid_source",
+                "message": f"configuration could not be loaded: {exc}",
+            }
+        )
+        return None
+
+
+def _run_memory_command(config_path: Path) -> int:
+    config = _load_command_config(config_path)
+    if config is None:
+        return 1
+    if not config.memory.root.strip():
+        _print(
+            {
+                "status": "invalid_source",
+                "message": "memory.root is not configured",
+            }
+        )
+        return 1
+    payload = initialize_memory_tree(Path(config.memory.root).expanduser(), config.memory)
+    _print(payload)
+    return 0 if payload["status"] in {"applied", "no_op"} else 1
+
+
+def _run_host_command(args: argparse.Namespace, config_path: Path) -> int:
+    from keepygaga.host_common import HostSetupError, HostSetupPartialError
+
+    config = _load_command_config(config_path)
+    if config is None:
+        return 1
+    try:
+        spec = _HOST_SPECS[args.host]
+        selected = getattr(
+            importlib.import_module(spec.module),
+            spec.setup if args.host_command == "setup" else spec.uninstall,
+        )
+        options = {name: getattr(args, name) for name in spec.options}
+        payload = selected(config_path, config, **options)
+    except HostSetupPartialError as exc:
+        _print(
+            {
+                "status": "partial_commit",
+                "message": str(exc),
+                "components": exc.components,
+            }
+        )
+        return 1
+    except HostSetupError as exc:
+        _print({"status": "invalid_source", "message": str(exc)})
+        return 1
+    _print(payload)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
@@ -228,57 +376,7 @@ def main(argv: list[str] | None = None) -> int:
     config_path = resolve_config_path(explicit_config)
 
     if args.command in {"install", "status", "repair", "upgrade", "uninstall"}:
-        from keepygaga import installer
-        from keepygaga.host_common import HostSetupError, HostSetupPartialError
-
-        try:
-            if args.command == "install":
-                interactive = sys.stdin.isatty()
-                if not args.yes and not interactive:
-                    parser.error(
-                        "non-interactive install requires --yes and explicit --host"
-                    )
-                configured_root = _configured_memory_root(config_path)
-                if args.memory_root:
-                    memory_root = args.memory_root.expanduser().resolve()
-                elif configured_root is not None:
-                    memory_root = configured_root
-                    if interactive:
-                        print(f"Using configured Memory Root: {memory_root}")
-                elif interactive:
-                    memory_root = _interactive_memory_root(
-                        installer.default_memory_root().resolve()
-                    )
-                else:
-                    memory_root = installer.default_memory_root().resolve()
-                hosts = args.hosts or (_interactive_hosts() if interactive else [])
-                payload = installer.install(config_path, memory_root, hosts)
-            elif args.command == "status":
-                payload = installer.status(config_path)
-            elif args.command == "repair":
-                if not args.yes:
-                    parser.error("repair requires --yes")
-                payload = installer.repair(config_path)
-            elif args.command == "upgrade":
-                payload = installer.upgrade(config_path, apply=args.yes)
-            else:
-                if not args.yes:
-                    parser.error("uninstall requires --yes")
-                payload = installer.uninstall(config_path, args.hosts or [])
-        except HostSetupPartialError as exc:
-            _print(
-                {
-                    "status": "partial_commit",
-                    "message": str(exc),
-                    "components": exc.components,
-                }
-            )
-            return 1
-        except (HostSetupError, ValueError) as exc:
-            _print({"status": "invalid_source", "message": str(exc)})
-            return 1
-        _print(payload)
-        return 1 if payload.get("status") == "error" else 0
+        return _run_installer_command(args, parser, config_path)
 
     if args.command == "doctor":
         payload = run_doctor(config_path, project_root=PROJECT_ROOT)
@@ -286,77 +384,12 @@ def main(argv: list[str] | None = None) -> int:
         return 1 if payload["status"] == "error" else 0
 
     if args.command == "hook" and args.hook_command == "run":
-        from keepygaga.hooks import closeout as closeout_hook
-        from keepygaga.hooks import context as context_hook
-        from keepygaga.hooks import route as route_hook
-
-        payload = context_hook.loads_stdin(sys.stdin.read())
-        if args.hook == "context":
-            result = context_hook.run(config_path, args.host, args.event, payload)
-        elif args.hook == "route":
-            result = route_hook.run(
-                args.host, args.event, payload, compact=args.compact
-            )
-        else:
-            result = closeout_hook.run(args.host, args.event, payload)
-        _print(result)
-        return 0
-
-    try:
-        config = load_config(config_path)
-    except Exception as exc:
-        _print(
-            {
-                "status": "invalid_source",
-                "message": f"configuration could not be loaded: {exc}",
-            }
-        )
-        return 1
+        return _run_hook_command(args, config_path)
     if args.command == "memory" and args.memory_command == "init":
-        if not config.memory.root.strip():
-            _print(
-                {
-                    "status": "invalid_source",
-                    "message": "memory.root is not configured",
-                }
-            )
-            return 1
-        payload = initialize_memory_tree(
-            Path(config.memory.root).expanduser(), config.memory
-        )
-        _print(payload)
-        return 0 if payload["status"] in {"applied", "no_op"} else 1
+        return _run_memory_command(config_path)
 
     if args.command == "host" and args.host_command in {"setup", "uninstall"}:
-        from keepygaga.host_common import HostSetupError, HostSetupPartialError
-
-        try:
-            spec = _HOST_SPECS[args.host]
-            selected = getattr(
-                importlib.import_module(spec.module),
-                spec.setup if args.host_command == "setup" else spec.uninstall,
-            )
-            options = {
-                ("hook_config_path" if name == "hook_config" else name): getattr(
-                    args, name
-                )
-                for name in spec.options
-            }
-            payload = selected(config_path, config, **options)
-        except HostSetupPartialError as exc:
-            _print(
-                {
-                    "status": "partial_commit",
-                    "message": str(exc),
-                    "components": exc.components,
-                }
-            )
-            return 1
-        except HostSetupError as exc:
-            _print({"status": "invalid_source", "message": str(exc)})
-            return 1
-        _print(payload)
-        return 0
+        return _run_host_command(args, config_path)
 
     return 2
 

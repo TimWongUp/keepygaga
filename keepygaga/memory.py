@@ -225,7 +225,14 @@ class MoveOperation(StrictModel):
     source_version: CurrentPageVersion
     destination_path: ExistingPagePath
     destination_version: CurrentPageVersion
-    fact: Fact
+    facts: list[Fact] = Field(
+        min_length=1,
+        max_length=MAX_FACTS_PER_OPERATION,
+        description=(
+            "All exact Facts to move between this source/destination pair in one "
+            "operation; copy them unchanged from the latest source Page Snapshot."
+        ),
+    )
 
 
 class RenameOperation(StrictModel):
@@ -295,7 +302,11 @@ MoveOperations = Annotated[
     Field(
         min_length=1,
         max_length=MAX_MUTATION_OPERATIONS,
-        description="Exact Fact moves; every source and destination path must be unique.",
+        description=(
+            "Exact Fact moves validated as one batch. Use one operation per disjoint "
+            "source/destination pair and include all Facts for that pair in facts; "
+            "every page path may appear only once across the batch."
+        ),
     ),
 ]
 RenameOperations = Annotated[
@@ -349,6 +360,57 @@ def _default_document(path: str) -> MemoryDocument:
     )
 
 
+def _prepare_memory_root(
+    root: Path,
+    config: MemoryFilesConfig,
+    created_directories: list[Path],
+) -> None:
+    if root.exists() and not root.is_dir():
+        raise MemoryValidationError(
+            "invalid_source", f"memory root must be a directory: {root}"
+        )
+    if root.is_dir():
+        MemoryStore(root, config)._load_catalog(require_complete=False)
+    if root.exists():
+        root.mkdir(parents=True, exist_ok=True)
+        return
+    _mkdir_private(root, parents=True)
+    created_directories.append(root)
+
+
+def _prepare_dynamic_directories(root: Path, created_directories: list[Path]) -> None:
+    for directory in DYNAMIC_DIRS:
+        target = root / directory
+        if target.is_symlink() or (target.exists() and not target.is_dir()):
+            raise MemoryValidationError(
+                "invalid_source", f"memory path must be a directory: {target}"
+            )
+        if target.exists():
+            target.mkdir(exist_ok=True)
+        else:
+            _mkdir_private(target)
+            created_directories.append(target)
+
+
+def _prepare_fixed_pages(root: Path, rendered: list[Path]) -> None:
+    for relative in FIXED_PATHS:
+        target = root / relative
+        if target.is_symlink():
+            raise MemoryValidationError(
+                "invalid_source", f"memory page must not be a symlink: {target}"
+            )
+        if target.exists():
+            if not target.is_file():
+                raise MemoryValidationError(
+                    "invalid_source", f"memory page must be a regular file: {target}"
+                )
+            continue
+        if _exclusive_create(
+            target, render_memory_file(_default_document(relative), relative)
+        ):
+            rendered.append(target)
+
+
 def initialize_memory_tree(
     root: Path,
     _config: MemoryFilesConfig,
@@ -357,18 +419,7 @@ def initialize_memory_tree(
     created_directories: list[Path] = []
     try:
         root = root.expanduser().resolve()
-        if root.exists() and not root.is_dir():
-            raise MemoryValidationError(
-                "invalid_source", f"memory root must be a directory: {root}"
-            )
-        if root.is_dir():
-            MemoryStore(root, _config)._load_catalog(require_complete=False)
-        root_was_missing = not root.exists()
-        if root_was_missing:
-            _mkdir_private(root, parents=True)
-            created_directories.append(root)
-        else:
-            root.mkdir(parents=True, exist_ok=True)
+        _prepare_memory_root(root, _config, created_directories)
         lock_path = root / ".keepygaga.lock"
         if lock_path.is_symlink():
             raise MemoryValidationError(
@@ -377,35 +428,8 @@ def initialize_memory_tree(
         with _memory_lock(lock_path):
             store = MemoryStore(root, _config)
             store._load_catalog(require_complete=False)
-            for directory in DYNAMIC_DIRS:
-                target = root / directory
-                if target.is_symlink() or (target.exists() and not target.is_dir()):
-                    raise MemoryValidationError(
-                        "invalid_source", f"memory path must be a directory: {target}"
-                    )
-                target_was_missing = not target.exists()
-                if target_was_missing:
-                    _mkdir_private(target)
-                    created_directories.append(target)
-                else:
-                    target.mkdir(exist_ok=True)
-            for relative in FIXED_PATHS:
-                target = root / relative
-                if target.is_symlink():
-                    raise MemoryValidationError(
-                        "invalid_source", f"memory page must not be a symlink: {target}"
-                    )
-                if target.exists():
-                    if not target.is_file():
-                        raise MemoryValidationError(
-                            "invalid_source",
-                            f"memory page must be a regular file: {target}",
-                        )
-                    continue
-                if _exclusive_create(
-                    target, render_memory_file(_default_document(relative), relative)
-                ):
-                    rendered.append(target)
+            _prepare_dynamic_directories(root, created_directories)
+            _prepare_fixed_pages(root, rendered)
             store._load_catalog()
     except Timeout:
         payload: dict[str, object] = {
@@ -626,7 +650,17 @@ class MemoryStore:
 
     def _catalog_paths(self, *, require_complete: bool = True) -> list[str]:
         missing: list[str] = []
-        paths: list[str] = []
+        self._validate_catalog_directories(missing)
+        paths = self._fixed_catalog_paths(missing)
+        paths.extend(self._dynamic_catalog_paths())
+        if missing and require_complete:
+            raise MemoryValidationError(
+                "not_initialized",
+                "memory tree is not initialized: " + ", ".join(missing),
+            )
+        return paths
+
+    def _validate_catalog_directories(self, missing: list[str]) -> None:
         for directory_name in DYNAMIC_DIRS:
             directory = self.root / directory_name
             if directory.is_symlink():
@@ -640,6 +674,9 @@ class MemoryStore:
                 )
             if not directory.exists():
                 missing.append(str(directory))
+
+    def _fixed_catalog_paths(self, missing: list[str]) -> list[str]:
+        paths: list[str] = []
         for relative in FIXED_PATHS:
             target = self.root / relative
             if target.is_symlink():
@@ -656,6 +693,10 @@ class MemoryStore:
                 )
             else:
                 missing.append(str(target))
+        return paths
+
+    def _dynamic_catalog_paths(self) -> list[str]:
+        paths: list[str] = []
         for directory_name in DYNAMIC_DIRS:
             directory = self.root / directory_name
             if not directory.is_dir():
@@ -668,11 +709,6 @@ class MemoryStore:
                         "invalid_source", f"memory path must be a regular file: {target}"
                     )
                 paths.append(f"{directory_name}/{target.name}")
-        if missing and require_complete:
-            raise MemoryValidationError(
-                "not_initialized",
-                "memory tree is not initialized: " + ", ".join(missing),
-            )
         return paths
 
     def _load_catalog(
@@ -898,7 +934,11 @@ class MemoryStore:
     def _move_locked(self, operations: list[MoveOperation]) -> dict[str, object]:
         self._require_operations(operations)
         self._check_duplicate_targets(
-            [op.source_path for op in operations] + [op.destination_path for op in operations]
+            [op.source_path for op in operations] + [op.destination_path for op in operations],
+            recovery=(
+                "Combine all exact Facts for one source/destination pair into one "
+                "operation; each page may appear in only one move operation."
+            ),
         )
         initial = self._load_catalog()
         working = dict(initial)
@@ -911,17 +951,25 @@ class MemoryStore:
             if source.path == destination.path:
                 raise MemoryValidationError("invalid_entry", "source and destination must differ")
             source_facts = list(source.document.facts)
-            try:
-                index = next(
-                    index
-                    for index, fact in enumerate(source_facts)
-                    if fact_key(fact) == fact_key(operation.fact)
-                )
-            except StopIteration as exc:
-                raise MemoryValidationError(
-                    "not_found", f"fact not found in {source.path}", path=source.path
-                ) from exc
-            source_facts.pop(index)
+            moved_facts: list[Fact] = []
+            for requested_fact in operation.facts:
+                try:
+                    index = next(
+                        index
+                        for index, source_fact in enumerate(source_facts)
+                        if fact_key(source_fact) == fact_key(requested_fact)
+                    )
+                except StopIteration as exc:
+                    raise MemoryValidationError(
+                        "not_found",
+                        f"requested fact not found in {source.path}",
+                        path=source.path,
+                        recovery=(
+                            "Copy every requested Fact exactly from the latest source "
+                            "Page Snapshot and retry the whole operation."
+                        ),
+                    ) from exc
+                moved_facts.append(source_facts.pop(index))
             working[source.path] = self._loaded(
                 source.path,
                 MemoryDocument(
@@ -937,7 +985,7 @@ class MemoryStore:
                     name=destination.document.name,
                     description=destination.document.description,
                     aliases=destination.document.aliases,
-                    facts=(*destination.document.facts, operation.fact),
+                    facts=(*destination.document.facts, *moved_facts),
                 ),
             )
             mutations.append(
@@ -945,7 +993,7 @@ class MemoryStore:
                     "move",
                     f"{source.path} -> {destination.path}",
                     source.path,
-                    [operation.fact.content],
+                    [fact.content for fact in moved_facts],
                 )
             )
         return self._finish(initial, working, mutations)
@@ -1061,65 +1109,10 @@ class MemoryStore:
         changed_paths: list[str],
     ) -> None:
         staged: dict[str, Path] = {}
-        applied_paths: list[str] = []
         try:
-            for relative in changed_paths:
-                self._assert_parent_safe(relative)
-                after = working.get(relative)
-                if after is None:
-                    continue
-                target = self.root / relative
-                with tempfile.NamedTemporaryFile(
-                    "w",
-                    encoding="utf-8",
-                    dir=target.parent,
-                    prefix=f".{target.name}.",
-                    suffix=".tmp",
-                    delete=False,
-                ) as handle:
-                    handle.write(after.text)
-                    handle.flush()
-                    os.fsync(handle.fileno())
-                    staged[relative] = Path(handle.name)
+            self._stage_commit(working, changed_paths, staged)
             self._verify_live_versions(initial, changed_paths)
-            try:
-                for relative in sorted(
-                    changed_paths,
-                    key=lambda path: self._commit_priority(
-                        initial.get(path), working.get(path), path
-                    ),
-                ):
-                    self._verify_live_versions(initial, [relative])
-                    target = self.root / relative
-                    if relative not in working:
-                        target.unlink()
-                    else:
-                        temporary = staged[relative]
-                        if relative in initial:
-                            mode = target.stat(follow_symlinks=False).st_mode & 0o7777
-                            os.chmod(temporary, mode)
-                        else:
-                            _chmod_private_file(temporary)
-                        os.replace(temporary, target)
-                        del staged[relative]
-                    applied_paths.append(relative)
-            except MemoryValidationError as exc:
-                if not applied_paths:
-                    raise
-                raise MemoryValidationError(
-                    "partial_commit",
-                    f"batch stopped after some files were applied: {exc}",
-                    path=exc.path,
-                    latest=exc.latest,
-                    applied_paths=applied_paths,
-                ) from exc
-            except Exception as exc:
-                status = "partial_commit" if applied_paths else "write_failed"
-                raise MemoryValidationError(
-                    status,
-                    f"{type(exc).__name__}: {exc}",
-                    applied_paths=applied_paths,
-                ) from exc
+            self._apply_commit(initial, working, changed_paths, staged)
         except MemoryValidationError:
             raise
         except Exception as exc:
@@ -1130,6 +1123,79 @@ class MemoryStore:
             for temporary in staged.values():
                 with suppress(FileNotFoundError):
                     temporary.unlink()
+
+    def _stage_commit(
+        self,
+        working: dict[str, LoadedFile],
+        changed_paths: list[str],
+        staged: dict[str, Path],
+    ) -> None:
+        for relative in changed_paths:
+            self._assert_parent_safe(relative)
+            after = working.get(relative)
+            if after is None:
+                continue
+            target = self.root / relative
+            with tempfile.NamedTemporaryFile(
+                "w",
+                encoding="utf-8",
+                dir=target.parent,
+                prefix=f".{target.name}.",
+                suffix=".tmp",
+                delete=False,
+            ) as handle:
+                handle.write(after.text)
+                handle.flush()
+                os.fsync(handle.fileno())
+                staged[relative] = Path(handle.name)
+
+    def _apply_commit(
+        self,
+        initial: dict[str, LoadedFile],
+        working: dict[str, LoadedFile],
+        changed_paths: list[str],
+        staged: dict[str, Path],
+    ) -> None:
+        applied_paths: list[str] = []
+        try:
+            ordered_paths = sorted(
+                changed_paths,
+                key=lambda path: self._commit_priority(
+                    initial.get(path), working.get(path), path
+                ),
+            )
+            for relative in ordered_paths:
+                self._verify_live_versions(initial, [relative])
+                target = self.root / relative
+                if relative not in working:
+                    target.unlink()
+                else:
+                    temporary = staged[relative]
+                    if relative in initial:
+                        mode = target.stat(follow_symlinks=False).st_mode & 0o7777
+                        os.chmod(temporary, mode)
+                    else:
+                        _chmod_private_file(temporary)
+                    os.replace(temporary, target)
+                    del staged[relative]
+                applied_paths.append(relative)
+        except MemoryValidationError as exc:
+            if not applied_paths:
+                raise
+            raise MemoryValidationError(
+                "partial_commit",
+                f"batch stopped after some files were applied: {exc}",
+                path=exc.path,
+                latest=exc.latest,
+                applied_paths=applied_paths,
+            ) from exc
+        except Exception as exc:
+            status = "partial_commit" if applied_paths else "write_failed"
+            raise MemoryValidationError(
+                status,
+                f"{type(exc).__name__}: {exc}",
+                applied_paths=applied_paths,
+            ) from exc
 
     @staticmethod
     def _commit_priority(
@@ -1266,7 +1332,9 @@ class MemoryStore:
             )
 
     @staticmethod
-    def _check_duplicate_targets(paths: Sequence[str]) -> None:
+    def _check_duplicate_targets(
+        paths: Sequence[str], *, recovery: str | None = None
+    ) -> None:
         seen: set[str] = set()
         for path in paths:
             if path in seen:
@@ -1274,6 +1342,7 @@ class MemoryStore:
                     "duplicate_target",
                     f"path appears more than once in this batch: {path}",
                     path=path,
+                    recovery=recovery,
                 )
             seen.add(path)
 
