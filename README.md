@@ -2,9 +2,13 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-**One private Obsidian vault for the core memory every coding agent should share.**
+**A small, deliberate core memory shared by every coding agent.**
 
-Keepygaga gives Codex, Claude Code, WorkBuddy, Grok, Hermes, and Antigravity CLI the same user-owned core memory instead of leaving durable identity and preferences in separate host silos. The source of truth is readable Markdown in one private Memory Root, preferably inside an Obsidian vault; any Markdown editor remains compatible.
+AI agents do not get better by remembering everything. If every conversation, temporary state, and project detail is pushed into long-term memory, useful facts are buried under stale and irrelevant context. Memory without selection is noise.
+
+Keepygaga keeps only a small set of durable facts that remain useful across tasks: who the user is, how they want an Agent to work, and a few ongoing topics, projects, responsibilities, or relationships. Temporary state stays in the current conversation or its direct source, such as a calendar, task manager, project documentation, issue tracker, or Git history. A fact enters core memory only when it has been deliberately judged useful across tasks.
+
+That carefully selected core memory belongs to the user and follows them across Codex, Claude Code, WorkBuddy, Grok, Hermes, and Antigravity CLI instead of being trapped in separate host silos. Its source of truth is readable Markdown in one private Memory Root, preferably inside an Obsidian vault; any Markdown editor remains compatible.
 
 The product has three deliberately separate surfaces:
 
@@ -14,7 +18,7 @@ The product has three deliberately separate surfaces:
 
 Keepygaga ships the complete runtime: an eight-tool MCP server, a concise global Agent Contract, built-in cross-host Hooks, and the CLI control plane. It does not require a database, embeddings, a source checkout, or an external Hook runtime. Obsidian is the recommended human interface, not a runtime dependency.
 
-Core memory contains `profile.md`, `preferences.md`, and direct pages below `topics/`, `areas/`, and `people/`. Project details and current state remain in their repository or live source; Keepygaga keeps only project locations and completed major milestones.
+Core memory contains `profile.md`, `preferences.md`, and direct pages below `topics/`, `areas/`, and `people/`. For code projects, Keepygaga does not replace repository-owned terms, architecture, operating guides, decisions, or current state; it keeps only project locations and completed major milestones.
 
 Host-native memories can continue to own host-specific conversation recall and project learning. Keepygaga owns the small set of stable user facts that should follow the user across hosts.
 

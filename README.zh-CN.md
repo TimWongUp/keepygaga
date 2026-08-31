@@ -2,9 +2,13 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-**一个私有 Obsidian Vault，供所有编码 Agent 共用同一套核心记忆。**
+**给所有编码 Agent 一套少而准的共享核心记忆。**
 
-Keepygaga 让 Codex、Claude Code、WorkBuddy、Grok、Hermes 与 Antigravity CLI 使用同一份属于用户的核心记忆，不再把长期身份和偏好分散在各宿主的记忆孤岛中。唯一事实源是一个私有 Memory Root 中的可读 Markdown；推荐把它放进 Obsidian Vault，也兼容任意 Markdown 编辑器。
+AI 不是记得越多越好。把每次对话、临时状态和项目细节都塞进长期记忆，只会让真正有用的信息被过时、无关的内容淹没。没有选择的记忆不是上下文，而是噪声。
+
+Keepygaga 只保存少量、能跨任务长期发挥作用的信息：用户是谁、希望 Agent 怎样工作，以及少数持续关注的主题、项目、责任或人物关系。临时状态留在当前对话或它的直接真源里，例如日历、任务管理器、项目文档、Issue 或 Git 历史。只有经过明确判断、确认能跨任务长期发挥作用的事实，才进入核心记忆。
+
+这套经过筛选的核心记忆属于用户，并随用户在 Codex、Claude Code、WorkBuddy、Grok、Hermes 与 Antigravity CLI 之间流动，而不是被困在各宿主的记忆孤岛中。唯一事实源是一个私有 Memory Root 中的可读 Markdown；推荐把它放进 Obsidian Vault，也兼容任意 Markdown 编辑器。
 
 产品刻意分成三个界面：
 
@@ -14,7 +18,7 @@ Keepygaga 让 Codex、Claude Code、WorkBuddy、Grok、Hermes 与 Antigravity CL
 
 Keepygaga 独立提供完整运行时：八个 raw Tool 的 MCP Server、精简全局 Agent Contract、内置跨宿主 Hook，以及 CLI 控制面。它不依赖数据库、向量索引、源码 checkout 或外部 Hook Runtime；Obsidian 是推荐的人类界面，不是运行依赖。
 
-核心记忆由 `profile.md`、`preferences.md` 以及 `topics/`、`areas/`、`people/` 的直属页面组成。项目详情与当前状态仍以仓库或 live source 为准；Keepygaga 只保留项目位置和已完成重大里程碑。
+核心记忆由 `profile.md`、`preferences.md` 以及 `topics/`、`areas/`、`people/` 的直属页面组成。对代码项目来说，Keepygaga 不替代仓库自己的术语、架构、操作说明、重要决定与当前状态，只保留项目位置和已完成重大里程碑。
 
 宿主原生记忆可以继续负责该宿主的会话召回与项目内学习；Keepygaga 只负责应当随用户跨宿主流动的少量稳定事实。
 
