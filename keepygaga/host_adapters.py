@@ -37,6 +37,7 @@ from keepygaga.host_common import (
     probe_keepygaga_python,
     remove_managed_contract,
     render_fragment,
+    run_captured,
     validate_hook_command_path,
     validate_host_source,
 )
@@ -883,14 +884,11 @@ def _run_grok(
     environment = os.environ.copy()
     environment["HOME"] = str(home.parent)
     try:
-        return subprocess.run(
+        return run_captured(
             [str(binary), *arguments],
-            check=False,
-            capture_output=True,
-            text=True,
+            timeout=30,
             env=environment,
             cwd=home.parent,
-            timeout=30,
         )
     except (OSError, subprocess.SubprocessError) as exc:
         raise HostSetupError(f"Grok CLI could not be executed: {exc}") from exc

@@ -19,7 +19,9 @@ from keepygaga.host_common import (
     HostSetupError,
     HostSetupPartialError,
     atomic_write,
+    captured_output,
     parse_managed_block,
+    run_captured,
 )
 from keepygaga.memory import initialize_memory_tree
 from keepygaga.version import (
@@ -443,13 +445,11 @@ def upgrade(config_path: Path, *, apply: bool) -> dict[str, object]:
             "message": "rerun with --yes to upgrade the installed release and repair recorded hosts",
         }
     try:
-        completed = subprocess.run(
-            command, check=False, capture_output=True, text=True, timeout=300
-        )
+        completed = run_captured(command, timeout=300)
     except (OSError, subprocess.SubprocessError) as exc:
         raise HostSetupError(f"Keepygaga upgrade could not be started: {exc}") from exc
     if completed.returncode != 0:
-        detail = completed.stderr.strip() or completed.stdout.strip() or "unknown uv error"
+        detail = captured_output(completed) or "unknown uv error"
         raise HostSetupError(f"Keepygaga upgrade failed: {detail}")
     raw_hosts = state.get("hosts", {})
     if not isinstance(raw_hosts, Mapping) or not raw_hosts:
@@ -471,13 +471,7 @@ def upgrade(config_path: Path, *, apply: bool) -> dict[str, object]:
             "repair",
             "--yes",
         ]
-        repaired = subprocess.run(
-            repair_command,
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=300,
-        )
+        repaired = run_captured(repair_command, timeout=300)
     except (OSError, subprocess.SubprocessError) as exc:
         raise HostSetupPartialError(
             f"Keepygaga upgraded but repair could not be started: {exc}",
@@ -487,7 +481,7 @@ def upgrade(config_path: Path, *, apply: bool) -> dict[str, object]:
             },
         ) from exc
     if repaired.returncode != 0:
-        detail = repaired.stderr.strip() or repaired.stdout.strip() or "unknown repair error"
+        detail = captured_output(repaired) or "unknown repair error"
         raise HostSetupPartialError(
             f"Keepygaga upgraded but host repair failed: {detail}",
             {

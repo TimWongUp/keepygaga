@@ -7,7 +7,7 @@ import os
 import stat
 import subprocess
 import tempfile
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
@@ -404,23 +404,56 @@ def read_utf8(path: Path) -> str:
         raise HostSetupError(f"could not read UTF-8 file: {path}") from exc
 
 
+def run_captured(
+    command: Sequence[str] | str,
+    *,
+    timeout: float,
+    env: Mapping[str, str] | None = None,
+    cwd: Path | str | None = None,
+    input: str | None = None,
+    executable: str | None = None,
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        command,
+        check=False,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=timeout,
+        env=None if env is None else dict(env),
+        cwd=cwd,
+        input=input,
+        executable=executable,
+    )
+
+
+def captured_output(
+    completed: subprocess.CompletedProcess[str],
+    *,
+    limit: int | None = None,
+) -> str:
+    text = (completed.stderr or "").strip() or (completed.stdout or "").strip()
+    return text if limit is None else text[:limit]
+
+
+def captured_streams(completed: subprocess.CompletedProcess[str]) -> str:
+    return f"{completed.stderr or ''}\n{completed.stdout or ''}"
+
+
 def _probe_python(
     python: Path, *, statement: str, expected_stdout: str, label: str
 ) -> None:
     if not os.access(python, os.X_OK):
         raise HostSetupError(f"{label} is not executable: {python}")
     try:
-        probe = subprocess.run(
+        probe = run_captured(
             [str(python), "-I", "-c", statement],
-            check=False,
-            capture_output=True,
-            text=True,
             timeout=15,
         )
     except (OSError, subprocess.SubprocessError) as exc:
         raise HostSetupError(f"{label} probe could not run: {exc}") from exc
     if probe.returncode != 0 or probe.stdout != expected_stdout:
-        detail = probe.stderr.strip() or probe.stdout.strip() or "unknown Python error"
+        detail = captured_output(probe) or "unknown Python error"
         raise HostSetupError(f"{label} probe failed: {detail}")
 
 
