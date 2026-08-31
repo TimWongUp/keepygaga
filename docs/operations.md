@@ -48,6 +48,7 @@ If Hook setup fails, inspect the target host's native event schema, the Keepygag
 - MCP verification failure: inspect the stable launcher, absolute config path, and returned recovery data.
 - Hook bootstrap error: report it; do not guess or use a different retrieval system.
 - Upgrade succeeded but repair failed: the package is new while host projection may be old; resolve the reported host error and run `keepygaga repair --yes`.
+- Installer subprocess capture always decodes package-manager and host CLI output as UTF-8. Missing stdout/stderr is treated as empty so a Windows locale cannot turn an upgrade or repair failure into `UnicodeDecodeError` or `AttributeError`.
 
 Doctor reports non-sensitive metadata only. `ok` means applicable checks passed, `warning` requires reading the individual check, and `error` blocks setup. Dynamic-page or home-page capacity warnings may be soft; permissions, malformed content, identity conflicts, or unwritable paths are blocking.
 

@@ -25,6 +25,8 @@ from keepygaga.host_common import (
     HostSetupError,
     HostSetupPartialError,
     atomic_write,
+    captured_output,
+    captured_streams,
     default_hook_config_path,
     ensure_regular_target,
     exclusive_backup,
@@ -40,6 +42,7 @@ from keepygaga.host_common import (
     read_utf8,
     remove_managed_contract,
     render_fragment,
+    run_captured,
     validate_hook_command_path,
     validate_host_source,
 )
@@ -168,13 +171,10 @@ def _run_codex(
     environment = os.environ.copy()
     environment["CODEX_HOME"] = str(codex_home)
     try:
-        return subprocess.run(
+        return run_captured(
             [str(codex_binary), *arguments],
-            check=False,
-            capture_output=True,
-            text=True,
-            env=environment,
             timeout=30,
+            env=environment,
         )
     except (OSError, subprocess.SubprocessError) as exc:
         raise HostSetupError(f"Codex CLI could not be executed: {exc}") from exc
@@ -307,9 +307,9 @@ def _prepare_codex_mcp(
                 current_payload=current_payload,
                 needs_update=False,
             )
-    elif "No MCP server named" not in f"{current.stderr}\n{current.stdout}":
+    elif "No MCP server named" not in captured_streams(current):
         detail = (
-            current.stderr.strip() or current.stdout.strip() or "unknown Codex error"
+            captured_output(current) or "unknown Codex error"
         )
         raise HostSetupError(f"Codex MCP registration could not be read: {detail}")
 
@@ -428,7 +428,7 @@ def _apply_codex_mcp_plan(plan: CodexMcpPlan) -> dict[str, object]:
         ],
     )
     if added.returncode != 0:
-        detail = added.stderr.strip() or added.stdout.strip() or "unknown Codex error"
+        detail = captured_output(added) or "unknown Codex error"
         raise HostSetupError(f"Codex MCP registration failed: {detail}")
     try:
         _verify_codex_mcp_update(plan)
@@ -650,13 +650,13 @@ def _hook_smoke_command(plan: CodexHookPlan) -> tuple[str | list[str], str | Non
 
 def _validate_hook_smoke(plan: CodexHookPlan, smoke: subprocess.CompletedProcess[str]) -> None:
     if smoke.returncode != 0:
-        detail = smoke.stderr.strip()[:500]
+        detail = captured_output(smoke, limit=500)
         suffix = f": {detail}" if detail else ""
         raise HostSetupError(f"Codex context Hook smoke failed{suffix}")
     try:
         smoke_payload = json.loads(smoke.stdout)
     except json.JSONDecodeError as exc:
-        detail = smoke.stderr.strip()[:500]
+        detail = captured_output(smoke, limit=500)
         suffix = f": {detail}" if detail else ""
         raise HostSetupError(
             f"Codex context Hook smoke returned invalid JSON{suffix}"
@@ -699,15 +699,12 @@ def _run_hook_smoke(plan: CodexHookPlan) -> None:
         smoke_environment["PYTHONIOENCODING"] = "utf-8"
     command, executable = _hook_smoke_command(plan)
     try:
-        smoke = subprocess.run(
+        smoke = run_captured(
             command,
             executable=executable,
-            check=False,
-            capture_output=True,
-            encoding="utf-8",
-            input="{}",
-            env=smoke_environment,
             timeout=15,
+            env=smoke_environment,
+            input="{}",
         )
     except (OSError, subprocess.SubprocessError) as exc:
         raise HostSetupError(f"Codex context Hook smoke could not run: {exc}") from exc
@@ -1141,9 +1138,9 @@ def _prepare_codex_mcp_removal(
         if not isinstance(loaded_payload, Mapping):
             raise HostSetupError("Codex returned an invalid MCP registration object")
         current_payload = loaded_payload
-    elif "No MCP server named" not in f"{current.stderr}\n{current.stdout}":
+    elif "No MCP server named" not in captured_streams(current):
         detail = (
-            current.stderr.strip() or current.stdout.strip() or "unknown Codex error"
+            captured_output(current) or "unknown Codex error"
         )
         raise HostSetupError(f"Codex MCP registration could not be read: {detail}")
     return CodexMcpPlan(
@@ -1168,12 +1165,8 @@ def _apply_codex_mcp_removal(plan: CodexMcpPlan) -> dict[str, object]:
         )
         if current.returncode == 0:
             raise HostSetupError("Keepygaga MCP registration changed after preflight")
-        if "No MCP server named" not in f"{current.stderr}\n{current.stdout}":
-            detail = (
-                current.stderr.strip()
-                or current.stdout.strip()
-                or "unknown Codex error"
-            )
+        if "No MCP server named" not in captured_streams(current):
+            detail = captured_output(current) or "unknown Codex error"
             raise HostSetupError(
                 f"Codex MCP registration could not be re-read: {detail}"
             )
@@ -1193,7 +1186,7 @@ def _apply_codex_mcp_removal(plan: CodexMcpPlan) -> dict[str, object]:
     )
     if removed.returncode != 0:
         detail = (
-            removed.stderr.strip() or removed.stdout.strip() or "unknown Codex error"
+            captured_output(removed) or "unknown Codex error"
         )
         raise HostSetupError(f"Codex MCP removal failed: {detail}")
     recovery: dict[str, object] = (
@@ -1228,10 +1221,10 @@ def _apply_codex_mcp_removal(plan: CodexMcpPlan) -> dict[str, object]:
             },
         ) from exc
     if verified.returncode == 0 or (
-        "No MCP server named" not in f"{verified.stderr}\n{verified.stdout}"
+        "No MCP server named" not in captured_streams(verified)
     ):
         detail = (
-            verified.stderr.strip() or verified.stdout.strip() or "unknown Codex error"
+            captured_output(verified) or "unknown Codex error"
         )
         raise HostSetupPartialError(
             f"Codex accepted the MCP removal but verification failed: {detail}",

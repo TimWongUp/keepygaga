@@ -102,8 +102,8 @@ def test_upgrade_without_recorded_hosts_skips_repair(
     monkeypatch.setattr(installer.shutil, "which", lambda name: f"/bin/{name}")
     calls: list[list[str]] = []
     monkeypatch.setattr(
-        installer.subprocess,
-        "run",
+        installer,
+        "run_captured",
         lambda command, **_kwargs: (
             calls.append(command)
             or type("Result", (), {"returncode": 0, "stdout": "", "stderr": ""})()
@@ -120,8 +120,8 @@ def test_upgrade_without_recorded_hosts_skips_repair(
 def test_upgrade_timeout_becomes_host_setup_error(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(installer.shutil, "which", lambda name: f"/bin/{name}")
     monkeypatch.setattr(
-        installer.subprocess,
-        "run",
+        installer,
+        "run_captured",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(
             subprocess.TimeoutExpired("uv", 300)
         ),
@@ -212,8 +212,8 @@ def test_upgrade_repair_failure_reports_partial_evidence(
     monkeypatch.setattr(installer.shutil, "which", lambda name: f"/bin/{name}")
     results = iter((0, 1))
     monkeypatch.setattr(
-        installer.subprocess,
-        "run",
+        installer,
+        "run_captured",
         lambda *_args, **_kwargs: type(
             "Result",
             (),
@@ -228,3 +228,23 @@ def test_upgrade_repair_failure_reports_partial_evidence(
         assert exc.components["repair"]["status"] == "failed"  # type: ignore[index]
     else:
         raise AssertionError("expected partial upgrade evidence")
+
+
+def test_upgrade_failure_with_missing_streams_stays_structured(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setattr(installer.shutil, "which", lambda name: f"/bin/{name}")
+    monkeypatch.setattr(
+        installer,
+        "run_captured",
+        lambda *_args, **_kwargs: subprocess.CompletedProcess(
+            ["uv", "tool", "upgrade", "keepygaga"], 1, None, None
+        ),
+    )
+
+    try:
+        installer.upgrade(tmp_path / "config.toml", apply=True)
+    except HostSetupError as exc:
+        assert "unknown uv error" in str(exc)
+    else:
+        raise AssertionError("expected structured upgrade error")
