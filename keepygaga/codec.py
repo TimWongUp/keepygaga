@@ -19,6 +19,7 @@ MAX_FACT_CONTENT_CHARS = 4096
 PROFILE_FACT_CONTENT_LIMIT = 300
 FACT_LINE_RE = re.compile(r"^- \[(stated|observed)\] (.+)$")
 FRONTMATTER_KEY_RE = re.compile(r"^(name|description|sources|aliases):")
+FRONTMATTER_FENCE_RE = re.compile(r"^-{3,}\s*$")
 
 Basis = Literal["stated", "observed"]
 
@@ -268,14 +269,17 @@ def _parse_frontmatter(
             "invalid_source", f"{path} must begin with YAML frontmatter", path=path
         )
     lines = normalized.splitlines()
-    try:
-        closing_index = lines.index("---", 1)
-    except ValueError as exc:
+    closing_index = next(
+        (index for index, line in enumerate(lines[1:], start=1)
+         if FRONTMATTER_FENCE_RE.fullmatch(line)),
+        None,
+    )
+    if closing_index is None:
         raise MemoryValidationError(
             "invalid_source",
             f"{path} frontmatter must end with a --- delimiter",
             path=path,
-        ) from exc
+        )
     field_order = [
         match.group(1)
         for line in lines[1:closing_index]

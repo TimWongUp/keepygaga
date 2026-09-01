@@ -361,6 +361,28 @@ def test_list_rejects_oversized_fact(memory_store: tuple[Path, MemoryStore]) -> 
     assert result["path"] == "preferences.md"
 
 
+def test_list_rejects_padded_frontmatter_fence(memory_store: tuple[Path, MemoryStore]) -> None:
+    root, store = memory_store
+    page = root / "profile.md"
+    nl = chr(10)
+    page.write_text(
+        "---" + nl
+        + "name: profile" + nl
+        + "description: desc" + nl
+        + "aliases: []" + nl
+        + "---   " + nl
+        + "- [stated] x" + nl
+        + "---" + nl,
+        encoding="utf-8",
+    )
+    listed = store.list_files()
+    assert listed["status"] == "invalid_source"
+    assert listed["path"] == "profile.md"
+    other = store.read(["preferences.md"])
+    assert other["status"] == "invalid_source"
+    assert other["path"] == "profile.md"
+
+
 def test_list_is_minimal_and_read_is_structured(
     memory_store: tuple[Path, MemoryStore],
 ) -> None:
