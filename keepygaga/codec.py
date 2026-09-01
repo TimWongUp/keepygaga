@@ -19,6 +19,7 @@ MAX_FACT_CONTENT_CHARS = 4096
 PROFILE_FACT_CONTENT_LIMIT = 300
 FACT_LINE_RE = re.compile(r"^- \[(stated|observed)\] (.+)$")
 FRONTMATTER_KEY_RE = re.compile(r"^(name|description|sources|aliases):")
+FRONTMATTER_FENCE_RE = re.compile(r"^-{3,}\s*$")
 
 Basis = Literal["stated", "observed"]
 
@@ -32,7 +33,7 @@ def unicode_chars(text: str) -> int:
 
 
 def sha256_text(text: str) -> str:
-    digest = hashlib.sha256(normalize_text(text).encode("utf-8")).hexdigest()
+    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
     return f"sha256:{digest}"
 
 
@@ -123,24 +124,33 @@ def receipt(action: str, scope: str, contents: Sequence[str]) -> str:
     return f"{fence}{padding}{text}{padding}{fence}"
 
 
+def parse_page_metadata(text: str, path: str) -> MemoryDocument:
+    canonical_memory_path(path)
+    metadata, body = _parse_frontmatter(normalize_text(text), path, include_body=False)
+    _assert_fact_body(body, path)
+    aliases = _string_array(metadata["aliases"], "aliases", maximum=8)
+    return validate_page_metadata(
+        MemoryDocument(
+            name=metadata["name"],
+            description=metadata["description"],
+            aliases=aliases,
+            facts=(),
+        ),
+        path,
+    )
+
+
+def validate_page_metadata(document: MemoryDocument, path: str) -> MemoryDocument:
+    return MemoryDocument(
+        name=_validated_name(document.name, path),
+        description=_validated_description(document.description, path),
+        aliases=_validated_aliases(document.aliases, path),
+        facts=document.facts,
+    )
+
+
 def validate_document(document: MemoryDocument, path: str) -> MemoryDocument:
-    expected_name = PurePosixPath(path).stem
-    try:
-        name = _one_line(document.name, "name")
-        description = _one_line(document.description, "description")
-    except ValueError as exc:
-        raise MemoryValidationError("invalid_entry", str(exc), path=path) from exc
-    if name != expected_name:
-        raise MemoryValidationError(
-            "invalid_source",
-            f"{path} frontmatter name must equal file stem {expected_name!r}",
-            path=path,
-        )
-    aliases = _string_array(list(document.aliases), "aliases", maximum=8)
-    if _identity(name) in {_identity(alias) for alias in aliases}:
-        raise MemoryValidationError(
-            "invalid_entry", f"{path} aliases cannot repeat its name", path=path
-        )
+    metadata = validate_page_metadata(document, path)
     facts = tuple(Fact.model_validate(fact) for fact in document.facts)
     if (
         path == "profile.md"
@@ -159,27 +169,117 @@ def validate_document(document: MemoryDocument, path: str) -> MemoryDocument:
             "invalid_entry", f"{path} contains duplicate facts", path=path
         )
     return MemoryDocument(
-        name=name,
-        description=description,
-        aliases=aliases,
+        name=metadata.name,
+        description=metadata.description,
+        aliases=metadata.aliases,
         facts=facts,
     )
 
 
-def _parse_frontmatter(normalized: str, path: str) -> tuple[dict[str, Any], str]:
+def _validated_name(name: str, path: str) -> str:
+    expected_name = PurePosixPath(path).stem
+    try:
+        normalized = _one_line(name, "name")
+    except ValueError as orig_exc:
+        raise MemoryValidationError(
+            "invalid_entry", str(orig_exc), path=path
+        ) from orig_exc
+    if normalized != expected_name:
+        raise MemoryValidationError(
+            "invalid_source",
+            f"{path} frontmatter name must equal file stem {expected_name!r}",
+            path=path,
+        )
+    return normalized
+
+
+def _validated_description(description: str, path: str) -> str:
+    try:
+        return _one_line(description, "description")
+    except ValueError as orig_exc:
+        raise MemoryValidationError(
+            "invalid_entry", str(orig_exc), path=path
+        ) from orig_exc
+
+
+def _validated_aliases(aliases: tuple[str, ...], path: str) -> tuple[str, ...]:
+    expected_name = PurePosixPath(path).stem
+    normalized = _string_array(list(aliases), "aliases", maximum=8)
+    if _identity(expected_name) in {_identity(alias) for alias in normalized}:
+        raise MemoryValidationError(
+            "invalid_entry", f"{path} aliases cannot repeat its name", path=path
+        )
+    return normalized
+
+
+def _assert_fact_body(body_text: str, path: str) -> None:
+    body = normalize_text(body_text).strip()
+    if not body:
+        return
+    seen: set[tuple[str, str]] = set()
+    profile_chars = 0
+    for line in body.splitlines():
+        if not line.strip():
+            continue
+        match = FACT_LINE_RE.fullmatch(line)
+        if match is None:
+            raise MemoryValidationError(
+                "invalid_source",
+                f"{path} body may contain only - [stated]/[observed] bullets",
+                path=path,
+            )
+        basis = match.group(1)
+        raw_content = match.group(2)
+        if len(raw_content) > MAX_FACT_CONTENT_CHARS:
+            raise MemoryValidationError(
+                "invalid_source",
+                f"{path} contains a fact that violates the page schema",
+                path=path,
+            )
+        try:
+            content = _one_line(raw_content, "content")
+        except ValueError as orig_exc:
+            raise MemoryValidationError(
+                "invalid_source",
+                f"{path} contains a fact that violates the page schema",
+                path=path,
+            ) from orig_exc
+        key = (basis, content)
+        if key in seen:
+            raise MemoryValidationError(
+                "invalid_entry", f"{path} contains duplicate facts", path=path
+            )
+        seen.add(key)
+        if path == "profile.md":
+            profile_chars += unicode_chars(content)
+            if profile_chars > PROFILE_FACT_CONTENT_LIMIT:
+                raise MemoryValidationError(
+                    "invalid_entry",
+                    "profile.md Fact.content cannot exceed "
+                    f"{PROFILE_FACT_CONTENT_LIMIT} characters in total",
+                    path=path,
+                )
+
+
+def _parse_frontmatter(
+    normalized: str, path: str, *, include_body: bool = True
+) -> tuple[dict[str, Any], str]:
     if not normalized.startswith("---\n"):
         raise MemoryValidationError(
             "invalid_source", f"{path} must begin with YAML frontmatter", path=path
         )
-    lines = normalized.splitlines()
-    try:
-        closing_index = lines.index("---", 1)
-    except ValueError as exc:
+    lines = normalized.split("\n")
+    closing_index = next(
+        (index for index, line in enumerate(lines[1:], start=1)
+         if FRONTMATTER_FENCE_RE.fullmatch(line)),
+        None,
+    )
+    if closing_index is None:
         raise MemoryValidationError(
             "invalid_source",
             f"{path} frontmatter must end with a --- delimiter",
             path=path,
-        ) from exc
+        )
     field_order = [
         match.group(1)
         for line in lines[1:closing_index]
@@ -195,8 +295,9 @@ def _parse_frontmatter(normalized: str, path: str) -> tuple[dict[str, Any], str]
             f"{path} frontmatter must contain name, description, aliases in order",
             path=path,
         )
+    header = "\n".join(lines[: closing_index + 1]) + "\n"
     try:
-        post = frontmatter.loads(normalized)
+        post = frontmatter.loads(header if not include_body else normalized)
     except Exception as exc:
         raise MemoryValidationError(
             "invalid_source",
@@ -222,33 +323,35 @@ def _parse_frontmatter(normalized: str, path: str) -> tuple[dict[str, Any], str]
         )
     if "sources" in metadata:
         _string_array(metadata["sources"], "sources")
-    return metadata, post.content
+    if include_body:
+        return metadata, post.content
+    body = "\n".join(lines[closing_index + 1 :])
+    if body:
+        body += "\n"
+    return metadata, body
 
 
 def _parse_facts(body_text: str, path: str) -> tuple[Fact, ...]:
+    _assert_fact_body(body_text, path)
     facts: list[Fact] = []
     body = normalize_text(body_text).strip()
-    if body:
-        for line in body.splitlines():
-            if not line.strip():
-                continue
-            match = FACT_LINE_RE.fullmatch(line)
-            if match is None:
-                raise MemoryValidationError(
-                    "invalid_source",
-                    f"{path} body may contain only - [stated]/[observed] bullets",
-                    path=path,
-                )
-            basis = match.group(1)
-            assert basis in ("stated", "observed")
-            try:
-                facts.append(Fact(basis=basis, content=match.group(2)))
-            except ValueError as exc:
-                raise MemoryValidationError(
-                    "invalid_source",
-                    f"{path} contains a fact that violates the page schema",
-                    path=path,
-                ) from exc
+    if not body:
+        return ()
+    for line in body.splitlines():
+        if not line.strip():
+            continue
+        match = FACT_LINE_RE.fullmatch(line)
+        assert match is not None
+        basis = match.group(1)
+        assert basis in ("stated", "observed")
+        try:
+            facts.append(Fact(basis=basis, content=match.group(2)))
+        except ValueError as orig_exc:
+            raise MemoryValidationError(
+                "invalid_source",
+                f"{path} contains a fact that violates the page schema",
+                path=path,
+            ) from orig_exc
     return tuple(facts)
 
 

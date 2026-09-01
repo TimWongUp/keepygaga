@@ -103,7 +103,9 @@ def test_core_memory_v1_contract_matches_current_page_format() -> None:
     with pytest.raises(ValidationError):
         Fact(basis="stated", content="  " + "x" * codec.MAX_FACT_CONTENT_CHARS)
     assert manifest["fixtures"] == {
-        relative: codec.sha256_text((CONTRACT_ROOT / relative).read_text(encoding="utf-8"))
+        relative: codec.sha256_text(
+            codec.normalize_text((CONTRACT_ROOT / relative).read_text(encoding="utf-8"))
+        )
         for relative in (
             "canonical/profile.md",
             "canonical/preferences.md",
@@ -334,6 +336,70 @@ def test_legacy_sources_are_read_but_removed_on_write(
     )
     assert result["status"] == "applied"
     assert "sources:" not in page.read_text(encoding="utf-8")
+
+
+def test_list_rejects_invalid_body(memory_store: tuple[Path, MemoryStore]) -> None:
+    root, store = memory_store
+    page = root / "preferences.md"
+    page.write_text(
+        page.read_text(encoding="utf-8") + "\nnot a fact\n", encoding="utf-8"
+    )
+    result = store.list_files()
+    assert result["status"] == "invalid_source"
+    assert result["path"] == "preferences.md"
+
+
+def test_list_rejects_oversized_fact(memory_store: tuple[Path, MemoryStore]) -> None:
+    root, store = memory_store
+    page = root / "preferences.md"
+    page.write_text(
+        page.read_text(encoding="utf-8") + f"\n- [stated] {chr(120) * 4097}\n",
+        encoding="utf-8",
+    )
+    result = store.list_files()
+    assert result["status"] == "invalid_source"
+    assert result["path"] == "preferences.md"
+
+
+def test_list_rejects_padded_frontmatter_fence(memory_store: tuple[Path, MemoryStore]) -> None:
+    root, store = memory_store
+    page = root / "profile.md"
+    nl = chr(10)
+    page.write_text(
+        "---" + nl
+        + "name: profile" + nl
+        + "description: desc" + nl
+        + "aliases: []" + nl
+        + "---   " + nl
+        + "- [stated] x" + nl
+        + "---" + nl,
+        encoding="utf-8",
+    )
+    listed = store.list_files()
+    assert listed["status"] == "invalid_source"
+    assert listed["path"] == "profile.md"
+    other = store.read(["preferences.md"])
+    assert other["status"] == "invalid_source"
+    assert other["path"] == "profile.md"
+
+
+def test_list_rejects_unicode_line_separator_fence(memory_store: tuple[Path, MemoryStore]) -> None:
+    root, store = memory_store
+    page = root / "profile.md"
+    nl = chr(10)
+    page.write_text(
+        "---" + nl
+        + "name: profile" + nl
+        + "description: desc" + nl
+        + "aliases: []" + chr(0x2028) + "---" + nl,
+        encoding="utf-8",
+    )
+    listed = store.list_files()
+    assert listed["status"] == "invalid_source"
+    assert listed["path"] == "profile.md"
+    other = store.read(["preferences.md"])
+    assert other["status"] == "invalid_source"
+    assert other["path"] == "profile.md"
 
 
 def test_list_is_minimal_and_read_is_structured(
@@ -578,7 +644,7 @@ def test_edit_during_commit_is_detected(
     def verify_then_edit(initial, changed_paths) -> None:  # type: ignore[no-untyped-def]
         nonlocal edited
         original_verify(initial, changed_paths)
-        if len(changed_paths) > 1 and not edited:
+        if changed_paths == ["profile.md"] and not edited:
             page.write_text(
                 page.read_text(encoding="utf-8").rstrip()
                 + "\n- [stated] Late edit.\n",
