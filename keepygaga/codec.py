@@ -268,7 +268,7 @@ def _parse_frontmatter(
         raise MemoryValidationError(
             "invalid_source", f"{path} must begin with YAML frontmatter", path=path
         )
-    lines = normalized.splitlines()
+    lines = normalized.split("\n")
     closing_index = next(
         (index for index, line in enumerate(lines[1:], start=1)
          if FRONTMATTER_FENCE_RE.fullmatch(line)),
