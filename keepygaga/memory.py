@@ -44,6 +44,7 @@ from keepygaga.codec import (
     fact_key,
     normalize_text,
     parse_memory_file,
+    parse_page_metadata,
     receipt,
     render_memory_file,
     sha256_text,
@@ -712,17 +713,27 @@ class MemoryStore:
         return paths
 
     def _load_catalog(
-        self, *, require_complete: bool = True
+        self,
+        *,
+        require_complete: bool = True,
+        full_paths: set[str] | None = None,
+        require_versions: bool = True,
     ) -> dict[str, LoadedFile]:
         files: dict[str, LoadedFile] = {}
+        parse_all = full_paths is None
         for relative in self._catalog_paths(require_complete=require_complete):
             target = self.root / relative
             text = normalize_text(self._read_catalog_text(target, relative))
+            parse = (
+                parse_memory_file
+                if parse_all or relative in full_paths
+                else parse_page_metadata
+            )
             files[relative] = LoadedFile(
                 path=relative,
-                document=parse_memory_file(text, relative),
+                document=parse(text, relative),
                 text=text,
-                version=sha256_text(text),
+                version=sha256_text(text) if require_versions else "",
             )
         _validate_catalog(files)
         return files
@@ -761,7 +772,7 @@ class MemoryStore:
                 os.close(descriptor)
 
     def _list_locked(self) -> dict[str, object]:
-        files = self._load_catalog()
+        files = self._load_catalog(full_paths=set(), require_versions=False)
         listing: list[dict[str, object]] = []
         for path, loaded in files.items():
             item: dict[str, object] = {
@@ -781,7 +792,7 @@ class MemoryStore:
         canonical = [canonical_memory_path(path) for path in paths]
         if len(canonical) != len(set(canonical)):
             raise MemoryValidationError("invalid_entry", "paths must not contain duplicates")
-        files = self._load_catalog()
+        files = self._load_catalog(full_paths=set(canonical))
         return {
             "status": "ok",
             "files": [self._read_item(self._require_existing(files, path)) for path in canonical],
@@ -1111,7 +1122,6 @@ class MemoryStore:
         staged: dict[str, Path] = {}
         try:
             self._stage_commit(working, changed_paths, staged)
-            self._verify_live_versions(initial, changed_paths)
             self._apply_commit(initial, working, changed_paths, staged)
         except MemoryValidationError:
             raise
