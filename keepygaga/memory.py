@@ -3,6 +3,7 @@ from __future__ import annotations
 import errno
 import os
 import re
+import secrets
 import stat
 import tempfile
 from collections.abc import Callable, Sequence
@@ -446,6 +447,13 @@ class LoadedFile:
     version: str
 
 
+@dataclass
+class StagedChange:
+    parent_descriptor: int | None
+    temporary_name: str | None = None
+    temporary_path: Path | None = None
+
+
 def page_limit(path: str) -> int:
     if path == "profile.md":
         return PROFILE_PAGE_LIMIT
@@ -456,6 +464,10 @@ def page_limit(path: str) -> int:
 
 def _local_date() -> str:
     return calendar_date.today().isoformat()
+
+
+def _absolute_without_resolving_links(path: Path) -> Path:
+    return Path(os.path.abspath(path.expanduser()))
 
 
 def _validate_agent_page_metadata(document: MemoryDocument, path: str) -> None:
@@ -489,6 +501,10 @@ def _prepare_memory_root(
     config: MemoryFilesConfig,
     created_directories: list[Path],
 ) -> None:
+    if _is_link_like(root):
+        raise MemoryValidationError(
+            "invalid_source", f"memory root must not be a symlink or junction: {root}"
+        )
     if root.exists() and not root.is_dir():
         raise MemoryValidationError(
             "invalid_source", f"memory root must be a directory: {root}"
@@ -542,7 +558,7 @@ def initialize_memory_tree(
     rendered: list[Path] = []
     created_directories: list[Path] = []
     try:
-        root = root.expanduser().resolve()
+        root = _absolute_without_resolving_links(root)
         _prepare_memory_root(root, _config, created_directories)
         lock_path = root / ".keepygaga.lock"
         if _is_link_like(lock_path):
@@ -700,7 +716,7 @@ def _permission_too_open(mode: int, *, directory: bool) -> bool:
 
 class MemoryStore:
     def __init__(self, root: Path, _config: MemoryFilesConfig):
-        self.root = root.expanduser().resolve()
+        self.root = _absolute_without_resolving_links(root)
         self.lock_path = self.root / ".keepygaga.lock"
         self.lock = FileLock(str(self.lock_path), timeout=30)
 
@@ -1667,7 +1683,7 @@ class MemoryStore:
         working: dict[str, LoadedFile],
         changed_paths: list[str],
     ) -> None:
-        staged: dict[str, Path] = {}
+        staged: dict[str, StagedChange] = {}
         try:
             self._stage_commit(working, changed_paths, staged)
             self._apply_commit(initial, working, changed_paths, staged)
@@ -1678,20 +1694,35 @@ class MemoryStore:
                 "write_failed", f"{type(exc).__name__}: {exc}"
             ) from exc
         finally:
-            for temporary in staged.values():
-                with suppress(FileNotFoundError):
-                    temporary.unlink()
+            for change in staged.values():
+                if change.parent_descriptor is not None:
+                    if change.temporary_name is not None:
+                        with suppress(FileNotFoundError):
+                            os.unlink(
+                                change.temporary_name,
+                                dir_fd=change.parent_descriptor,
+                            )
+                    os.close(change.parent_descriptor)
+                elif change.temporary_path is not None:
+                    with suppress(FileNotFoundError):
+                        change.temporary_path.unlink()
 
     def _stage_commit(
         self,
         working: dict[str, LoadedFile],
         changed_paths: list[str],
-        staged: dict[str, Path],
+        staged: dict[str, StagedChange],
     ) -> None:
         for relative in changed_paths:
+            if self._supports_anchored_commit():
+                staged[relative] = self._stage_anchored_change(
+                    relative, working.get(relative)
+                )
+                continue
             self._assert_parent_safe(relative)
             after = working.get(relative)
             if after is None:
+                staged[relative] = StagedChange(parent_descriptor=None)
                 continue
             target = self.root / relative
             with tempfile.NamedTemporaryFile(
@@ -1705,14 +1736,67 @@ class MemoryStore:
                 handle.write(after.text)
                 handle.flush()
                 os.fsync(handle.fileno())
-                staged[relative] = Path(handle.name)
+                staged[relative] = StagedChange(
+                    parent_descriptor=None,
+                    temporary_path=Path(handle.name),
+                )
+
+    @staticmethod
+    def _supports_anchored_commit() -> bool:
+        return (
+            os.name == "posix"
+            and hasattr(os, "O_DIRECTORY")
+            and os.open in os.supports_dir_fd
+            and os.chmod in os.supports_dir_fd
+            and os.rename in os.supports_dir_fd
+            and os.stat in os.supports_dir_fd
+            and os.unlink in os.supports_dir_fd
+        )
+
+    def _stage_anchored_change(
+        self, relative: str, after: LoadedFile | None
+    ) -> StagedChange:
+        parent_descriptor = self._open_commit_parent(relative)
+        temporary_name: str | None = None
+        try:
+            if after is not None:
+                target_name = PurePosixPath(relative).name
+                for _ in range(100):
+                    candidate = f".{target_name}.{secrets.token_hex(8)}.tmp"
+                    try:
+                        descriptor = os.open(
+                            candidate,
+                            os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                            NEW_FILE_MODE,
+                            dir_fd=parent_descriptor,
+                        )
+                    except FileExistsError:
+                        continue
+                    temporary_name = candidate
+                    break
+                else:
+                    raise FileExistsError("could not allocate a unique temporary file")
+                with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+                    handle.write(after.text)
+                    handle.flush()
+                    os.fsync(handle.fileno())
+            return StagedChange(
+                parent_descriptor=parent_descriptor,
+                temporary_name=temporary_name,
+            )
+        except Exception:
+            if temporary_name is not None:
+                with suppress(FileNotFoundError):
+                    os.unlink(temporary_name, dir_fd=parent_descriptor)
+            os.close(parent_descriptor)
+            raise
 
     def _apply_commit(
         self,
         initial: dict[str, LoadedFile],
         working: dict[str, LoadedFile],
         changed_paths: list[str],
-        staged: dict[str, Path],
+        staged: dict[str, StagedChange],
     ) -> None:
         applied_paths: list[str] = []
         try:
@@ -1723,19 +1807,55 @@ class MemoryStore:
                 ),
             )
             for relative in ordered_paths:
-                self._verify_live_versions(initial, [relative])
-                target = self.root / relative
-                if relative not in working:
-                    target.unlink()
-                else:
-                    temporary = staged[relative]
-                    if relative in initial:
-                        mode = target.stat(follow_symlinks=False).st_mode & 0o7777
-                        os.chmod(temporary, mode)
+                change = staged[relative]
+                if change.parent_descriptor is not None:
+                    self._assert_commit_parent_current(
+                        relative, change.parent_descriptor
+                    )
+                    self._verify_live_version_anchored(
+                        initial, relative, change.parent_descriptor
+                    )
+                    target_name = PurePosixPath(relative).name
+                    if relative not in working:
+                        os.unlink(target_name, dir_fd=change.parent_descriptor)
                     else:
-                        _chmod_private_file(temporary)
-                    os.replace(temporary, target)
-                    del staged[relative]
+                        temporary_name = change.temporary_name
+                        assert temporary_name is not None
+                        if relative in initial:
+                            mode = (
+                                os.stat(
+                                    target_name,
+                                    dir_fd=change.parent_descriptor,
+                                    follow_symlinks=False,
+                                ).st_mode
+                                & 0o7777
+                            )
+                            os.chmod(
+                                temporary_name,
+                                mode,
+                                dir_fd=change.parent_descriptor,
+                            )
+                        self._replace_anchored_file(
+                            change.parent_descriptor,
+                            temporary_name,
+                            target_name,
+                        )
+                        change.temporary_name = None
+                else:
+                    self._verify_live_versions(initial, [relative])
+                    target = self.root / relative
+                    if relative not in working:
+                        target.unlink()
+                    else:
+                        temporary = change.temporary_path
+                        assert temporary is not None
+                        if relative in initial:
+                            mode = target.stat(follow_symlinks=False).st_mode & 0o7777
+                            os.chmod(temporary, mode)
+                        else:
+                            _chmod_private_file(temporary)
+                        os.replace(temporary, target)
+                        change.temporary_path = None
                 applied_paths.append(relative)
         except MemoryValidationError as exc:
             if not applied_paths:
@@ -1754,6 +1874,124 @@ class MemoryStore:
                 f"{type(exc).__name__}: {exc}",
                 applied_paths=applied_paths,
             ) from exc
+
+    @staticmethod
+    def _replace_anchored_file(
+        parent_descriptor: int, temporary_name: str, target_name: str
+    ) -> None:
+        os.rename(
+            temporary_name,
+            target_name,
+            src_dir_fd=parent_descriptor,
+            dst_dir_fd=parent_descriptor,
+        )
+
+    def _open_commit_parent(self, relative: str) -> int:
+        canonical = canonical_memory_path(relative)
+        parts = PurePosixPath(canonical).parts
+        flags = (
+            os.O_RDONLY
+            | getattr(os, "O_DIRECTORY", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+        )
+        root_descriptor = -1
+        try:
+            root_descriptor = os.open(self.root, flags)
+            if len(parts) == 1:
+                result = root_descriptor
+                root_descriptor = -1
+                return result
+            return os.open(parts[0], flags, dir_fd=root_descriptor)
+        except OSError as exc:
+            raise MemoryValidationError(
+                "write_conflict",
+                f"memory parent directory changed during mutation: {canonical}",
+                path=canonical,
+            ) from exc
+        finally:
+            if root_descriptor >= 0:
+                os.close(root_descriptor)
+
+    def _assert_commit_parent_current(
+        self, relative: str, staged_descriptor: int
+    ) -> None:
+        current_descriptor = self._open_commit_parent(relative)
+        try:
+            if not os.path.samestat(
+                os.fstat(staged_descriptor), os.fstat(current_descriptor)
+            ):
+                raise MemoryValidationError(
+                    "write_conflict",
+                    f"memory parent directory changed during mutation: {relative}",
+                    path=relative,
+                )
+        finally:
+            os.close(current_descriptor)
+
+    def _verify_live_version_anchored(
+        self,
+        initial: dict[str, LoadedFile],
+        relative: str,
+        parent_descriptor: int,
+    ) -> None:
+        before = initial.get(relative)
+        target_name = PurePosixPath(relative).name
+        if before is None:
+            try:
+                os.stat(
+                    target_name,
+                    dir_fd=parent_descriptor,
+                    follow_symlinks=False,
+                )
+            except FileNotFoundError:
+                return
+            raise MemoryValidationError(
+                "write_conflict",
+                f"memory path appeared during mutation: {relative}",
+                path=relative,
+            )
+        flags = (
+            os.O_RDONLY
+            | getattr(os, "O_NOFOLLOW", 0)
+            | getattr(os, "O_NONBLOCK", 0)
+        )
+        try:
+            descriptor = os.open(
+                target_name,
+                flags,
+                dir_fd=parent_descriptor,
+            )
+        except OSError as exc:
+            raise MemoryValidationError(
+                "write_conflict",
+                f"memory path changed during mutation: {relative}",
+                path=relative,
+            ) from exc
+        try:
+            if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+                raise MemoryValidationError(
+                    "write_conflict",
+                    f"memory path changed during mutation: {relative}",
+                    path=relative,
+                )
+            with os.fdopen(descriptor, encoding="utf-8") as handle:
+                descriptor = -1
+                text = normalize_text(handle.read())
+        except (OSError, UnicodeDecodeError) as exc:
+            raise MemoryValidationError(
+                "write_conflict",
+                f"memory path changed during mutation: {relative}",
+                path=relative,
+            ) from exc
+        finally:
+            if descriptor >= 0:
+                os.close(descriptor)
+        if sha256_text(text) != before.version:
+            raise MemoryValidationError(
+                "write_conflict",
+                f"memory file changed during mutation: {relative}",
+                path=relative,
+            )
 
     @staticmethod
     def _commit_priority(

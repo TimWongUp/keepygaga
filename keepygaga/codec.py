@@ -143,7 +143,7 @@ def _one_line(value: str, field: str) -> str:
     normalized = normalize_text(value).strip()
     if not normalized:
         raise ValueError(f"{field} must not be empty")
-    if "\x00" in normalized or "\n" in normalized:
+    if "\x00" in normalized or len(normalized.splitlines()) != 1:
         raise ValueError(f"{field} must be one non-empty line")
     return normalized
 
