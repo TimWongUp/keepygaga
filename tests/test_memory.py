@@ -9,8 +9,9 @@ from typing import cast
 import pytest
 from pydantic import ValidationError
 
-from keepygaga import codec, paths
+from keepygaga import codec, memory_files, memory_init, paths
 from keepygaga import memory as memory_module
+from keepygaga import memory_store as memory_store_module
 from keepygaga.config import MemoryFilesConfig
 from keepygaga.memory import (
     AddOperation,
@@ -297,14 +298,14 @@ def test_initialize_reports_created_directories_on_partial_failure(
 ) -> None:
     root = tmp_path / "memory"
     root.mkdir()
-    original_mkdir = memory_module._mkdir_new
+    original_mkdir = memory_files._mkdir_new
 
     def fail_areas(path: Path, *args, **kwargs) -> None:
         if path == root / "areas":
             raise PermissionError("simulated directory failure")
         original_mkdir(path, *args, **kwargs)
 
-    monkeypatch.setattr(memory_module, "_mkdir_new", fail_areas)
+    monkeypatch.setattr(memory_files, "_mkdir_new", fail_areas)
 
     result = initialize_memory_tree(root, MemoryFilesConfig(root=str(root)))
 
@@ -319,14 +320,14 @@ def test_initialize_partial_file_commit_does_not_offer_onboarding(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     root = tmp_path / "memory"
-    original_create = memory_module._exclusive_create
+    original_create = memory_init._exclusive_create
 
     def fail_preferences(target: Path, text: str) -> bool:
         if target.name == "preferences.md":
             raise PermissionError("simulated page failure")
         return original_create(target, text)
 
-    monkeypatch.setattr(memory_module, "_exclusive_create", fail_preferences)
+    monkeypatch.setattr(memory_init, "_exclusive_create", fail_preferences)
 
     result = initialize_memory_tree(root, MemoryFilesConfig(root=str(root)))
 
@@ -564,7 +565,7 @@ def test_create_add_update_and_page_metadata(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _, store = memory_store
-    monkeypatch.setattr(memory_module, "_local_date", lambda: "2032-03-04")
+    monkeypatch.setattr(memory_store_module, "_local_date", lambda: "2032-03-04")
     created = store.create([create("areas/work.md", "First fact.")])
     assert created["status"] == "applied"
     added = store.add(
@@ -633,7 +634,7 @@ def test_observed_fact_can_be_promoted_to_stated(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _, store = memory_store
-    monkeypatch.setattr(memory_module, "_local_date", lambda: "2032-03-03")
+    monkeypatch.setattr(memory_store_module, "_local_date", lambda: "2032-03-03")
     added = store.add(
         [
             AddOperation(
@@ -645,7 +646,7 @@ def test_observed_fact_can_be_promoted_to_stated(
     )
     assert added["status"] == "applied"
 
-    monkeypatch.setattr(memory_module, "_local_date", lambda: "2032-03-04")
+    monkeypatch.setattr(memory_store_module, "_local_date", lambda: "2032-03-04")
 
     result = store.update(
         [
@@ -821,7 +822,7 @@ def test_move_fact(
     memory_store: tuple[Path, MemoryStore], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _, store = memory_store
-    monkeypatch.setattr(memory_module, "_local_date", lambda: "2030-03-04")
+    monkeypatch.setattr(memory_store_module, "_local_date", lambda: "2030-03-04")
     assert (
         store.create(
             [
@@ -1076,7 +1077,7 @@ def test_rename_is_local_and_preserves_old_name_as_alias(
     memory_store: tuple[Path, MemoryStore], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     root, store = memory_store
-    monkeypatch.setattr(memory_module, "_local_date", lambda: "2030-03-04")
+    monkeypatch.setattr(memory_store_module, "_local_date", lambda: "2030-03-04")
     assert (
         store.create(
             [
@@ -1143,7 +1144,7 @@ def test_rename_same_stem_across_scopes_preserves_page(
     memory_store: tuple[Path, MemoryStore], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     root, store = memory_store
-    monkeypatch.setattr(memory_module, "_local_date", lambda: "2030-03-04")
+    monkeypatch.setattr(memory_store_module, "_local_date", lambda: "2030-03-04")
     assert store.create(
         [create("topics/source.md", "Source fact.", ["origin"])]
     )["status"] == "applied"
@@ -1580,7 +1581,7 @@ def test_applied_files_can_chain_mutations_without_read(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _, store = memory_store
-    monkeypatch.setattr(memory_module, "_local_date", lambda: "2032-03-04")
+    monkeypatch.setattr(memory_store_module, "_local_date", lambda: "2032-03-04")
     added = store.add(
         [
             AddOperation(
@@ -2119,7 +2120,7 @@ def test_mutation_date_is_captured_once_and_move_preserves_it(
         calls += 1
         return "2030-01-02"
 
-    monkeypatch.setattr(memory_module, "_local_date", fixed_date)
+    monkeypatch.setattr(memory_store_module, "_local_date", fixed_date)
     created = store.create(
         [
             CreateOperation(
@@ -2137,7 +2138,7 @@ def test_mutation_date_is_captured_once_and_move_preserves_it(
         {"basis": "stated", "content": "Other fact.", "date": "2030-01-02"}
     ]
     monkeypatch.setattr(
-        memory_module,
+        memory_store_module,
         "_local_date",
         lambda: pytest.fail("move must not generate a new Fact date"),
     )
@@ -2175,7 +2176,7 @@ def test_multi_operation_add_and_update_each_capture_one_date(
     memory_store: tuple[Path, MemoryStore], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _, store = memory_store
-    monkeypatch.setattr(memory_module, "_local_date", lambda: "2030-02-02")
+    monkeypatch.setattr(memory_store_module, "_local_date", lambda: "2030-02-02")
     assert store.create(
         [create("topics/one.md", "One."), create("areas/two.md", "Two.")]
     )["status"] == "applied"
@@ -2186,7 +2187,7 @@ def test_multi_operation_add_and_update_each_capture_one_date(
         calls += 1
         return "2030-02-03"
 
-    monkeypatch.setattr(memory_module, "_local_date", add_date)
+    monkeypatch.setattr(memory_store_module, "_local_date", add_date)
     added = store.add(
         [
             AddOperation(
@@ -2215,7 +2216,7 @@ def test_multi_operation_add_and_update_each_capture_one_date(
         calls += 1
         return "2030-02-04"
 
-    monkeypatch.setattr(memory_module, "_local_date", update_date)
+    monkeypatch.setattr(memory_store_module, "_local_date", update_date)
     updated = store.update(
         [
             UpdateFactOperation(
@@ -2286,7 +2287,7 @@ def test_legacy_long_fact_can_be_selected_for_move_and_update(
     assert destination["facts"] == [
         {"basis": "observed", "content": long_content, "date": None}
     ]
-    monkeypatch.setattr(memory_module, "_local_date", lambda: "2031-04-05")
+    monkeypatch.setattr(memory_store_module, "_local_date", lambda: "2031-04-05")
     refined = store.update(
         [
             UpdateFactOperation(
