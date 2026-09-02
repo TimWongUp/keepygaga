@@ -42,7 +42,7 @@ If Hook setup fails, inspect the target host's native event schema, the Keepygag
 ## Failure routing
 
 - Invalid config or Memory Root: run Doctor, fix the exact live path or malformed page, and retry. Do not initialize over invalid existing content.
-- `write_conflict`: reread the returned `latest` snapshot when present and reclassify; for repair conflicts use the returned raw/version evidence. Never retry an old version unchanged.
+- `write_conflict`: reread the returned `latest` snapshot when present and reclassify. A repair conflict returns only the current version; call scoped `list` again and retry only if it still marks the page repairable. Never retry an old version unchanged.
 - `capacity_exceeded`: for a fixed page, refine the candidate or ask the user what to remove. For a dynamic page, use scoped list/read and versioned move to reuse a suitable destination or create a bounded new one. A full target scope requires user-led organization; do not loop.
 - `repairable=true`: call `update(target=repair)` once with the returned path and version. Conflicts, non-repairable pages, and repair failures require an exact user-facing report rather than guessing.
 - `partial_commit`: treat reported components and backups as live evidence, inspect them, then rerun the same idempotent operation.

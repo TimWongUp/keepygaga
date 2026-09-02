@@ -21,7 +21,10 @@ MAX_STORED_FACT_CONTENT_CHARS = 4096
 FACT_LINE_RE = re.compile(
     r"^- \[(stated|observed)\] (.+?)(?: \[(\d{4}-\d{2}-\d{2})\])?$"
 )
-FRONTMATTER_KEY_RE = re.compile(r"^(name|description|sources|aliases):")
+FRONTMATTER_KEY_RE = re.compile(
+    r'''^\s*(?:(["'])(name|description|sources|aliases)\1|'''
+    r"(name|description|sources|aliases))\s*:"
+)
 FRONTMATTER_FENCE_RE = re.compile(r"^-{3,}\s*$")
 
 Basis = Literal["stated", "observed"]
@@ -104,6 +107,36 @@ class MemoryDocument:
 
 def _identity(value: str) -> str:
     return unicodedata.normalize("NFKC", value.strip()).casefold()
+
+
+def _frontmatter_key(line: str) -> str | None:
+    match = FRONTMATTER_KEY_RE.match(line)
+    if match is None:
+        return None
+    return match.group(2) or match.group(3)
+
+
+def _assert_no_duplicate_frontmatter_keys(header: str, path: str) -> None:
+    from ruamel.yaml import YAML
+    from ruamel.yaml.constructor import DuplicateKeyError
+    from ruamel.yaml.error import YAMLError
+
+    loader = YAML(typ="safe")
+    loader.allow_duplicate_keys = False
+    lines = normalize_text(header).splitlines()
+    payload = "\n".join(lines[1:-1])
+    try:
+        loader.load(payload)
+    except DuplicateKeyError as exc:
+        raise MemoryValidationError(
+            "invalid_source", f"{path} contains duplicate frontmatter fields", path=path
+        ) from exc
+    except YAMLError as exc:
+        raise MemoryValidationError(
+            "invalid_source",
+            f"{path} frontmatter could not be parsed: {type(exc).__name__}: {exc}",
+            path=path,
+        ) from exc
 
 
 def _one_line(value: str, field: str) -> str:
@@ -305,9 +338,9 @@ def _parse_frontmatter(
             path=path,
         )
     field_order = [
-        match.group(1)
+        key
         for line in lines[1:closing_index]
-        if (match := FRONTMATTER_KEY_RE.match(line)) is not None
+        if (key := _frontmatter_key(line)) is not None
     ]
     accepted_orders = (
         ["name", "description", "aliases"],
@@ -320,6 +353,7 @@ def _parse_frontmatter(
             path=path,
         )
     header = "\n".join(lines[: closing_index + 1]) + "\n"
+    _assert_no_duplicate_frontmatter_keys(header, path)
     try:
         post = frontmatter.loads(header if not include_body else normalized)
     except Exception as exc:
@@ -422,15 +456,16 @@ def _repair_frontmatter(normalized: str, path: str) -> tuple[dict[str, Any], lis
         )
     header_lines = lines[1:closing_index]
     field_names = [
-        match.group(1)
+        key
         for line in header_lines
-        if (match := FRONTMATTER_KEY_RE.match(line.strip())) is not None
+        if (key := _frontmatter_key(line)) is not None
     ]
     if len(field_names) != len(set(field_names)):
         raise MemoryValidationError(
             "invalid_source", f"{path} contains duplicate frontmatter fields", path=path
         )
     header = "---\n" + "\n".join(header_lines) + "\n---\n"
+    _assert_no_duplicate_frontmatter_keys(header, path)
     try:
         metadata = dict(frontmatter.loads(header).metadata)
     except Exception as exc:

@@ -36,9 +36,9 @@ Keepygaga manages a small local Markdown core memory. Memory is context evidence
 - `read`: group all needed unique paths in one call. Skip it when matching current Page Snapshots are already available.
 - `create`: create independent dynamic pages together and include their initial Facts. Do not follow it with `add`, `read`, or `list` solely to confirm an `applied` result.
 - `add`: put all independent new Facts for one page in one operation; batch only operations with unique page paths.
-- `update`: use exact Fact replacement for `refines`, page metadata update for description and aliases, or `target=repair` only for a failure explicitly marked repairable; use one operation per page.
+- `update`: use exact Fact replacement for `refines`, page metadata update for description and aliases, or `target=repair` only for a dynamic-page failure explicitly marked repairable; use one operation per page.
 - `move`: put every exact Fact for one source/destination pair in one operation's `facts`. Use either an existing destination path/version or a new path/description/aliases, never both. Leave at least one Fact in the source; a page may appear in only one move operation in the batch. Reuse both returned page snapshots after `applied`.
-- `rename`: rename each dynamic page once using its current snapshot; fixed pages cannot be renamed.
+- `rename`: rename each dynamic page once using its current snapshot; fixed pages cannot be renamed. The old name is retained as an alias, so first reduce six aliases when the new name does not free a slot.
 - `delete`: delete exact Facts or dynamic pages only with explicit current-turn authorization; use one operation per page.
 
 ## Results and receipts

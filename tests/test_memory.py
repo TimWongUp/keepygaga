@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import os
 import sys
-from datetime import date as calendar_date
 from pathlib import Path
 from typing import cast
 
@@ -99,6 +98,11 @@ def test_core_memory_v1_contract_matches_current_page_format() -> None:
         assert canonical == render_memory_file(document, path)
         assert parse_memory_file(canonical, path) == document
         legacy_document = parse_memory_file(legacy, path)
+        assert (
+            legacy_document.name,
+            legacy_document.description,
+            legacy_document.aliases,
+        ) == (document.name, document.description, document.aliases)
         assert [fact.date for fact in legacy_document.facts] == [None]
         assert [fact.content for fact in legacy_document.facts] == [
             fact.content for fact in document.facts
@@ -405,6 +409,8 @@ def test_list_rejects_invalid_body(memory_store: tuple[Path, MemoryStore]) -> No
     assert result["status"] == "invalid_source"
     assert result["path"] == "topics/broken.md"
     assert result["repairable"] is False
+    assert "raw" not in result
+    assert "version" not in result
     assert store.list_files("areas") == {"status": "ok", "files": []}
 
 
@@ -419,6 +425,43 @@ def test_list_rejects_oversized_fact(memory_store: tuple[Path, MemoryStore]) -> 
     result = store.list_files("topics")
     assert result["status"] == "invalid_source"
     assert result["path"] == "topics/oversized.md"
+    assert result["repairable"] is False
+    assert "raw" not in result
+    assert "version" not in result
+
+
+@pytest.mark.parametrize(
+    "duplicate_key",
+    [
+        "description :",
+        '"description":',
+        "!!str description:",
+        '"descriptio\\u006e":',
+    ],
+)
+def test_frontmatter_duplicate_variants_are_rejected(
+    memory_store: tuple[Path, MemoryStore],
+    duplicate_key: str,
+) -> None:
+    root, store = memory_store
+    page = root / "topics" / "duplicate.md"
+    original = (
+        "---\n"
+        "name: duplicate\n"
+        "description: Original.\n"
+        f"{duplicate_key} Changed.\n"
+        "aliases: []\n"
+        "---\n\n"
+        "- [stated] Keep.\n"
+    )
+    page.write_text(original, encoding="utf-8")
+
+    result = store.list_files("topics")
+
+    assert result["status"] == "invalid_source"
+    assert result["repairable"] is False
+    assert "raw" not in result
+    assert page.read_text(encoding="utf-8") == original
 
 
 def test_list_rejects_padded_frontmatter_fence(
@@ -509,8 +552,10 @@ def test_read_rejects_invalid_count(memory_store: tuple[Path, MemoryStore]) -> N
 
 def test_create_add_update_and_page_metadata(
     memory_store: tuple[Path, MemoryStore],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _, store = memory_store
+    monkeypatch.setattr(memory_module, "_local_date", lambda: "2032-03-04")
     created = store.create([create("areas/work.md", "First fact.")])
     assert created["status"] == "applied"
     added = store.add(
@@ -550,10 +595,9 @@ def test_create_add_update_and_page_metadata(
     item = read_file(store, "areas/work.md")
     assert item["description"] == "Work context."
     assert item["aliases"] == ["工作"]
-    today = calendar_date.today().isoformat()
     assert item["facts"] == [
-        {"basis": "stated", "content": "Refined first fact.", "date": today},
-        {"basis": "stated", "content": "Second fact.", "date": today},
+        {"basis": "stated", "content": "Refined first fact.", "date": "2032-03-04"},
+        {"basis": "stated", "content": "Second fact.", "date": "2032-03-04"},
     ]
 
 
@@ -577,8 +621,10 @@ def test_stated_fact_cannot_be_downgraded(
 
 def test_observed_fact_can_be_promoted_to_stated(
     memory_store: tuple[Path, MemoryStore],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _, store = memory_store
+    monkeypatch.setattr(memory_module, "_local_date", lambda: "2032-03-03")
     added = store.add(
         [
             AddOperation(
@@ -589,6 +635,8 @@ def test_observed_fact_can_be_promoted_to_stated(
         ]
     )
     assert added["status"] == "applied"
+
+    monkeypatch.setattr(memory_module, "_local_date", lambda: "2032-03-04")
 
     result = store.update(
         [
@@ -607,7 +655,7 @@ def test_observed_fact_can_be_promoted_to_stated(
         {
             "basis": "stated",
             "content": "Prefers concise answers.",
-            "date": calendar_date.today().isoformat(),
+            "date": "2032-03-04",
         }
     ]
 
@@ -760,8 +808,11 @@ def test_edit_during_commit_is_detected(
     assert "Second agent edit." not in page.read_text(encoding="utf-8")
 
 
-def test_move_fact(memory_store: tuple[Path, MemoryStore]) -> None:
+def test_move_fact(
+    memory_store: tuple[Path, MemoryStore], monkeypatch: pytest.MonkeyPatch
+) -> None:
     _, store = memory_store
+    monkeypatch.setattr(memory_module, "_local_date", lambda: "2030-03-04")
     assert (
         store.create(
             [
@@ -797,6 +848,10 @@ def test_move_fact(memory_store: tuple[Path, MemoryStore]) -> None:
         "Keep me.",
         "Move me.",
     }
+    moved_fact = next(
+        item for item in destination_facts if item["content"] == "Move me."
+    )
+    assert moved_fact["date"] == "2030-03-04"
     snapshots = {item["path"]: item for item in moved["files"]}  # type: ignore[index]
     chained = store.add(
         [
@@ -808,6 +863,69 @@ def test_move_fact(memory_store: tuple[Path, MemoryStore]) -> None:
         ]
     )
     assert chained["status"] == "applied"
+
+
+def test_move_rejects_emptying_source_and_preserves_both_pages(
+    memory_store: tuple[Path, MemoryStore],
+) -> None:
+    root, store = memory_store
+    assert (
+        store.create(
+            [
+                create("topics/source.md", "Only source fact."),
+                create("areas/destination.md", "Destination fact."),
+            ]
+        )["status"]
+        == "applied"
+    )
+    source = root / "topics" / "source.md"
+    destination = root / "areas" / "destination.md"
+    before = (source.read_bytes(), destination.read_bytes())
+
+    result = store.move(
+        [
+            MoveOperation(
+                source_path="topics/source.md",
+                source_version=version(store, "topics/source.md"),
+                destination_path="areas/destination.md",
+                destination_version=version(store, "areas/destination.md"),
+                facts=[selector("Only source fact.")],
+            )
+        ]
+    )
+
+    assert result["status"] == "invalid_entry"
+    assert "leave at least one Fact" in str(result["message"])
+    assert result["recovery"]
+    assert (source.read_bytes(), destination.read_bytes()) == before
+
+
+def test_move_to_new_page_rejects_emptying_source_without_creating_destination(
+    memory_store: tuple[Path, MemoryStore],
+) -> None:
+    root, store = memory_store
+    assert store.create([create("topics/source.md", "Only source fact.")])[
+        "status"
+    ] == "applied"
+    source = root / "topics" / "source.md"
+    before = source.read_bytes()
+
+    result = store.move(
+        [
+            MoveOperation(
+                source_path="topics/source.md",
+                source_version=version(store, "topics/source.md"),
+                new_path="areas/new.md",
+                description="New destination.",
+                aliases=[],
+                facts=[selector("Only source fact.")],
+            )
+        ]
+    )
+
+    assert result["status"] == "invalid_entry"
+    assert source.read_bytes() == before
+    assert not (root / "areas" / "new.md").exists()
 
 
 def test_move_multiple_facts_between_same_pages_in_one_operation(
@@ -860,7 +978,7 @@ def test_move_multiple_facts_between_same_pages_in_one_operation(
 def test_move_duplicate_page_in_batch_explains_recovery(
     memory_store: tuple[Path, MemoryStore],
 ) -> None:
-    _, store = memory_store
+    root, store = memory_store
     assert (
         store.create(
             [
@@ -877,6 +995,7 @@ def test_move_duplicate_page_in_batch_explains_recovery(
     )
     source_version = version(store, "topics/source.md")
     destination_version = version(store, "areas/destination.md")
+    destination_before = (root / "areas" / "destination.md").read_bytes()
 
     result = store.move(
         [
@@ -905,6 +1024,7 @@ def test_move_duplicate_page_in_batch_explains_recovery(
         "Move one.",
         "Move two.",
     ]
+    assert (root / "areas" / "destination.md").read_bytes() == destination_before
 
 
 def test_move_multiple_facts_is_preflighted_before_commit(
@@ -944,9 +1064,10 @@ def test_move_multiple_facts_is_preflighted_before_commit(
 
 
 def test_rename_is_local_and_preserves_old_name_as_alias(
-    memory_store: tuple[Path, MemoryStore],
+    memory_store: tuple[Path, MemoryStore], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     root, store = memory_store
+    monkeypatch.setattr(memory_module, "_local_date", lambda: "2030-03-04")
     assert (
         store.create(
             [
@@ -980,6 +1101,9 @@ def test_rename_is_local_and_preserves_old_name_as_alias(
     )
     assert chained["status"] == "applied"
     assert read_file(store, "people/renamed.md")["aliases"] == ["source"]
+    renamed_facts = read_file(store, "people/renamed.md")["facts"]
+    assert isinstance(renamed_facts, list)
+    assert renamed_facts[0]["date"] == "2030-03-04"
     assert (root / "areas/reference.md").read_text(encoding="utf-8") == reference_before
 
 
@@ -1004,6 +1128,132 @@ def test_rename_can_promote_an_existing_alias(
     )
     assert renamed["status"] == "applied"
     assert read_file(store, "topics/assistant.md")["aliases"] == ["source"]
+
+
+def test_rename_same_stem_across_scopes_preserves_page(
+    memory_store: tuple[Path, MemoryStore], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root, store = memory_store
+    monkeypatch.setattr(memory_module, "_local_date", lambda: "2030-03-04")
+    assert store.create(
+        [create("topics/source.md", "Source fact.", ["origin"])]
+    )["status"] == "applied"
+
+    renamed = store.rename(
+        [
+            RenameOperation(
+                path="topics/source.md",
+                if_version=version(store, "topics/source.md"),
+                new_path="people/source.md",
+            )
+        ]
+    )
+
+    assert renamed["status"] == "applied"
+    assert not (root / "topics/source.md").exists()
+    item = read_file(store, "people/source.md")
+    assert item["name"] == "source"
+    assert item["description"] == "Route topics/source.md."
+    assert item["aliases"] == ["origin"]
+    assert item["facts"] == [
+        {"basis": "stated", "content": "Source fact.", "date": "2030-03-04"}
+    ]
+
+
+def test_overlimit_rename_reports_capacity_without_target_path_mismatch(
+    memory_store: tuple[Path, MemoryStore],
+) -> None:
+    root, store = memory_store
+    source = root / "topics" / "over.md"
+    source.write_text(
+        render_memory_file(
+            MemoryDocument(
+                name="over",
+                description="Over limit.",
+                aliases=(),
+                facts=(
+                    StoredFact(basis="stated", content="a" * 4096),
+                    StoredFact(basis="stated", content="b" * 900),
+                ),
+            ),
+            "topics/over.md",
+        ),
+        encoding="utf-8",
+    )
+    assert len(source.read_text(encoding="utf-8")) > memory_module.DYNAMIC_PAGE_LIMIT
+
+    renamed = store.rename(
+        [
+            RenameOperation(
+                path="topics/over.md",
+                if_version=version(store, "topics/over.md"),
+                new_path="topics/x.md",
+            )
+        ]
+    )
+
+    assert renamed["status"] == "capacity_exceeded"
+    assert renamed["path"] == "topics/x.md"
+    assert source.is_file()
+    assert not (root / "topics" / "x.md").exists()
+
+
+def test_rename_requires_alias_slot_to_preserve_old_name(
+    memory_store: tuple[Path, MemoryStore],
+) -> None:
+    root, store = memory_store
+    aliases = [f"alias-{index}" for index in range(6)]
+    assert (
+        store.create([create("topics/source.md", "Source fact.", aliases)])["status"]
+        == "applied"
+    )
+
+    renamed = store.rename(
+        [
+            RenameOperation(
+                path="topics/source.md",
+                if_version=version(store, "topics/source.md"),
+                new_path="topics/renamed.md",
+            )
+        ]
+    )
+
+    assert renamed["status"] == "capacity_exceeded"
+    assert renamed["limit"] == 6
+    assert "leave one slot" in str(renamed["recovery"])
+    assert (root / "topics" / "source.md").is_file()
+    assert not (root / "topics" / "renamed.md").exists()
+
+
+def test_rename_batch_rejects_reusing_any_old_or_new_path(
+    memory_store: tuple[Path, MemoryStore],
+) -> None:
+    root, store = memory_store
+    assert store.create(
+        [create("topics/a.md", "A."), create("topics/c.md", "C.")]
+    )["status"] == "applied"
+    before = {
+        path: (root / path).read_bytes() for path in ("topics/a.md", "topics/c.md")
+    }
+
+    result = store.rename(
+        [
+            RenameOperation(
+                path="topics/a.md",
+                if_version=version(store, "topics/a.md"),
+                new_path="topics/b.md",
+            ),
+            RenameOperation(
+                path="topics/c.md",
+                if_version=version(store, "topics/c.md"),
+                new_path="topics/a.md",
+            ),
+        ]
+    )
+
+    assert result["status"] == "duplicate_target"
+    assert all((root / path).read_bytes() == content for path, content in before.items())
+    assert not (root / "topics" / "b.md").exists()
 
 
 def test_delete_requires_authorization_and_protects_fixed_pages(
@@ -1093,6 +1343,7 @@ def test_fixed_page_hard_limit(memory_store: tuple[Path, MemoryStore]) -> None:
     assert result["limit"] == 2000
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="symlink creation is privileged")
 def test_canonical_paths_and_symlinks_are_rejected(
     memory_store: tuple[Path, MemoryStore], tmp_path: Path
 ) -> None:
@@ -1100,10 +1351,129 @@ def test_canonical_paths_and_symlinks_are_rejected(
     assert store.read(["../outside.md"])["status"] == "invalid_path"
     outside = tmp_path / "outside"
     outside.mkdir()
+    (outside / "leak.md").write_text(
+        render_memory_file(
+            MemoryDocument(
+                name="leak",
+                description="Outside Memory Root.",
+                aliases=(),
+                facts=(StoredFact(basis="stated", content="Must not leak."),),
+            ),
+            "topics/leak.md",
+        ),
+        encoding="utf-8",
+    )
     topics = root / "topics"
     topics.rmdir()
     topics.symlink_to(outside, target_is_directory=True)
+    listed = store.list_files("topics")
+    assert listed["status"] == "invalid_source"
+    assert listed["path"] == "topics"
+    assert store.read(["topics/leak.md"])["status"] == "invalid_source"
+    repaired = store.update(
+        [
+            RepairPageOperation(
+                path="topics/leak.md",
+                if_version="sha256:" + "0" * 64,
+                target="repair",
+            )
+        ]
+    )
+    assert repaired["status"] == "invalid_source"
+    assert "raw" not in repaired
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlink creation is privileged")
+def test_page_symlink_is_rejected_by_list_read_repair_and_write(
+    memory_store: tuple[Path, MemoryStore], tmp_path: Path
+) -> None:
+    root, store = memory_store
+    outside = tmp_path / "outside.md"
+    outside.write_text(
+        render_memory_file(
+            MemoryDocument(
+                name="linked",
+                description="Outside.",
+                aliases=(),
+                facts=(StoredFact(basis="stated", content="Outside fact."),),
+            ),
+            "topics/linked.md",
+        ),
+        encoding="utf-8",
+    )
+    linked = root / "topics" / "linked.md"
+    linked.symlink_to(outside)
+
     assert store.list_files("topics")["status"] == "invalid_source"
+    assert store.read(["topics/linked.md"])["status"] == "invalid_source"
+    repaired = store.update(
+        [
+            RepairPageOperation(
+                path="topics/linked.md",
+                if_version="sha256:" + "0" * 64,
+                target="repair",
+            )
+        ]
+    )
+    assert repaired["status"] == "invalid_source"
+    added = store.add(
+        [
+            AddOperation(
+                path="topics/linked.md",
+                if_version="sha256:" + "0" * 64,
+                facts=[fact("Do not write.")],
+            )
+        ]
+    )
+    assert added["status"] == "invalid_source"
+    assert "Do not write." not in outside.read_text(encoding="utf-8")
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlink creation is privileged")
+def test_memory_root_replaced_by_symlink_is_rejected(
+    memory_store: tuple[Path, MemoryStore], tmp_path: Path
+) -> None:
+    root, store = memory_store
+    original = tmp_path / "original-memory"
+    root.rename(original)
+    outside = tmp_path / "outside-memory"
+    outside.mkdir()
+    root.symlink_to(outside, target_is_directory=True)
+
+    assert store.list_files("topics")["status"] == "invalid_source"
+    assert store.read(["profile.md"])["status"] == "invalid_source"
+    created = store.create([create("topics/escape.md", "Must not escape.")])
+    assert created["status"] == "invalid_source"
+    assert not (outside / "topics" / "escape.md").exists()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows has no POSIX FIFO")
+def test_repair_rejects_fifo_without_blocking(
+    memory_store: tuple[Path, MemoryStore], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root, store = memory_store
+    fifo = root / "topics" / "pipe.md"
+    os.mkfifo(fifo)
+    real_open = os.open
+
+    def guarded_open(path, flags, *args, **kwargs):  # type: ignore[no-untyped-def]
+        if Path(path).name == fifo.name and not flags & os.O_NONBLOCK:
+            raise AssertionError("FIFO must be opened non-blocking before fstat")
+        return real_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", guarded_open)
+
+    result = store.update(
+        [
+            RepairPageOperation(
+                path="topics/pipe.md",
+                if_version="sha256:" + "0" * 64,
+                target="repair",
+            )
+        ]
+    )
+
+    assert result["status"] == "invalid_source"
 
 
 def test_legacy_environment_is_outside_catalog(
@@ -1156,8 +1526,10 @@ def test_applied_mutations_return_receipts(
 
 def test_applied_files_can_chain_mutations_without_read(
     memory_store: tuple[Path, MemoryStore],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _, store = memory_store
+    monkeypatch.setattr(memory_module, "_local_date", lambda: "2032-03-04")
     added = store.add(
         [
             AddOperation(
@@ -1184,7 +1556,7 @@ def test_applied_files_can_chain_mutations_without_read(
     assert updated["files"][0]["facts"][-1] == {  # type: ignore[index]
         "basis": "stated",
         "content": "Refined preference.",
-        "date": calendar_date.today().isoformat(),
+        "date": "2032-03-04",
     }
 
 
@@ -1285,6 +1657,91 @@ def test_interrupted_move_duplicates_before_it_can_lose_a_fact(
     assert result["applied_paths"] == ["areas/destination.md"]
     assert "Move safely." in str(read_file(store, "topics/source.md")["facts"])
     assert "Move safely." in str(read_file(store, "areas/destination.md")["facts"])
+
+
+def test_move_destination_failure_leaves_source_and_destination_unchanged(
+    memory_store: tuple[Path, MemoryStore], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root, store = memory_store
+    assert store.create(
+        [
+            CreateOperation(
+                path="topics/source.md",
+                description="Safe source.",
+                aliases=[],
+                facts=[fact("Stay safely."), fact("Move safely.")],
+            ),
+            create("areas/destination.md", "Keep."),
+        ]
+    )["status"] == "applied"
+    source = root / "topics" / "source.md"
+    destination = root / "areas" / "destination.md"
+    before = (source.read_bytes(), destination.read_bytes())
+    original_replace = os.replace
+
+    def fail_destination(source_path: str | Path, destination_path: str | Path) -> None:
+        if Path(destination_path) == destination:
+            raise OSError("simulated destination replace failure")
+        original_replace(source_path, destination_path)
+
+    monkeypatch.setattr(os, "replace", fail_destination)
+    result = store.move(
+        [
+            MoveOperation(
+                source_path="topics/source.md",
+                source_version=version(store, "topics/source.md"),
+                destination_path="areas/destination.md",
+                destination_version=version(store, "areas/destination.md"),
+                facts=[selector("Move safely.")],
+            )
+        ]
+    )
+
+    assert result["status"] == "write_failed"
+    assert (source.read_bytes(), destination.read_bytes()) == before
+
+
+def test_new_move_destination_failure_leaves_source_unchanged(
+    memory_store: tuple[Path, MemoryStore], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root, store = memory_store
+    assert store.create(
+        [
+            CreateOperation(
+                path="topics/source.md",
+                description="Safe source.",
+                aliases=[],
+                facts=[fact("Stay safely."), fact("Move safely.")],
+            )
+        ]
+    )["status"] == "applied"
+    source = root / "topics" / "source.md"
+    before = source.read_bytes()
+    destination = root / "areas" / "new.md"
+    original_replace = os.replace
+
+    def fail_destination(source_path: str | Path, destination_path: str | Path) -> None:
+        if Path(destination_path) == destination:
+            raise OSError("simulated new destination replace failure")
+        original_replace(source_path, destination_path)
+
+    monkeypatch.setattr(os, "replace", fail_destination)
+    result = store.move(
+        [
+            MoveOperation(
+                source_path="topics/source.md",
+                source_version=version(store, "topics/source.md"),
+                new_path="areas/new.md",
+                description="New destination.",
+                aliases=["new-alias"],
+                facts=[selector("Move safely.")],
+            )
+        ]
+    )
+
+    assert result["status"] == "write_failed"
+    assert source.read_bytes() == before
+    assert not destination.exists()
 
 
 def test_atomic_replace_failure_leaves_no_temp_file(
@@ -1435,6 +1892,76 @@ def test_create_rejects_more_than_max_dynamic_pages(
     assert listed["status"] == "ok"
 
 
+def test_dynamic_page_limits_are_literal_contract() -> None:
+    assert memory_module.DYNAMIC_PAGE_LIMITS == {
+        "topics": 50,
+        "areas": 50,
+        "people": 100,
+    }
+
+
+def test_full_target_scope_blocks_new_move_and_cross_scope_rename(
+    memory_store: tuple[Path, MemoryStore],
+) -> None:
+    root, store = memory_store
+    for index in range(50):
+        path = f"areas/manual-{index}.md"
+        (root / path).write_text(
+            render_memory_file(
+                MemoryDocument(
+                    name=f"manual-{index}",
+                    description="Manual area.",
+                    aliases=(),
+                    facts=(StoredFact(basis="stated", content=f"Area {index}."),),
+                ),
+                path,
+            ),
+            encoding="utf-8",
+        )
+    assert store.create(
+        [
+            CreateOperation(
+                path="topics/source.md",
+                description="Source.",
+                aliases=[],
+                facts=[fact("Stay."), fact("Move.")],
+            )
+        ]
+    )["status"] == "applied"
+
+    moved = store.move(
+        [
+            MoveOperation(
+                source_path="topics/source.md",
+                source_version=version(store, "topics/source.md"),
+                new_path="areas/new.md",
+                description="New area.",
+                aliases=[],
+                facts=[selector("Move.")],
+            )
+        ]
+    )
+    assert moved["status"] == "capacity_exceeded"
+    assert moved["scope"] == "areas"
+    assert moved["current"] == 50
+    assert moved["limit"] == 50
+    assert moved["recovery"]
+
+    renamed = store.rename(
+        [
+            RenameOperation(
+                path="topics/source.md",
+                if_version=version(store, "topics/source.md"),
+                new_path="areas/source.md",
+            )
+        ]
+    )
+    assert renamed["status"] == "capacity_exceeded"
+    assert renamed["scope"] == "areas"
+    assert not (root / "areas" / "new.md").exists()
+    assert (root / "topics" / "source.md").is_file()
+
+
 def test_create_capacity_check_runs_after_path_validation(
     memory_store: tuple[Path, MemoryStore],
 ) -> None:
@@ -1521,6 +2048,13 @@ def test_fact_dates_are_optional_validated_and_rendered() -> None:
     invalid = rendered.replace("2026-09-02", "2026-02-30")
     with pytest.raises(memory_module.MemoryValidationError):
         parse_memory_file(invalid, "topics/example.md")
+    duplicate_with_different_dates = (
+        "---\nname: example\ndescription: Example.\naliases: []\n---\n\n"
+        "- [stated] Same Fact. [2026-09-01]\n"
+        "- [stated] Same Fact. [2026-09-02]\n"
+    )
+    with pytest.raises(memory_module.MemoryValidationError):
+        parse_memory_file(duplicate_with_different_dates, "topics/example.md")
 
 
 def test_mutation_date_is_captured_once_and_move_preserves_it(
@@ -1542,11 +2076,15 @@ def test_mutation_date_is_captured_once_and_move_preserves_it(
                 description="Known person.",
                 aliases=["P"],
                 facts=[fact("Core fact."), fact("Work fact.", "observed")],
-            )
+            ),
+            create("topics/other.md", "Other fact."),
         ]
     )
     assert created["status"] == "applied"
     assert calls == 1
+    assert read_file(store, "topics/other.md")["facts"] == [
+        {"basis": "stated", "content": "Other fact.", "date": "2030-01-02"}
+    ]
     monkeypatch.setattr(
         memory_module,
         "_local_date",
@@ -1566,6 +2104,9 @@ def test_mutation_date_is_captured_once_and_move_preserves_it(
     )
     assert moved["status"] == "applied"
     destination = read_file(store, "people/person-work.md")
+    assert destination["name"] == "person-work"
+    assert destination["description"] == "Work context for this person."
+    assert destination["aliases"] == ["P"]
     assert destination["facts"] == [
         {
             "basis": "observed",
@@ -1576,6 +2117,81 @@ def test_mutation_date_is_captured_once_and_move_preserves_it(
     source = read_file(store, "people/person.md")
     assert source["facts"] == [
         {"basis": "stated", "content": "Core fact.", "date": "2030-01-02"}
+    ]
+
+
+def test_multi_operation_add_and_update_each_capture_one_date(
+    memory_store: tuple[Path, MemoryStore], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, store = memory_store
+    monkeypatch.setattr(memory_module, "_local_date", lambda: "2030-02-02")
+    assert store.create(
+        [create("topics/one.md", "One."), create("areas/two.md", "Two.")]
+    )["status"] == "applied"
+    calls = 0
+
+    def add_date() -> str:
+        nonlocal calls
+        calls += 1
+        return "2030-02-03"
+
+    monkeypatch.setattr(memory_module, "_local_date", add_date)
+    added = store.add(
+        [
+            AddOperation(
+                path="topics/one.md",
+                if_version=version(store, "topics/one.md"),
+                facts=[fact("Added one.")],
+            ),
+            AddOperation(
+                path="areas/two.md",
+                if_version=version(store, "areas/two.md"),
+                facts=[fact("Added two.")],
+            ),
+        ]
+    )
+    assert added["status"] == "applied"
+    assert calls == 1
+    assert {
+        item["facts"][-1]["date"]  # type: ignore[index]
+        for item in added["files"]  # type: ignore[union-attr]
+    } == {"2030-02-03"}
+
+    calls = 0
+
+    def update_date() -> str:
+        nonlocal calls
+        calls += 1
+        return "2030-02-04"
+
+    monkeypatch.setattr(memory_module, "_local_date", update_date)
+    updated = store.update(
+        [
+            UpdateFactOperation(
+                path="topics/one.md",
+                if_version=version(store, "topics/one.md"),
+                target="fact",
+                old_fact=selector("Added one."),
+                new_fact=fact("Updated one."),
+            ),
+            UpdateFactOperation(
+                path="areas/two.md",
+                if_version=version(store, "areas/two.md"),
+                target="fact",
+                old_fact=selector("Added two."),
+                new_fact=fact("Updated two."),
+            ),
+        ]
+    )
+    assert updated["status"] == "applied"
+    assert calls == 1
+    assert {
+        item["facts"][-1]["date"]  # type: ignore[index]
+        for item in updated["files"]  # type: ignore[union-attr]
+    } == {"2030-02-04"}
+    assert read_file(store, "topics/one.md")["facts"] == [
+        {"basis": "stated", "content": "One.", "date": "2030-02-02"},
+        {"basis": "stated", "content": "Updated one.", "date": "2030-02-04"},
     ]
 
 
@@ -1698,8 +2314,8 @@ def test_repair_is_explicit_versioned_and_semantics_preserving(
         'description: "Repairable page."\n'
         'name: "repairable"\n'
         "---\n\n"
-        "- [stated] Keep this fact.\n"
-        "- [stated] Keep this fact.\n"
+        "- [stated] Keep this fact. [2030-03-04]\n"
+        "- [stated] Keep this fact. [2030-03-04]\n"
     )
     page.write_text(original, encoding="utf-8")
 
@@ -1720,22 +2336,251 @@ def test_repair_is_explicit_versioned_and_semantics_preserving(
     )
     assert repaired["status"] == "applied"
     item = read_file(store, "topics/repairable.md")
+    assert item["name"] == "repairable"
+    assert item["description"] == "Repairable page."
     assert item["aliases"] == ["same"]
     assert item["facts"] == [
-        {"basis": "stated", "content": "Keep this fact.", "date": None}
+        {"basis": "stated", "content": "Keep this fact.", "date": "2030-03-04"}
     ]
+
+
+def test_repair_rejects_page_that_scoped_list_accepts(
+    memory_store: tuple[Path, MemoryStore],
+) -> None:
+    root, store = memory_store
+    page = root / "topics" / "valid.md"
+    original = (
+        "---\n"
+        "name: valid\n"
+        "description: Valid page.\n"
+        "aliases: []\n"
+        "---\n\n"
+        "- [stated] Keep this fact. [2030-03-04]\n"
+    )
+    page.write_text(original, encoding="utf-8")
+    assert store.list_files("topics")["status"] == "ok"
+
+    repaired = store.update(
+        [
+            RepairPageOperation(
+                path="topics/valid.md",
+                if_version=version(store, "topics/valid.md"),
+                target="repair",
+            )
+        ]
+    )
+
+    assert repaired["status"] == "invalid_entry"
+    assert repaired["repairable"] is False
+    assert page.read_text(encoding="utf-8") == original
+
+
+def test_repair_stale_version_reports_conflict_without_raw(
+    memory_store: tuple[Path, MemoryStore],
+) -> None:
+    root, store = memory_store
+    page = root / "topics" / "repairable.md"
+    page.write_text(
+        "---\naliases: []\ndescription: Repairable.\nname: repairable\n---\n",
+        encoding="utf-8",
+    )
+    proposed = store.list_files("topics")
+    assert proposed["repairable"] is True
+    page.write_text(page.read_text(encoding="utf-8") + "\n", encoding="utf-8")
+    changed = page.read_bytes()
+
+    result = store.update(
+        [
+            RepairPageOperation(
+                path="topics/repairable.md",
+                if_version=str(proposed["version"]),
+                target="repair",
+            )
+        ]
+    )
+
+    assert result["status"] == "write_conflict"
+    assert "raw" not in result
+    assert result["version"] != proposed["version"]
+    assert page.read_bytes() == changed
+
+
+def test_repair_deleted_after_proposal_returns_actionable_not_found(
+    memory_store: tuple[Path, MemoryStore],
+) -> None:
+    root, store = memory_store
+    page = root / "topics" / "repairable.md"
+    page.write_text(
+        "---\naliases: []\ndescription: Repairable.\nname: repairable\n---\n",
+        encoding="utf-8",
+    )
+    proposed = store.list_files("topics")
+    page.unlink()
+
+    result = store.update(
+        [
+            RepairPageOperation(
+                path="topics/repairable.md",
+                if_version=str(proposed["version"]),
+                target="repair",
+            )
+        ]
+    )
+
+    assert result["status"] == "not_found"
+    assert result["path"] == "topics/repairable.md"
+    assert "do not retry" in str(result["recovery"])
+
+
+def test_repair_rejects_fixed_pages_not_proposed_by_scoped_list(
+    memory_store: tuple[Path, MemoryStore],
+) -> None:
+    _, store = memory_store
+    result = store.update(
+        [
+            RepairPageOperation(
+                path="profile.md",
+                if_version=version(store, "profile.md"),
+                target="repair",
+            )
+        ]
+    )
+
+    assert result["status"] == "invalid_path"
+    assert result["repairable"] is False
+
+
+def test_list_does_not_propose_repair_that_cannot_reduce_page_capacity(
+    memory_store: tuple[Path, MemoryStore],
+) -> None:
+    root, store = memory_store
+    raw = (
+        "---\naliases: []\ndescription: x\nname: over\n---\n"
+        f"- [stated] {'a' * 2463}\n"
+        f"- [stated] {'b' * 2463}\n"
+    )
+    assert len(raw) == 4996
+    (root / "topics" / "over.md").write_text(raw, encoding="utf-8")
+
+    result = store.list_files("topics")
+
+    assert result["status"] == "invalid_source"
+    assert result["repairable"] is False
+    assert "raw" not in result
+    assert "version" not in result
+
+
+def test_repair_cannot_be_mixed_with_semantic_update(
+    memory_store: tuple[Path, MemoryStore],
+) -> None:
+    root, store = memory_store
+    page = root / "topics" / "repairable.md"
+    original = "---\naliases: []\ndescription: Repairable.\nname: repairable\n---\n"
+    page.write_text(original, encoding="utf-8")
+    proposed = store.list_files("topics")
+    profile = root / "profile.md"
+    profile_before = profile.read_bytes()
+
+    result = store.update(
+        [
+            RepairPageOperation(
+                path="topics/repairable.md",
+                if_version=str(proposed["version"]),
+                target="repair",
+            ),
+            UpdatePageOperation(
+                path="profile.md",
+                if_version=version(store, "profile.md"),
+                target="page",
+                description="Changed.",
+            ),
+        ]
+    )
+
+    assert result["status"] == "invalid_entry"
+    assert page.read_text(encoding="utf-8") == original
+    assert profile.read_bytes() == profile_before
+
+
+def test_repair_batch_stale_second_page_writes_nothing(
+    memory_store: tuple[Path, MemoryStore],
+) -> None:
+    root, store = memory_store
+    originals = {
+        "topics/one.md": "---\naliases: []\ndescription: One.\nname: one\n---\n",
+        "topics/two.md": "---\naliases: []\ndescription: Two.\nname: two\n---\n",
+    }
+    for path, raw in originals.items():
+        (root / path).write_text(raw, encoding="utf-8")
+
+    result = store.update(
+        [
+            RepairPageOperation(
+                path="topics/one.md",
+                if_version=codec.sha256_text(originals["topics/one.md"]),
+                target="repair",
+            ),
+            RepairPageOperation(
+                path="topics/two.md",
+                if_version="sha256:" + "0" * 64,
+                target="repair",
+            ),
+        ]
+    )
+
+    assert result["status"] == "write_conflict"
+    assert all(
+        (root / path).read_text(encoding="utf-8") == raw
+        for path, raw in originals.items()
+    )
+
+
+def test_oversized_invalid_page_is_not_returned_or_mechanically_repaired(
+    memory_store: tuple[Path, MemoryStore],
+) -> None:
+    root, store = memory_store
+    page = root / "topics" / "huge.md"
+    page.write_text("not frontmatter\n" + "x" * 10_001, encoding="utf-8")
+
+    listed = store.list_files("topics")
+
+    assert listed["status"] == "invalid_source"
+    assert listed["repairable"] is False
+    assert "raw" not in listed
+    assert "version" not in listed
+    repaired = store.update(
+        [
+            RepairPageOperation(
+                path="topics/huge.md",
+                if_version=codec.sha256_text(page.read_text(encoding="utf-8")),
+                target="repair",
+            )
+        ]
+    )
+    assert repaired["status"] == "capacity_exceeded"
+    assert repaired["limit"] == 10_000
+    assert "raw" not in repaired
+    assert "version" not in repaired
 
 
 def test_agent_metadata_limits_do_not_invalidate_legacy_pages(
     memory_store: tuple[Path, MemoryStore],
 ) -> None:
     root, store = memory_store
-    CreateOperation(
-        path="topics/eighty.md",
-        description="  " + "x" * 80 + "  ",
-        aliases=[str(index) for index in range(6)],
-        facts=[fact("Allowed.")],
+    accepted = store.create(
+        [
+            CreateOperation(
+                path="topics/eighty.md",
+                description="  " + "x" * 80 + "  ",
+                aliases=[str(index) for index in range(6)],
+                facts=[fact("Allowed.")],
+            )
+        ]
     )
+    assert accepted["status"] == "applied"
+    item = read_file(store, "topics/eighty.md")
+    assert item["description"] == "x" * 80
+    assert item["aliases"] == [str(index) for index in range(6)]
     with pytest.raises(ValidationError):
         CreateOperation(
             path="topics/too-long.md",
@@ -1774,7 +2619,8 @@ def test_agent_metadata_limits_do_not_invalidate_legacy_pages(
             )
         ]
     )
-    assert rename_blocked["status"] == "invalid_entry"
+    assert rename_blocked["status"] == "capacity_exceeded"
+    assert rename_blocked["limit"] == 6
     partial_metadata_update = store.update(
         [
             UpdatePageOperation(
@@ -1831,6 +2677,19 @@ def test_dynamic_page_limit_rejects_growth_but_allows_reduction(
         ]
     )
     assert blocked["status"] == "capacity_exceeded"
+    before_metadata = page.read_bytes()
+    metadata = store.update(
+        [
+            UpdatePageOperation(
+                path="topics/over.md",
+                if_version=version(store, "topics/over.md"),
+                target="page",
+                description="Short.",
+            )
+        ]
+    )
+    assert metadata["status"] == "capacity_exceeded"
+    assert page.read_bytes() == before_metadata
     reduced = store.delete(
         [
             DeleteFactOperation(
@@ -1844,3 +2703,56 @@ def test_dynamic_page_limit_rejects_growth_but_allows_reduction(
     )
     assert reduced["status"] == "applied"
     assert "split_recommended" not in read_file(store, "topics/over.md")
+
+
+def test_move_cannot_hide_overlimit_destination_growth_with_raw_whitespace(
+    memory_store: tuple[Path, MemoryStore],
+) -> None:
+    root, store = memory_store
+    assert (
+        store.create(
+            [
+                CreateOperation(
+                    path="topics/source.md",
+                    description="Source.",
+                    aliases=[],
+                    facts=[fact("Stay."), fact("Move me.")],
+                )
+            ]
+        )["status"]
+        == "applied"
+    )
+    destination = root / "areas" / "over.md"
+    destination.write_text(
+        render_memory_file(
+            MemoryDocument(
+                name="over",
+                description="Over capacity.",
+                aliases=(),
+                facts=tuple(
+                    StoredFact(basis="stated", content=str(index) * 700)
+                    for index in range(7)
+                ),
+            ),
+            "areas/over.md",
+        )
+        + "\n" * 1000,
+        encoding="utf-8",
+    )
+    source = root / "topics" / "source.md"
+    before = (source.read_bytes(), destination.read_bytes())
+
+    result = store.move(
+        [
+            MoveOperation(
+                source_path="topics/source.md",
+                source_version=version(store, "topics/source.md"),
+                destination_path="areas/over.md",
+                destination_version=version(store, "areas/over.md"),
+                facts=[selector("Move me.")],
+            )
+        ]
+    )
+
+    assert result["status"] == "capacity_exceeded"
+    assert (source.read_bytes(), destination.read_bytes()) == before

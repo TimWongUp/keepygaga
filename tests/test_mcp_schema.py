@@ -64,9 +64,15 @@ def test_public_mcp_surface_and_exact_top_level_shapes() -> None:
         assert set(definition["properties"]) == expected_fields
         assert definition["additionalProperties"] is False
 
+    for tool_name in {"update", "delete"}:
+        operations = by_name[tool_name].input_schema["properties"]["operations"]
+        assert operations["minItems"] == 1
+        assert operations["maxItems"] == 15
+
     create_schema = by_name["create"].input_schema
     create = create_schema["$defs"]["CreateOperation"]
     assert set(create["required"]) == {"path", "description", "aliases", "facts"}
+    assert create["properties"]["description"]["maxLength"] == 80
     assert create["properties"]["aliases"]["maxItems"] == 6
     assert "minItems" not in create["properties"]["facts"]
     assert create["properties"]["facts"]["maxItems"] == 30
@@ -112,6 +118,18 @@ def test_public_mcp_surface_and_exact_top_level_shapes() -> None:
     assert update_page["additionalProperties"] is False
     assert update_fact["properties"]["target"]["const"] == "fact"
     assert update_page["properties"]["target"]["const"] == "page"
+    update_description = next(
+        branch
+        for branch in update_page["properties"]["description"]["anyOf"]
+        if branch.get("type") == "string"
+    )
+    update_aliases = next(
+        branch
+        for branch in update_page["properties"]["aliases"]["anyOf"]
+        if branch.get("type") == "array"
+    )
+    assert update_description["maxLength"] == 80
+    assert update_aliases["maxItems"] == 6
     assert set(update_fact["required"]) == {
         "path",
         "if_version",
@@ -171,6 +189,7 @@ def test_tool_protocol_is_discoverable_from_descriptions_and_schema() -> None:
     add = add_schema["$defs"]["AddOperation"]
     assert "latest Page Snapshot" in add["properties"]["if_version"]["description"]
     assert "exact duplicates only" in add["properties"]["facts"]["description"]
+    assert add["properties"]["facts"]["maxItems"] == 30
     assert (
         "each path must be unique"
         in (add_schema["properties"]["operations"]["description"])
@@ -186,6 +205,18 @@ def test_tool_protocol_is_discoverable_from_descriptions_and_schema() -> None:
     assert move["oneOf"][1]["required"] == ["new_path", "description", "aliases"]
     assert move["properties"]["facts"]["minItems"] == 1
     assert move["properties"]["facts"]["maxItems"] == 30
+    move_description = next(
+        branch
+        for branch in move["properties"]["description"]["anyOf"]
+        if branch.get("type") == "string"
+    )
+    move_aliases = next(
+        branch
+        for branch in move["properties"]["aliases"]["anyOf"]
+        if branch.get("type") == "array"
+    )
+    assert move_description["maxLength"] == 80
+    assert move_aliases["maxItems"] == 6
     selector_schema = move_schema["$defs"]["FactSelector"]
     assert set(selector_schema["properties"]) == {"basis", "content"}
     assert selector_schema["properties"]["content"]["maxLength"] == 4096
@@ -326,7 +357,7 @@ def test_runtime_rejects_unexpected_top_level_arguments() -> None:
 def test_runtime_rejects_more_than_fifteen_read_paths() -> None:
     result = asyncio.run(
         _call_tool(
-            "read", {"paths": [f"topics/page-{index}.md" for index in range(21)]}
+            "read", {"paths": [f"topics/page-{index}.md" for index in range(16)]}
         )
     )
     assert result.is_error is True

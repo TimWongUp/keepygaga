@@ -81,6 +81,7 @@ from keepygaga.paths import (
 PROFILE_PAGE_LIMIT = 2000
 PREFERENCES_PAGE_LIMIT = 2000
 DYNAMIC_PAGE_LIMIT = 5000
+MAX_REPAIR_INPUT_CHARS = DYNAMIC_PAGE_LIMIT * 2
 MAX_DESCRIPTION_CHARS = 80
 MAX_ALIASES_PER_PAGE = 6
 MAX_READ_PATHS = 15
@@ -96,6 +97,10 @@ DEFAULT_DESCRIPTIONS = {
     "profile.md": "用户明确陈述的稳定身份、背景与长期角色。",
     "preferences.md": "用户希望 Agent 长期遵循的回应方式、工作偏好与条件检索偏好。",
 }
+
+
+def _is_link_like(path: Path) -> bool:
+    return path.is_symlink() or path.is_junction()
 
 __all__ = [
     "AddOperation",
@@ -175,7 +180,9 @@ CurrentPageVersion = Annotated[
 ]
 
 
-def _agent_description(value: str) -> str:
+def _agent_description(value: object) -> str:
+    if not isinstance(value, str):
+        raise ValueError("description must be a string")
     normalized = _one_line(value, "description")
     if unicode_chars(normalized) > MAX_DESCRIPTION_CHARS:
         raise ValueError(
@@ -186,13 +193,13 @@ def _agent_description(value: str) -> str:
 
 class CreateOperation(StrictModel):
     path: DynamicPagePath
-    description: str
+    description: str = Field(max_length=MAX_DESCRIPTION_CHARS)
     aliases: list[str] = Field(max_length=MAX_ALIASES_PER_PAGE)
     facts: list[Fact] = Field(max_length=MAX_FACTS_PER_OPERATION)
 
-    @field_validator("description")
+    @field_validator("description", mode="before")
     @classmethod
-    def validate_description(cls, value: str) -> str:
+    def validate_description(cls, value: object) -> str:
         return _agent_description(value)
 
 
@@ -230,12 +237,12 @@ class UpdatePageOperation(StrictModel):
     target: Literal["page"] = Field(
         description="Select page description or aliases update rather than Fact replacement."
     )
-    description: str | None = None
+    description: str | None = Field(default=None, max_length=MAX_DESCRIPTION_CHARS)
     aliases: list[str] | None = Field(default=None, max_length=MAX_ALIASES_PER_PAGE)
 
-    @field_validator("description")
+    @field_validator("description", mode="before")
     @classmethod
-    def validate_description(cls, value: str | None) -> str | None:
+    def validate_description(cls, value: object) -> str | None:
         if value is None:
             return None
         return _agent_description(value)
@@ -288,7 +295,7 @@ class MoveOperation(StrictModel):
     destination_path: ExistingPagePath | None = None
     destination_version: CurrentPageVersion | None = None
     new_path: DynamicPagePath | None = None
-    description: str | None = None
+    description: str | None = Field(default=None, max_length=MAX_DESCRIPTION_CHARS)
     aliases: list[str] | None = Field(default=None, max_length=MAX_ALIASES_PER_PAGE)
     facts: list[FactSelector] = Field(
         min_length=1,
@@ -299,9 +306,9 @@ class MoveOperation(StrictModel):
         ),
     )
 
-    @field_validator("description")
+    @field_validator("description", mode="before")
     @classmethod
-    def validate_description(cls, value: str | None) -> str | None:
+    def validate_description(cls, value: object) -> str | None:
         return _agent_description(value) if value is not None else None
 
     @model_validator(mode="after")
@@ -498,7 +505,7 @@ def _prepare_memory_root(
 def _prepare_dynamic_directories(root: Path, created_directories: list[Path]) -> None:
     for directory in DYNAMIC_DIRS:
         target = root / directory
-        if target.is_symlink() or (target.exists() and not target.is_dir()):
+        if _is_link_like(target) or (target.exists() and not target.is_dir()):
             raise MemoryValidationError(
                 "invalid_source", f"memory path must be a directory: {target}"
             )
@@ -512,7 +519,7 @@ def _prepare_dynamic_directories(root: Path, created_directories: list[Path]) ->
 def _prepare_fixed_pages(root: Path, rendered: list[Path]) -> None:
     for relative in FIXED_PATHS:
         target = root / relative
-        if target.is_symlink():
+        if _is_link_like(target):
             raise MemoryValidationError(
                 "invalid_source", f"memory page must not be a symlink: {target}"
             )
@@ -538,7 +545,7 @@ def initialize_memory_tree(
         root = root.expanduser().resolve()
         _prepare_memory_root(root, _config, created_directories)
         lock_path = root / ".keepygaga.lock"
-        if lock_path.is_symlink():
+        if _is_link_like(lock_path):
             raise MemoryValidationError(
                 "invalid_source", f"memory lock path must not be a symlink: {lock_path}"
             )
@@ -727,6 +734,11 @@ class MemoryStore:
     def _run_locked(
         self, callback: Callable[[], dict[str, object]]
     ) -> dict[str, object]:
+        if _is_link_like(self.root):
+            return {
+                "status": "invalid_source",
+                "message": f"memory root must not be a symlink or junction: {self.root}",
+            }
         if not self.root.is_dir():
             if self.root.exists():
                 return {
@@ -737,7 +749,7 @@ class MemoryStore:
                 "status": "not_initialized",
                 "message": f"memory root does not exist: {self.root}",
             }
-        if self.lock_path.is_symlink():
+        if _is_link_like(self.lock_path):
             return {
                 "status": "invalid_source",
                 "message": f"memory lock path must not be a symlink: {self.lock_path}",
@@ -784,7 +796,7 @@ class MemoryStore:
     def _validate_catalog_directories(self, missing: list[str]) -> None:
         for directory_name in DYNAMIC_DIRS:
             directory = self.root / directory_name
-            if directory.is_symlink():
+            if _is_link_like(directory):
                 raise MemoryValidationError(
                     "invalid_source",
                     f"memory directory must not be a symlink: {directory}",
@@ -801,7 +813,7 @@ class MemoryStore:
         paths: list[str] = []
         for relative in FIXED_PATHS:
             target = self.root / relative
-            if target.is_symlink():
+            if _is_link_like(target):
                 raise MemoryValidationError(
                     "invalid_source", f"memory path must not be a symlink: {target}"
                 )
@@ -824,10 +836,11 @@ class MemoryStore:
             directory = self.root / directory_name
             if not directory.is_dir():
                 continue
-            for target in sorted(directory.iterdir(), key=lambda item: item.name):
-                if target.suffix != ".md":
-                    continue
-                if target.is_symlink() or not target.is_file():
+            markdown_targets = (
+                target for target in directory.iterdir() if target.suffix == ".md"
+            )
+            for target in sorted(markdown_targets, key=lambda item: item.name):
+                if _is_link_like(target) or not target.is_file():
                     relative = f"{directory_name}/{target.name}"
                     raise MemoryValidationError(
                         "invalid_source",
@@ -859,16 +872,16 @@ class MemoryStore:
         _validate_catalog(files)
         return files
 
-    @staticmethod
-    def _read_catalog_text(target: Path, relative: str) -> str:
-        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    def _read_catalog_text(
+        self, target: Path, relative: str, *, max_chars: int | None = None
+    ) -> str:
         try:
-            descriptor = os.open(target, flags)
+            descriptor = self._open_catalog_descriptor(target, relative)
         except OSError as exc:
-            if exc.errno == errno.ELOOP or target.is_symlink():
+            if exc.errno in (errno.ELOOP, errno.ENOTDIR) or _is_link_like(target):
                 raise MemoryValidationError(
                     "invalid_source",
-                    f"memory path must not be a symlink: {target}",
+                    f"memory path and its dynamic directory must not be symlinks: {target}",
                     path=relative,
                 ) from exc
             raise
@@ -881,7 +894,17 @@ class MemoryStore:
                 )
             with os.fdopen(descriptor, encoding="utf-8") as handle:
                 descriptor = -1
-                return handle.read()
+                text = handle.read() if max_chars is None else handle.read(max_chars + 1)
+                if max_chars is not None and len(text) > max_chars:
+                    raise MemoryValidationError(
+                        "capacity_exceeded",
+                        f"{relative} exceeds the bounded repair input",
+                        path=relative,
+                        limit=max_chars,
+                        repairable=False,
+                        recovery="Organize the invalid page manually before retrying.",
+                    )
+                return text
         except UnicodeDecodeError as exc:
             raise MemoryValidationError(
                 "invalid_source",
@@ -892,19 +915,67 @@ class MemoryStore:
             if descriptor >= 0:
                 os.close(descriptor)
 
+    def _open_catalog_descriptor(self, target: Path, relative: str) -> int:
+        flags = (
+            os.O_RDONLY
+            | getattr(os, "O_NOFOLLOW", 0)
+            | getattr(os, "O_NONBLOCK", 0)
+        )
+        if os.open not in os.supports_dir_fd or not hasattr(os, "O_DIRECTORY"):
+            if _is_link_like(target) or _is_link_like(target.parent):
+                raise MemoryValidationError(
+                    "invalid_source",
+                    f"memory path and its dynamic directory must not be symlinks: {target}",
+                    path=relative,
+                )
+            return os.open(target, flags)
+
+        parts = PurePosixPath(relative).parts
+        root_descriptor = os.open(
+            self.root,
+            os.O_RDONLY
+            | getattr(os, "O_DIRECTORY", 0)
+            | getattr(os, "O_NOFOLLOW", 0),
+        )
+        parent_descriptor = -1
+        try:
+            parent = root_descriptor
+            if len(parts) == 2:
+                parent_descriptor = os.open(
+                    parts[0],
+                    os.O_RDONLY
+                    | getattr(os, "O_DIRECTORY", 0)
+                    | getattr(os, "O_NOFOLLOW", 0),
+                    dir_fd=root_descriptor,
+                )
+                parent = parent_descriptor
+            return os.open(parts[-1], flags, dir_fd=parent)
+        finally:
+            if parent_descriptor >= 0:
+                os.close(parent_descriptor)
+            os.close(root_descriptor)
+
     def _list_locked(self, scope: MemoryScope) -> dict[str, object]:
         if scope not in DYNAMIC_DIRS:
             raise MemoryValidationError(
                 "invalid_entry", "scope must be topics, areas, or people"
             )
         directory = self.root / scope
-        if directory.is_symlink() or (directory.exists() and not directory.is_dir()):
+        if _is_link_like(directory) or (directory.exists() and not directory.is_dir()):
             raise MemoryValidationError(
-                "invalid_source", f"memory path must be a directory: {directory}"
+                "invalid_source",
+                f"memory path must be a directory: {directory}",
+                path=scope,
+                repairable=False,
+                recovery="Replace the exact scope path with a regular directory.",
             )
         if not directory.is_dir():
             raise MemoryValidationError(
-                "not_initialized", f"memory directory does not exist: {directory}"
+                "not_initialized",
+                f"memory directory does not exist: {directory}",
+                path=scope,
+                repairable=False,
+                recovery="Initialize the Memory Root, then call list again.",
             )
         listing: list[dict[str, object]] = []
         for path in self._dynamic_catalog_paths(scope):
@@ -925,25 +996,41 @@ class MemoryStore:
             try:
                 document = parse_page_metadata(text, path)
             except MemoryValidationError as exc:
-                try:
-                    repair_memory_file(text, path)
-                except MemoryValidationError:
+                if unicode_chars(text) > MAX_REPAIR_INPUT_CHARS:
                     repairable = False
-                    recovery = "Fix the exact page manually, then call list again."
-                else:
-                    repairable = True
                     recovery = (
-                        "Call update with target=repair, this path, and the returned "
-                        "version; stop and report any conflict."
+                        "The invalid page is above the bounded repair input; organize it manually, "
+                        "then call list again."
                     )
+                else:
+                    try:
+                        repaired_document = repair_memory_file(text, path)
+                    except MemoryValidationError:
+                        repairable = False
+                        recovery = "Fix the exact page manually, then call list again."
+                    else:
+                        repaired_used = unicode_chars(
+                            render_memory_file(repaired_document, path)
+                        )
+                        used = unicode_chars(text)
+                        limit = page_limit(path)
+                        repairable = repaired_used <= limit or (
+                            used > limit and repaired_used < used
+                        )
+                        recovery = (
+                            "Call update with target=repair, this path, and the returned "
+                            "version; stop and report any conflict."
+                            if repairable
+                            else "Organize the page manually within its capacity, then call list again."
+                        )
                 raise MemoryValidationError(
                     exc.status,
                     str(exc),
                     path=path,
                     repairable=repairable,
-                    raw=text,
-                    version=sha256_text(text),
                     recovery=recovery,
+                    raw=text if repairable else None,
+                    version=sha256_text(text) if repairable else None,
                 ) from exc
             listing.append(
                 {
@@ -968,7 +1055,15 @@ class MemoryStore:
         files: dict[str, LoadedFile] = {}
         for path in canonical:
             target = self.root / path
-            if target.is_symlink() or not target.is_file():
+            if _is_link_like(target):
+                raise MemoryValidationError(
+                    "invalid_source",
+                    f"memory path must not be a symlink: {path}",
+                    path=path,
+                    repairable=False,
+                    recovery="Replace the exact path with a regular UTF-8 Markdown file.",
+                )
+            if not target.is_file():
                 raise MemoryValidationError(
                     "not_found", f"memory file not found: {path}", path=path
                 )
@@ -1164,18 +1259,60 @@ class MemoryStore:
         mutations: list[dict[str, object]] = []
         for operation in operations:
             path = canonical_memory_path(operation.path)
-            target = self.root / path
-            text = normalize_text(self._read_catalog_text(target, path))
-            version = sha256_text(text)
+            if not is_dynamic_path(path):
+                raise MemoryValidationError(
+                    "invalid_path",
+                    "repair is available only for dynamic pages proposed by scoped list",
+                    path=path,
+                    repairable=False,
+                    recovery=(
+                        "Fix the Home Page manually and preserve its current versioned content."
+                    ),
+                )
             if not VERSION_RE.fullmatch(operation.if_version):
                 raise MemoryValidationError("invalid_entry", "if_version is invalid")
+            target = self.root / path
+            try:
+                text = normalize_text(
+                    self._read_catalog_text(
+                        target, path, max_chars=MAX_REPAIR_INPUT_CHARS
+                    )
+                )
+            except FileNotFoundError as exc:
+                raise MemoryValidationError(
+                    "not_found",
+                    f"repair target no longer exists: {path}",
+                    path=path,
+                    recovery=(
+                        "Call list for the same scope again; do not retry the stale repair."
+                    ),
+                ) from exc
+            version = sha256_text(text)
             if version != operation.if_version:
                 raise MemoryValidationError(
                     "write_conflict",
                     f"memory file changed since repair was proposed: {path}",
                     path=path,
-                    raw=text,
                     version=version,
+                    recovery=(
+                        "Call list for the same scope again and only retry if the page "
+                        "is still explicitly marked repairable."
+                    ),
+                )
+            try:
+                parse_page_metadata(text, path)
+            except MemoryValidationError:
+                pass
+            else:
+                raise MemoryValidationError(
+                    "invalid_entry",
+                    f"repair target is already structurally valid: {path}",
+                    path=path,
+                    repairable=False,
+                    recovery=(
+                        "Do not repair this page; use a normal versioned mutation only "
+                        "when its memory content needs to change."
+                    ),
                 )
             document = repair_memory_file(text, path)
             initial[path] = LoadedFile(
@@ -1302,10 +1439,13 @@ class MemoryStore:
 
     def _rename_locked(self, operations: list[RenameOperation]) -> dict[str, object]:
         self._require_operations(operations)
-        self._check_duplicate_targets([op.path for op in operations])
+        rename_paths = [canonical_memory_path(op.path) for op in operations]
+        rename_paths.extend(canonical_memory_path(op.new_path) for op in operations)
+        self._check_duplicate_targets(rename_paths)
         initial = self._load_catalog()
         working = dict(initial)
         mutations: list[dict[str, object]] = []
+        renamed_from: dict[str, str] = {}
         for operation in operations:
             current = self._check_version(working, operation.path, operation.if_version)
             if not is_dynamic_path(current.path):
@@ -1327,9 +1467,22 @@ class MemoryStore:
                 for alias in current.document.aliases
                 if _identity(alias) != _identity(new_name)
             ]
-            if _identity(current.document.name) not in {
+            old_name_identity = _identity(current.document.name)
+            if old_name_identity != _identity(new_name) and old_name_identity not in {
                 _identity(alias) for alias in aliases
             }:
+                if len(aliases) >= MAX_ALIASES_PER_PAGE:
+                    raise MemoryValidationError(
+                        "capacity_exceeded",
+                        "rename cannot preserve the old page name within the alias limit",
+                        path=current.path,
+                        current=len(aliases),
+                        limit=MAX_ALIASES_PER_PAGE,
+                        recovery=(
+                            "Update aliases to leave one slot for the old page name, "
+                            "then retry against the latest Page Snapshot."
+                        ),
+                    )
                 aliases.append(current.document.name)
             document = MemoryDocument(
                 name=new_name,
@@ -1340,8 +1493,11 @@ class MemoryStore:
             _validate_agent_page_metadata(document, new_path)
             del working[current.path]
             working[new_path] = self._loaded(new_path, document)
+            renamed_from[new_path] = current.path
             mutations.append(self._mutation("rename", "page", current.path, [new_path]))
-        return self._finish(initial, working, mutations)
+        return self._finish(
+            initial, working, mutations, renamed_from=renamed_from
+        )
 
     def _delete_locked(self, operations: list[DeleteOperation]) -> dict[str, object]:
         self._require_operations(operations)
@@ -1395,10 +1551,14 @@ class MemoryStore:
         initial: dict[str, LoadedFile],
         working: dict[str, LoadedFile],
         mutations: list[dict[str, object]],
+        *,
+        renamed_from: dict[str, str] | None = None,
     ) -> dict[str, object]:
         _validate_catalog(working)
         self._validate_scope_capacity(initial, working)
-        self._validate_page_capacity(initial, working)
+        self._validate_page_capacity(
+            initial, working, mutations, renamed_from or {}
+        )
         changed_paths = sorted(
             path
             for path in set(initial) | set(working)
@@ -1443,19 +1603,48 @@ class MemoryStore:
 
     @staticmethod
     def _validate_page_capacity(
-        initial: dict[str, LoadedFile], working: dict[str, LoadedFile]
+        initial: dict[str, LoadedFile],
+        working: dict[str, LoadedFile],
+        mutations: list[dict[str, object]],
+        renamed_from: dict[str, str],
     ) -> None:
+        mutation_by_path = {
+            str(mutation["path"]): mutation for mutation in mutations
+        }
         for path, after in working.items():
-            before = initial.get(path)
+            source_path = renamed_from.get(path)
+            before = initial.get(source_path or path)
             if before is not None and before.text == after.text:
                 continue
             used = unicode_chars(after.text)
             limit = page_limit(path)
             if used <= limit:
                 continue
-            before_used = unicode_chars(before.text) if before is not None else 0
-            if before is not None and before_used > limit and used < before_used:
-                continue
+            if before is not None:
+                before_used = unicode_chars(before.text)
+                mutation = mutation_by_path.get(source_path or path)
+                action = mutation.get("action") if mutation is not None else None
+                target = mutation.get("target") if mutation is not None else None
+                if action == "repair" and before_used > limit and used < before_used:
+                    continue
+                canonical_before_used = unicode_chars(
+                    render_memory_file(before.document, source_path or path)
+                )
+                reduces_fact_content = (
+                    (action == "update" and target == "fact")
+                    or (action == "delete" and target == "fact")
+                    or action == "move"
+                )
+                if (
+                    canonical_before_used > limit
+                    and used < canonical_before_used
+                    and (
+                        source_path is not None
+                        or not is_dynamic_path(path)
+                        or reduces_fact_content
+                    )
+                ):
+                    continue
             dynamic = is_dynamic_path(path)
             recovery = (
                 "Organize exact Facts into a suitable existing page or a bounded new "
@@ -1587,7 +1776,7 @@ class MemoryStore:
             target = self.root / relative
             before = initial.get(relative)
             if before is None:
-                if target.exists() or target.is_symlink():
+                if target.exists() or _is_link_like(target):
                     raise MemoryValidationError(
                         "write_conflict",
                         f"memory path appeared during mutation: {relative}",
@@ -1608,7 +1797,7 @@ class MemoryStore:
     def _assert_parent_safe(self, relative: str) -> None:
         canonical = canonical_memory_path(relative)
         parent = (self.root / canonical).parent
-        if parent.is_symlink() or not parent.is_dir():
+        if _is_link_like(parent) or not parent.is_dir():
             raise MemoryValidationError(
                 "write_conflict",
                 f"memory parent directory is unsafe: {parent}",
@@ -1675,15 +1864,14 @@ class MemoryStore:
             directory = self.root / directory_name
             if not directory.is_dir():
                 continue
-            for target in sorted(directory.iterdir(), key=lambda item: item.name):
-                if (
-                    target.suffix == ".md"
-                    and target.is_file()
-                    and not target.is_symlink()
-                ):
+            markdown_targets = (
+                target for target in directory.iterdir() if target.suffix == ".md"
+            )
+            for target in sorted(markdown_targets, key=lambda item: item.name):
+                if target.is_file() and not _is_link_like(target):
                     candidates.append((target, False))
         for target, directory in candidates:
-            if not target.exists() or target.is_symlink():
+            if not target.exists() or _is_link_like(target):
                 continue
             mode = target.stat(follow_symlinks=False).st_mode & 0o777
             if _permission_too_open(mode, directory=directory):

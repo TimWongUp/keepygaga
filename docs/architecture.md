@@ -23,7 +23,7 @@ Host-native memory remains free to own host-specific conversation recall and pro
 
 ## Memory model
 
-The only source of truth is the live Markdown allowlist below Memory Root. Fixed pages are `profile.md` and `preferences.md`; dynamic pages are direct Markdown children of the independently bounded `topics`, `areas`, and `people` scopes. Canonical frontmatter is `name`, `description`, and `aliases`; body lines are independent `[stated]` or `[observed]` Facts with an optional Store-owned local last-write date. Legacy undated Facts remain valid.
+The only source of truth is the live Markdown allowlist below Memory Root. Fixed pages are `profile.md` and `preferences.md`; dynamic pages are direct Markdown children of the independently bounded `topics`, `areas`, and `people` scopes. Canonical frontmatter is `name`, `description`, and `aliases`; body lines are independent `[stated]` or `[observed]` Facts with an optional Store-owned local last-write date. The terminal ` [YYYY-MM-DD]` form is reserved for that date; other legacy undated Facts remain valid.
 
 Every call rereads its live files. Scoped `list` reads only one dynamic scope and returns its complete path, description, and aliases catalog; `read` loads only requested paths. Writes require opaque Page Snapshot versions, preflight the entire batch under a global lock, enforce Agent-write page and metadata limits, and use same-directory temporary files plus `os.replace`. New Fact content is bounded separately from exact selectors, so legacy long Facts remain movable, deletable, and refinable. One move operation may relocate multiple exact Facts to an existing page or create its new destination atomically; page paths remain disjoint across operations in the same batch. Changed pages are canonicalized; unchanged pages retain their bytes. Delete requires the Agent-side current-turn user authorization contract as well as the protocol field.
 
@@ -61,4 +61,4 @@ Repository tests and temporary homes establish only Config-tested behavior: proj
 
 ## Threat model
 
-Filesystem boundaries are enforced by path allowlists, symlink checks, locks, compare-and-swap checks, private creation modes on POSIX, and atomic replacement. The Agent and host remain responsible for current user intent. Markdown inside the selected Memory Root is trusted local input and may contain sensitive personal data.
+Filesystem boundaries are enforced by path allowlists, Memory-Root-anchored no-follow descriptor reads on supported platforms, symlink/junction checks, locks, compare-and-swap checks, private creation modes on POSIX, and atomic replacement. The Agent and host remain responsible for current user intent. Markdown inside the selected Memory Root is trusted local input and may contain sensitive personal data.

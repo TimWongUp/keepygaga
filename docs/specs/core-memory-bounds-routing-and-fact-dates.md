@@ -43,6 +43,7 @@ Agent 写入受到清晰、统一且可计算的页面数、页面字符、Fact 
 - Agent 创建页面或更新页面元数据时，规范化后的 description 最长 80 个 Unicode 字符，aliases 最多 6 个。
 - alias 单项和合计不设独立字符上限，path/stem 不新增字符上限；仍遵守现有 canonical lowercase kebab-case 和文件系统边界。
 - description 与 aliases 的新上限只约束 Agent create 或相关页面元数据更新。既有更长 description 或 7–8 个 aliases 可读取；Doctor 可警告，下一次相关元数据更新必须收敛。
+- rename 保留旧页面 name 作为 alias；若已有 6 个 aliases 且新 name 没有释放一个位置，Store 拒绝 rename 并要求 Agent 先用页面元数据更新留出一个 alias 位置，不静默丢弃旧 name。
 
 ### 页面与 Fact 容量
 
@@ -88,7 +89,7 @@ Agent 写入受到清晰、统一且可计算的页面数、页面字符、Fact 
 
 ### Fact 日期
 
-- 新规范 Fact 行为 `- [stated|observed] <content> [YYYY-MM-DD]`，日期必须位于行尾。
+- 新规范 Fact 行为 `- [stated|observed] <content> [YYYY-MM-DD]`，日期必须位于行尾。终止的空格加合法 ` [YYYY-MM-DD]` 是保留日期语法，不再解释为 content；需要把这类文本本身作为 content 时，Agent 必须改写或补充标点使其不占用保留尾部。
 - 日期表示 Fact 最后一次实际新增或更新的宿主机本地日历日期，不表示页面修改时间、证据发生时间或有效期。
 - Store 在一次顶层 mutation 进入全局锁后读取一次本地日期，并用于该批次所有新建或实际更新的 Facts。
 - Agent 的公开 Tool 输入仍只包含 `basis + content`，不得提交或修改日期；Fact 身份与重复键仍是 `basis + normalized content`，日期不参与匹配。
@@ -96,19 +97,19 @@ Agent 写入受到清晰、统一且可计算的页面数、页面字符、Fact 
 - `observed → stated` 属于 Fact 更新并写当天日期；stated 自动降级仍禁止。
 - move、自动拆分、repair、rename 和页面元数据更新完整保留已有日期；通用 renderer 不得给无日期 Fact 自动补日期。
 - `read` 的每个结构化 Fact 固定返回 `basis`、`content`、`date`；新 Fact 的 date 为 `YYYY-MM-DD` 字符串，旧 Fact 为 `null`。
-- 旧的无日期 Fact 是长期兼容的合法输入。升级不批量迁移、不使用文件时间或升级日期补写，也不为缺少日期产生 Doctor 警告。
+- 除占用上述保留尾部外，旧的无日期 Fact 是长期兼容的合法输入。升级不批量迁移、不使用文件时间或升级日期补写，也不为缺少日期产生 Doctor 警告。
 - 日期存在时必须是合法的 ISO `YYYY-MM-DD` 日历日期；无效日期使页面结构无效。
 - 日期不触发 TTL、自动过期、降权、删除或定期确认。Agent 可在实际使用明显时效性内容时结合当前上下文核对。
 
 ### 结构损坏与机械修复
 
 - list 保持严格只读，不得在扫描时隐式修复文件。
-- 目标分区结构无效时，失败响应提供准确 `path`、`message`、`recovery`，并在适用时提供 `repairable=true` 和当前 raw/version，使 Agent 能决定是否调用修复。
+- 目标分区结构无效时，失败响应提供准确 `path`、`message`、`recovery`。只有动态页面存在唯一机械修复结果、输入不超过 10000 字符且规范结果满足页面容量或能缩短既有超限页时，才提供 `repairable=true` 和当前 raw/version；其他损坏页不暴露 raw/version。
 - 扩展现有 `update`，增加 `target=repair`；不新增公开 Tool。
 - 只有存在唯一规范结果且不需要发明或改变语义内容时，才允许 Agent 无需用户确认自动调用 repair。
 - 可机械修复的情形包括：完整 frontmatter 字段顺序错误、换行/空白/末尾换行、完全重复 aliases、alias 等于同页 name、完全重复 Fact 行、mutation 时移除兼容的 legacy `sources`，以及能够完整解析后规范重渲染的文件。
 - 不可自动修复的情形包括：name/path 不一致、缺少 description、正文含非 Fact prose、Fact content 超长、basis 非法、UTF-8 非法、symlink、非法 path，以及语义冲突但文本不同的 Facts。
-- repair 必须携带失败响应提供的当前 version，在全局锁内执行 compare-and-swap。冲突或修复失败时 Agent 停止并通知用户，不循环重试或猜测修复。
+- repair 只接受 scoped list 能提议的动态页面，并必须携带失败响应提供的当前 version，在全局锁内执行 compare-and-swap。固定 Home Pages 不走自动 repair。冲突只返回当前 version、不返回 raw；Agent 重新调用同分区 list，只有页面仍明确标为 repairable 时才可重试。修复失败时停止并通知用户，不循环重试或猜测修复。
 
 ### 批量边界、兼容与升级
 
@@ -148,7 +149,7 @@ Agent 的 add 会让一个动态页超过 5000 字符。Store 不提交该 add�
 
 ### 旧 Fact 与日期
 
-旧页面含 `- [stated] 内容。`。read 返回 `date: null`，Doctor 不警告。移动或页面规范化仍保持无日期；只有该 Fact 的 content 或 basis 后续确实更新，Store 才写入当天日期。
+旧页面含 `- [stated] 内容。`。read 返回 `date: null`，Doctor 不警告。移动或页面规范化仍保持无日期；只有该 Fact 的 content 或 basis 后续确实更新，Store 才写入当天日期。旧 content 若恰好以空格加合法 `[YYYY-MM-DD]` 结束，会按保留语法解释为日期；Agent 必须通过实际 Fact 更新改写该文本，不能假称它仍是无日期 Fact。
 
 ## Accepted decisions
 
@@ -195,7 +196,7 @@ uv run python scripts/smoke_mcp_server.py
 - 动态页可在一次 move 中安全创建目的页并移动准确 Facts；任何失败路径都不会丢失 Fact，自动流程不会删除源页或留下 create 产生的空孤儿页。
 - 固定页超限只返回失败和恢复信息，不发生自动整理；动态页只在 mutation 路径整理，任何 read/list/Doctor/Hook 都不写文件。
 - Store 不执行语义匹配；Agent 自动整理先考虑现有页，只在必要时创建语义明确的新页，并在目标分区无额度且无可复用页时通知用户。
-- 新建和实际更新的 Facts 得到同批次统一的本地 `YYYY-MM-DD`；移动、拆分、修复、重命名和页面元数据更新不改变日期；旧无日期 Fact 始终返回 `date:null` 且不被补写。
+- 新建和实际更新的 Facts 得到同批次统一的本地 `YYYY-MM-DD`；移动、拆分、修复、重命名和页面元数据更新不改变日期；未占用保留日期尾部的旧无日期 Fact 始终返回 `date:null` 且不被补写。
 - `observed` 可用于所有页面中基于可见材料直接归纳或推断的内容，并明确区别于用户 stated；当前用户陈述在冲突时优先。
 - 隐私准入只硬性拒绝已定义的真实秘密、完整高风险标识和明确“不要记住”，不按宽泛敏感主题自动拒绝其他稳定 Fact。
 - 可唯一机械修复的页面能通过带 version 的 `update(target=repair)` 收敛；语义不明确或不可安全修复的页面保持原样并返回可行动错误。

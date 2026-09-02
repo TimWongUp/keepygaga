@@ -237,20 +237,46 @@ def test_context_bootstrap_contains_home_pages_and_scope_descriptions(
         )["status"]
         == "applied"
     )
+    profile = memory_root / "profile.md"
+    profile.write_text(
+        profile.read_text(encoding="utf-8").rstrip()
+        + "\n\n- [stated] Dated home fact. [2026-09-02]\n",
+        encoding="utf-8",
+    )
+    preferences = memory_root / "preferences.md"
+    preferences.write_text(
+        preferences.read_text(encoding="utf-8").rstrip()
+        + "\n\n- [observed] Legacy home fact.\n",
+        encoding="utf-8",
+    )
+    (memory_root / "areas" / "broken.md").write_text(
+        "malformed dynamic page\n", encoding="utf-8"
+    )
     config = tmp_path / "config.toml"
     config.write_text(
         f"[memory]\nroot = {json.dumps(str(memory_root))}\n", encoding="utf-8"
     )
+    snapshots = {
+        item["path"]: item["version"]
+        for item in store.read(["profile.md", "preferences.md"])["files"]  # type: ignore[index]
+    }
 
     rendered = context.load_bootstrap(config)
 
-    assert "<profile version=" in rendered
-    assert "<preferences version=" in rendered
+    assert f'<profile version="{snapshots["profile.md"]}">' in rendered
+    assert f'<preferences version="{snapshots["preferences.md"]}">' in rendered
     assert "<memory_scopes>" in rendered
     assert "`topics`" in rendered
     assert "`areas`" in rendered
     assert "`people`" in rendered
+    assert "- [stated] Dated home fact. [2026-09-02]" in rendered
+    assert "- [observed] Legacy home fact." in rendered
     assert "people/not-in-bootstrap.md" not in rendered
+    assert "Must stay out of bootstrap." not in rendered
+    assert "Known person." not in rendered
+    assert "malformed dynamic page" not in rendered
+    for description in context.SCOPE_DESCRIPTIONS.values():
+        assert rendered.count(description) == 1
     assert "<memory_listing>" not in rendered
 
 
