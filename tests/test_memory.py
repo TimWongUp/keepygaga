@@ -1453,11 +1453,14 @@ def test_repair_rejects_fifo_without_blocking(
 ) -> None:
     root, store = memory_store
     fifo = root / "topics" / "pipe.md"
-    os.mkfifo(fifo)
+    mkfifo = getattr(os, "mkfifo", None)
+    nonblock = getattr(os, "O_NONBLOCK", 0)
+    assert mkfifo is not None
+    mkfifo(fifo)
     real_open = os.open
 
     def guarded_open(path, flags, *args, **kwargs):  # type: ignore[no-untyped-def]
-        if Path(path).name == fifo.name and not flags & os.O_NONBLOCK:
+        if Path(path).name == fifo.name and not flags & nonblock:
             raise AssertionError("FIFO must be opened non-blocking before fstat")
         return real_open(path, flags, *args, **kwargs)
 
