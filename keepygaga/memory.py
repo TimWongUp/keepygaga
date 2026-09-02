@@ -723,34 +723,53 @@ class MemoryStore:
         self._active_parent_descriptors: dict[str, int] | None = None
 
     def list_files(self, scope: MemoryScope) -> dict[str, object]:
-        return self._run_locked(lambda: self._list_locked(scope))
+        scopes = (scope,) if scope in DYNAMIC_DIRS else ()
+        return self._run_locked(lambda: self._list_locked(scope), scopes=scopes)
 
     def read(self, paths: list[str]) -> dict[str, object]:
-        return self._run_locked(lambda: self._read_locked(paths))
+        scopes = tuple(
+            scope
+            for scope in DYNAMIC_DIRS
+            if any(path.startswith(f"{scope}/") for path in paths)
+        )
+        return self._run_locked(lambda: self._read_locked(paths), scopes=scopes)
 
     def create(self, operations: list[CreateOperation]) -> dict[str, object]:
-        return self._run_locked(lambda: self._create_locked(operations))
+        return self._run_locked(
+            lambda: self._create_locked(operations), scopes=DYNAMIC_DIRS
+        )
 
     def add(self, operations: list[AddOperation]) -> dict[str, object]:
-        return self._run_locked(lambda: self._add_locked(operations))
+        return self._run_locked(lambda: self._add_locked(operations), scopes=DYNAMIC_DIRS)
 
     def update(self, operations: list[UpdateOperation]) -> dict[str, object]:
-        return self._run_locked(lambda: self._update_locked(operations))
+        return self._run_locked(
+            lambda: self._update_locked(operations), scopes=DYNAMIC_DIRS
+        )
 
     def move(self, operations: list[MoveOperation]) -> dict[str, object]:
-        return self._run_locked(lambda: self._move_locked(operations))
+        return self._run_locked(
+            lambda: self._move_locked(operations), scopes=DYNAMIC_DIRS
+        )
 
     def rename(self, operations: list[RenameOperation]) -> dict[str, object]:
-        return self._run_locked(lambda: self._rename_locked(operations))
+        return self._run_locked(
+            lambda: self._rename_locked(operations), scopes=DYNAMIC_DIRS
+        )
 
     def delete(self, operations: list[DeleteOperation]) -> dict[str, object]:
-        return self._run_locked(lambda: self._delete_locked(operations))
+        return self._run_locked(
+            lambda: self._delete_locked(operations), scopes=DYNAMIC_DIRS
+        )
 
     def inspect(self) -> dict[str, object]:
-        return self._run_locked(self._inspect_locked)
+        return self._run_locked(self._inspect_locked, scopes=DYNAMIC_DIRS)
 
     def _run_locked(
-        self, callback: Callable[[], dict[str, object]]
+        self,
+        callback: Callable[[], dict[str, object]],
+        *,
+        scopes: Sequence[str],
     ) -> dict[str, object]:
         if _is_link_like(self.root):
             return {
@@ -775,7 +794,7 @@ class MemoryStore:
         try:
             _ensure_private_lock_file(self.lock_path)
             with self.lock:
-                return self._invoke_locked(callback)
+                return self._invoke_locked(callback, scopes)
         except Timeout:
             return {
                 "status": "write_conflict",
@@ -800,11 +819,13 @@ class MemoryStore:
             }
 
     def _invoke_locked(
-        self, callback: Callable[[], dict[str, object]]
+        self,
+        callback: Callable[[], dict[str, object]],
+        scopes: Sequence[str],
     ) -> dict[str, object]:
         if not self._supports_anchored_access():
             return callback()
-        descriptors = self._open_call_parents()
+        descriptors = self._open_call_parents(scopes)
         self._active_parent_descriptors = descriptors
         try:
             return callback()
@@ -1847,7 +1868,7 @@ class MemoryStore:
             and os.unlink in os.supports_dir_fd
         )
 
-    def _open_call_parents(self) -> dict[str, int]:
+    def _open_call_parents(self, scopes: Sequence[str]) -> dict[str, int]:
         flags = (
             os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
         )
@@ -1855,7 +1876,7 @@ class MemoryStore:
         try:
             root_descriptor = os.open(self.root, flags)
             descriptors[""] = root_descriptor
-            for scope in DYNAMIC_DIRS:
+            for scope in scopes:
                 try:
                     descriptors[scope] = os.open(
                         scope,

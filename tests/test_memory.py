@@ -1467,6 +1467,25 @@ def test_canonical_paths_and_symlinks_are_rejected(
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="symlink creation is privileged")
+def test_scoped_list_ignores_invalid_unrelated_scope(
+    memory_store: tuple[Path, MemoryStore], tmp_path: Path
+) -> None:
+    root, store = memory_store
+    assert store.create([create("topics/inside.md", "Inside.")])["status"] == "applied"
+    outside = tmp_path / "outside-areas"
+    outside.mkdir()
+    (root / "areas").rmdir()
+    (root / "areas").symlink_to(outside, target_is_directory=True)
+
+    listed = store.list_files("topics")
+
+    assert listed["status"] == "ok"
+    assert [item["path"] for item in cast(list[dict[str, object]], listed["files"])] == [
+        "topics/inside.md"
+    ]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlink creation is privileged")
 def test_page_symlink_is_rejected_by_list_read_repair_and_write(
     memory_store: tuple[Path, MemoryStore], tmp_path: Path
 ) -> None:
