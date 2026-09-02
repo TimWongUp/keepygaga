@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import cast
 
 import pytest
@@ -209,6 +209,21 @@ def fail_commit_replace(
         original_replace(source, destination)
 
     monkeypatch.setattr(os, "replace", fail_fallback)
+
+
+def write_test_page(path: Path, relative: str, description: str, content: str) -> None:
+    path.write_text(
+        render_memory_file(
+            MemoryDocument(
+                name=PurePosixPath(relative).stem,
+                description=description,
+                aliases=(),
+                facts=(StoredFact(basis="stated", content=content),),
+            ),
+            relative,
+        ),
+        encoding="utf-8",
+    )
 
 
 def test_fact_is_one_nonempty_line() -> None:
@@ -816,7 +831,9 @@ def test_edit_during_commit_is_detected(
         original_anchored = store._verify_live_version_anchored
 
         def verify_anchored_then_edit(
-            initial, relative, parent_descriptor  # type: ignore[no-untyped-def]
+            initial,
+            relative,
+            parent_descriptor,  # type: ignore[no-untyped-def]
         ) -> None:
             nonlocal edited
             original_anchored(initial, relative, parent_descriptor)
@@ -963,9 +980,10 @@ def test_move_to_new_page_rejects_emptying_source_without_creating_destination(
     memory_store: tuple[Path, MemoryStore],
 ) -> None:
     root, store = memory_store
-    assert store.create([create("topics/source.md", "Only source fact.")])[
-        "status"
-    ] == "applied"
+    assert (
+        store.create([create("topics/source.md", "Only source fact.")])["status"]
+        == "applied"
+    )
     source = root / "topics" / "source.md"
     before = source.read_bytes()
 
@@ -1194,9 +1212,10 @@ def test_rename_same_stem_across_scopes_preserves_page(
 ) -> None:
     root, store = memory_store
     monkeypatch.setattr(memory_module, "_local_date", lambda: "2030-03-04")
-    assert store.create(
-        [create("topics/source.md", "Source fact.", ["origin"])]
-    )["status"] == "applied"
+    assert (
+        store.create([create("topics/source.md", "Source fact.", ["origin"])])["status"]
+        == "applied"
+    )
 
     renamed = store.rename(
         [
@@ -1288,9 +1307,12 @@ def test_rename_batch_rejects_reusing_any_old_or_new_path(
     memory_store: tuple[Path, MemoryStore],
 ) -> None:
     root, store = memory_store
-    assert store.create(
-        [create("topics/a.md", "A."), create("topics/c.md", "C.")]
-    )["status"] == "applied"
+    assert (
+        store.create([create("topics/a.md", "A."), create("topics/c.md", "C.")])[
+            "status"
+        ]
+        == "applied"
+    )
     before = {
         path: (root / path).read_bytes() for path in ("topics/a.md", "topics/c.md")
     }
@@ -1311,7 +1333,9 @@ def test_rename_batch_rejects_reusing_any_old_or_new_path(
     )
 
     assert result["status"] == "duplicate_target"
-    assert all((root / path).read_bytes() == content for path, content in before.items())
+    assert all(
+        (root / path).read_bytes() == content for path, content in before.items()
+    )
     assert not (root / "topics" / "b.md").exists()
 
 
@@ -1526,6 +1550,117 @@ def test_memory_store_constructed_from_symlink_root_is_rejected(
     assert not (outside / "topics" / "escape.md").exists()
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="requires POSIX dir_fd reads")
+def test_list_stays_on_initial_scope_directory_during_plain_directory_swap(
+    memory_store: tuple[Path, MemoryStore],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root, store = memory_store
+    assert (
+        store.create([create("topics/original.md", "Inside.")])["status"] == "applied"
+    )
+    replacement = tmp_path / "replacement-topics"
+    replacement.mkdir()
+    write_test_page(
+        replacement / "leak.md",
+        "topics/leak.md",
+        "LEAK",
+        "Outside fact must not be listed.",
+    )
+    detached = tmp_path / "detached-topics"
+    original_catalog = store._dynamic_catalog_paths
+    swapped = False
+
+    def catalog_after_swap(scope=None):  # type: ignore[no-untyped-def]
+        nonlocal swapped
+        if scope == "topics" and not swapped:
+            (root / "topics").rename(detached)
+            replacement.rename(root / "topics")
+            swapped = True
+        return original_catalog(scope)
+
+    monkeypatch.setattr(store, "_dynamic_catalog_paths", catalog_after_swap)
+    listed = store.list_files("topics")
+
+    assert listed["status"] == "ok"
+    assert listed["files"] == [
+        {
+            "path": "topics/original.md",
+            "description": "Route topics/original.md.",
+            "aliases": [],
+        }
+    ]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="requires POSIX dir_fd reads")
+def test_read_stays_on_initial_scope_directory_during_plain_directory_swap(
+    memory_store: tuple[Path, MemoryStore],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root, store = memory_store
+    assert (
+        store.create([create("topics/page.md", "Inside fact.")])["status"] == "applied"
+    )
+    replacement = tmp_path / "replacement-topics"
+    replacement.mkdir()
+    write_test_page(
+        replacement / "page.md",
+        "topics/page.md",
+        "LEAK",
+        "Outside fact must not be read.",
+    )
+    detached = tmp_path / "detached-topics"
+    original_read = store._read_catalog_text
+    swapped = False
+
+    def read_after_swap(target, relative, **kwargs):  # type: ignore[no-untyped-def]
+        nonlocal swapped
+        if relative == "topics/page.md" and not swapped:
+            (root / "topics").rename(detached)
+            replacement.rename(root / "topics")
+            swapped = True
+        return original_read(target, relative, **kwargs)
+
+    monkeypatch.setattr(store, "_read_catalog_text", read_after_swap)
+    read = store.read(["topics/page.md"])
+
+    assert read["status"] == "ok"
+    page = cast(list[dict[str, object]], read["files"])[0]
+    facts = cast(list[dict[str, object]], page["facts"])
+    assert [item["content"] for item in facts] == ["Inside fact."]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="requires POSIX dir_fd commits")
+def test_create_rejects_plain_scope_directory_swap_after_initial_read(
+    memory_store: tuple[Path, MemoryStore],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root, store = memory_store
+    replacement = tmp_path / "replacement-topics"
+    replacement.mkdir()
+    detached = tmp_path / "detached-topics"
+    original_stage = store._stage_anchored_change
+    swapped = False
+
+    def stage_after_swap(relative, after):  # type: ignore[no-untyped-def]
+        nonlocal swapped
+        if relative == "topics/escape.md" and not swapped:
+            (root / "topics").rename(detached)
+            replacement.rename(root / "topics")
+            swapped = True
+        return original_stage(relative, after)
+
+    monkeypatch.setattr(store, "_stage_anchored_change", stage_after_swap)
+    created = store.create([create("topics/escape.md", "Must not escape.")])
+
+    assert created["status"] == "write_conflict"
+    assert not (root / "topics" / "escape.md").exists()
+    assert not (detached / "escape.md").exists()
+
+
 @pytest.mark.skipif(sys.platform == "win32", reason="requires POSIX dir_fd commits")
 def test_delete_commit_cannot_escape_after_version_verification(
     memory_store: tuple[Path, MemoryStore],
@@ -1544,7 +1679,9 @@ def test_delete_commit_cannot_escape_after_version_verification(
     swapped = False
 
     def verify_then_swap(
-        initial, relative, parent_descriptor  # type: ignore[no-untyped-def]
+        initial,
+        relative,
+        parent_descriptor,  # type: ignore[no-untyped-def]
     ) -> None:
         nonlocal swapped
         original_verify(initial, relative, parent_descriptor)
@@ -1553,9 +1690,7 @@ def test_delete_commit_cannot_escape_after_version_verification(
             (root / "topics").symlink_to(outside, target_is_directory=True)
             swapped = True
 
-    monkeypatch.setattr(
-        store, "_verify_live_version_anchored", verify_then_swap
-    )
+    monkeypatch.setattr(store, "_verify_live_version_anchored", verify_then_swap)
     deleted = store.delete(
         [
             DeletePageOperation(
@@ -1786,17 +1921,20 @@ def test_move_destination_failure_leaves_source_and_destination_unchanged(
     memory_store: tuple[Path, MemoryStore], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     root, store = memory_store
-    assert store.create(
-        [
-            CreateOperation(
-                path="topics/source.md",
-                description="Safe source.",
-                aliases=[],
-                facts=[fact("Stay safely."), fact("Move safely.")],
-            ),
-            create("areas/destination.md", "Keep."),
-        ]
-    )["status"] == "applied"
+    assert (
+        store.create(
+            [
+                CreateOperation(
+                    path="topics/source.md",
+                    description="Safe source.",
+                    aliases=[],
+                    facts=[fact("Stay safely."), fact("Move safely.")],
+                ),
+                create("areas/destination.md", "Keep."),
+            ]
+        )["status"]
+        == "applied"
+    )
     source = root / "topics" / "source.md"
     destination = root / "areas" / "destination.md"
     before = (source.read_bytes(), destination.read_bytes())
@@ -1826,16 +1964,19 @@ def test_new_move_destination_failure_leaves_source_unchanged(
     memory_store: tuple[Path, MemoryStore], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     root, store = memory_store
-    assert store.create(
-        [
-            CreateOperation(
-                path="topics/source.md",
-                description="Safe source.",
-                aliases=[],
-                facts=[fact("Stay safely."), fact("Move safely.")],
-            )
-        ]
-    )["status"] == "applied"
+    assert (
+        store.create(
+            [
+                CreateOperation(
+                    path="topics/source.md",
+                    description="Safe source.",
+                    aliases=[],
+                    facts=[fact("Stay safely."), fact("Move safely.")],
+                )
+            ]
+        )["status"]
+        == "applied"
+    )
     source = root / "topics" / "source.md"
     before = source.read_bytes()
     destination = root / "areas" / "new.md"
@@ -1867,9 +2008,7 @@ def test_atomic_replace_failure_leaves_no_temp_file(
     memory_store: tuple[Path, MemoryStore], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     root, store = memory_store
-    fail_commit_replace(
-        store, monkeypatch, "profile.md", "simulated replace failure"
-    )
+    fail_commit_replace(store, monkeypatch, "profile.md", "simulated replace failure")
     result = store.add(
         [
             AddOperation(
@@ -2032,16 +2171,19 @@ def test_full_target_scope_blocks_new_move_and_cross_scope_rename(
             ),
             encoding="utf-8",
         )
-    assert store.create(
-        [
-            CreateOperation(
-                path="topics/source.md",
-                description="Source.",
-                aliases=[],
-                facts=[fact("Stay."), fact("Move.")],
-            )
-        ]
-    )["status"] == "applied"
+    assert (
+        store.create(
+            [
+                CreateOperation(
+                    path="topics/source.md",
+                    description="Source.",
+                    aliases=[],
+                    facts=[fact("Stay."), fact("Move.")],
+                )
+            ]
+        )["status"]
+        == "applied"
+    )
 
     moved = store.move(
         [
@@ -2239,9 +2381,12 @@ def test_multi_operation_add_and_update_each_capture_one_date(
 ) -> None:
     _, store = memory_store
     monkeypatch.setattr(memory_module, "_local_date", lambda: "2030-02-02")
-    assert store.create(
-        [create("topics/one.md", "One."), create("areas/two.md", "Two.")]
-    )["status"] == "applied"
+    assert (
+        store.create([create("topics/one.md", "One."), create("areas/two.md", "Two.")])[
+            "status"
+        ]
+        == "applied"
+    )
     calls = 0
 
     def add_date() -> str:

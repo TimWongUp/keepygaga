@@ -103,6 +103,7 @@ DEFAULT_DESCRIPTIONS = {
 def _is_link_like(path: Path) -> bool:
     return path.is_symlink() or path.is_junction()
 
+
 __all__ = [
     "AddOperation",
     "AddOperations",
@@ -719,6 +720,7 @@ class MemoryStore:
         self.root = _absolute_without_resolving_links(root)
         self.lock_path = self.root / ".keepygaga.lock"
         self.lock = FileLock(str(self.lock_path), timeout=30)
+        self._active_parent_descriptors: dict[str, int] | None = None
 
     def list_files(self, scope: MemoryScope) -> dict[str, object]:
         return self._run_locked(lambda: self._list_locked(scope))
@@ -773,7 +775,7 @@ class MemoryStore:
         try:
             _ensure_private_lock_file(self.lock_path)
             with self.lock:
-                return callback()
+                return self._invoke_locked(callback)
         except Timeout:
             return {
                 "status": "write_conflict",
@@ -797,6 +799,20 @@ class MemoryStore:
                 "message": f"{type(exc).__name__}: {exc}",
             }
 
+    def _invoke_locked(
+        self, callback: Callable[[], dict[str, object]]
+    ) -> dict[str, object]:
+        if not self._supports_anchored_access():
+            return callback()
+        descriptors = self._open_call_parents()
+        self._active_parent_descriptors = descriptors
+        try:
+            return callback()
+        finally:
+            self._active_parent_descriptors = None
+            for descriptor in descriptors.values():
+                os.close(descriptor)
+
     def _catalog_paths(self, *, require_complete: bool = True) -> list[str]:
         missing: list[str] = []
         self._validate_catalog_directories(missing)
@@ -810,6 +826,11 @@ class MemoryStore:
         return paths
 
     def _validate_catalog_directories(self, missing: list[str]) -> None:
+        if self._active_parent_descriptors is not None:
+            for directory_name in DYNAMIC_DIRS:
+                if directory_name not in self._active_parent_descriptors:
+                    missing.append(str(self.root / directory_name))
+            return
         for directory_name in DYNAMIC_DIRS:
             directory = self.root / directory_name
             if _is_link_like(directory):
@@ -827,6 +848,26 @@ class MemoryStore:
 
     def _fixed_catalog_paths(self, missing: list[str]) -> list[str]:
         paths: list[str] = []
+        if self._active_parent_descriptors is not None:
+            root_descriptor = self._active_parent_descriptors[""]
+            for relative in FIXED_PATHS:
+                try:
+                    metadata = os.stat(
+                        relative,
+                        dir_fd=root_descriptor,
+                        follow_symlinks=False,
+                    )
+                except FileNotFoundError:
+                    missing.append(str(self.root / relative))
+                    continue
+                if not stat.S_ISREG(metadata.st_mode):
+                    raise MemoryValidationError(
+                        "invalid_source",
+                        f"memory path must be a regular file: {self.root / relative}",
+                        path=relative,
+                    )
+                paths.append(relative)
+            return paths
         for relative in FIXED_PATHS:
             target = self.root / relative
             if _is_link_like(target):
@@ -848,6 +889,8 @@ class MemoryStore:
     def _dynamic_catalog_paths(self, scope: str | None = None) -> list[str]:
         paths: list[str] = []
         directory_names = (scope,) if scope is not None else DYNAMIC_DIRS
+        if self._active_parent_descriptors is not None:
+            return self._dynamic_catalog_paths_anchored(directory_names)
         for directory_name in directory_names:
             directory = self.root / directory_name
             if not directory.is_dir():
@@ -868,6 +911,38 @@ class MemoryStore:
                         ),
                     )
                 paths.append(f"{directory_name}/{target.name}")
+        return paths
+
+    def _dynamic_catalog_paths_anchored(
+        self, directory_names: Sequence[str]
+    ) -> list[str]:
+        descriptors = self._active_parent_descriptors
+        assert descriptors is not None
+        paths: list[str] = []
+        for directory_name in directory_names:
+            descriptor = descriptors.get(directory_name)
+            if descriptor is None:
+                continue
+            for name in sorted(os.listdir(descriptor)):
+                if PurePosixPath(name).suffix != ".md":
+                    continue
+                metadata = os.stat(
+                    name,
+                    dir_fd=descriptor,
+                    follow_symlinks=False,
+                )
+                relative = f"{directory_name}/{name}"
+                if not stat.S_ISREG(metadata.st_mode):
+                    raise MemoryValidationError(
+                        "invalid_source",
+                        f"memory path must be a regular file: {self.root / relative}",
+                        path=relative,
+                        repairable=False,
+                        recovery=(
+                            "Replace the exact path with a regular UTF-8 Markdown file."
+                        ),
+                    )
+                paths.append(relative)
         return paths
 
     def _load_catalog(
@@ -910,7 +985,9 @@ class MemoryStore:
                 )
             with os.fdopen(descriptor, encoding="utf-8") as handle:
                 descriptor = -1
-                text = handle.read() if max_chars is None else handle.read(max_chars + 1)
+                text = (
+                    handle.read() if max_chars is None else handle.read(max_chars + 1)
+                )
                 if max_chars is not None and len(text) > max_chars:
                     raise MemoryValidationError(
                         "capacity_exceeded",
@@ -933,9 +1010,7 @@ class MemoryStore:
 
     def _open_catalog_descriptor(self, target: Path, relative: str) -> int:
         flags = (
-            os.O_RDONLY
-            | getattr(os, "O_NOFOLLOW", 0)
-            | getattr(os, "O_NONBLOCK", 0)
+            os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
         )
         if os.open not in os.supports_dir_fd or not hasattr(os, "O_DIRECTORY"):
             if _is_link_like(target) or _is_link_like(target.parent):
@@ -947,11 +1022,15 @@ class MemoryStore:
             return os.open(target, flags)
 
         parts = PurePosixPath(relative).parts
+        if self._active_parent_descriptors is not None:
+            parent_key = parts[0] if len(parts) == 2 else ""
+            parent_descriptor = self._active_parent_descriptors.get(parent_key)
+            if parent_descriptor is None:
+                raise FileNotFoundError(relative)
+            return os.open(parts[-1], flags, dir_fd=parent_descriptor)
         root_descriptor = os.open(
             self.root,
-            os.O_RDONLY
-            | getattr(os, "O_DIRECTORY", 0)
-            | getattr(os, "O_NOFOLLOW", 0),
+            os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0),
         )
         parent_descriptor = -1
         try:
@@ -976,23 +1055,7 @@ class MemoryStore:
             raise MemoryValidationError(
                 "invalid_entry", "scope must be topics, areas, or people"
             )
-        directory = self.root / scope
-        if _is_link_like(directory) or (directory.exists() and not directory.is_dir()):
-            raise MemoryValidationError(
-                "invalid_source",
-                f"memory path must be a directory: {directory}",
-                path=scope,
-                repairable=False,
-                recovery="Replace the exact scope path with a regular directory.",
-            )
-        if not directory.is_dir():
-            raise MemoryValidationError(
-                "not_initialized",
-                f"memory directory does not exist: {directory}",
-                path=scope,
-                repairable=False,
-                recovery="Initialize the Memory Root, then call list again.",
-            )
+        self._require_list_scope(scope)
         listing: list[dict[str, object]] = []
         for path in self._dynamic_catalog_paths(scope):
             target = self.root / path
@@ -1057,6 +1120,31 @@ class MemoryStore:
             )
         return {"status": "ok", "files": listing}
 
+    def _require_list_scope(self, scope: MemoryScope) -> None:
+        directory = self.root / scope
+        if self._active_parent_descriptors is not None:
+            directory_exists = scope in self._active_parent_descriptors
+        else:
+            directory_exists = directory.is_dir()
+            if _is_link_like(directory) or (
+                directory.exists() and not directory_exists
+            ):
+                raise MemoryValidationError(
+                    "invalid_source",
+                    f"memory path must be a directory: {directory}",
+                    path=scope,
+                    repairable=False,
+                    recovery="Replace the exact scope path with a regular directory.",
+                )
+        if not directory_exists:
+            raise MemoryValidationError(
+                "not_initialized",
+                f"memory directory does not exist: {directory}",
+                path=scope,
+                repairable=False,
+                recovery="Initialize the Memory Root, then call list again.",
+            )
+
     def _read_locked(self, paths: list[str]) -> dict[str, object]:
         if not paths or len(paths) > MAX_READ_PATHS:
             raise MemoryValidationError(
@@ -1071,7 +1159,7 @@ class MemoryStore:
         files: dict[str, LoadedFile] = {}
         for path in canonical:
             target = self.root / path
-            if _is_link_like(target):
+            if self._active_parent_descriptors is None and _is_link_like(target):
                 raise MemoryValidationError(
                     "invalid_source",
                     f"memory path must not be a symlink: {path}",
@@ -1079,11 +1167,16 @@ class MemoryStore:
                     repairable=False,
                     recovery="Replace the exact path with a regular UTF-8 Markdown file.",
                 )
-            if not target.is_file():
+            if self._active_parent_descriptors is None and not target.is_file():
                 raise MemoryValidationError(
                     "not_found", f"memory file not found: {path}", path=path
                 )
-            text = normalize_text(self._read_catalog_text(target, path))
+            try:
+                text = normalize_text(self._read_catalog_text(target, path))
+            except FileNotFoundError as exc:
+                raise MemoryValidationError(
+                    "not_found", f"memory file not found: {path}", path=path
+                ) from exc
             files[path] = LoadedFile(
                 path=path,
                 document=parse_memory_file(text, path),
@@ -1511,9 +1604,7 @@ class MemoryStore:
             working[new_path] = self._loaded(new_path, document)
             renamed_from[new_path] = current.path
             mutations.append(self._mutation("rename", "page", current.path, [new_path]))
-        return self._finish(
-            initial, working, mutations, renamed_from=renamed_from
-        )
+        return self._finish(initial, working, mutations, renamed_from=renamed_from)
 
     def _delete_locked(self, operations: list[DeleteOperation]) -> dict[str, object]:
         self._require_operations(operations)
@@ -1572,9 +1663,7 @@ class MemoryStore:
     ) -> dict[str, object]:
         _validate_catalog(working)
         self._validate_scope_capacity(initial, working)
-        self._validate_page_capacity(
-            initial, working, mutations, renamed_from or {}
-        )
+        self._validate_page_capacity(initial, working, mutations, renamed_from or {})
         changed_paths = sorted(
             path
             for path in set(initial) | set(working)
@@ -1624,9 +1713,7 @@ class MemoryStore:
         mutations: list[dict[str, object]],
         renamed_from: dict[str, str],
     ) -> None:
-        mutation_by_path = {
-            str(mutation["path"]): mutation for mutation in mutations
-        }
+        mutation_by_path = {str(mutation["path"]): mutation for mutation in mutations}
         for path, after in working.items():
             source_path = renamed_from.get(path)
             before = initial.get(source_path or path)
@@ -1742,21 +1829,57 @@ class MemoryStore:
                 )
 
     @staticmethod
-    def _supports_anchored_commit() -> bool:
+    def _supports_anchored_access() -> bool:
         return (
             os.name == "posix"
             and hasattr(os, "O_DIRECTORY")
             and os.open in os.supports_dir_fd
+            and os.listdir in os.supports_fd
+            and os.stat in os.supports_dir_fd
+        )
+
+    @classmethod
+    def _supports_anchored_commit(cls) -> bool:
+        return (
+            cls._supports_anchored_access()
             and os.chmod in os.supports_dir_fd
             and os.rename in os.supports_dir_fd
-            and os.stat in os.supports_dir_fd
             and os.unlink in os.supports_dir_fd
         )
+
+    def _open_call_parents(self) -> dict[str, int]:
+        flags = (
+            os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+        )
+        descriptors: dict[str, int] = {}
+        try:
+            root_descriptor = os.open(self.root, flags)
+            descriptors[""] = root_descriptor
+            for scope in DYNAMIC_DIRS:
+                try:
+                    descriptors[scope] = os.open(
+                        scope,
+                        flags,
+                        dir_fd=root_descriptor,
+                    )
+                except FileNotFoundError:
+                    continue
+                except OSError as exc:
+                    raise MemoryValidationError(
+                        "invalid_source",
+                        f"memory path must be a directory: {self.root / scope}",
+                        path=scope,
+                    ) from exc
+            return descriptors
+        except Exception:
+            for descriptor in descriptors.values():
+                os.close(descriptor)
+            raise
 
     def _stage_anchored_change(
         self, relative: str, after: LoadedFile | None
     ) -> StagedChange:
-        parent_descriptor = self._open_commit_parent(relative)
+        parent_descriptor = self._duplicate_active_parent(relative)
         temporary_name: str | None = None
         try:
             if after is not None:
@@ -1790,6 +1913,21 @@ class MemoryStore:
                     os.unlink(temporary_name, dir_fd=parent_descriptor)
             os.close(parent_descriptor)
             raise
+
+    def _duplicate_active_parent(self, relative: str) -> int:
+        descriptors = self._active_parent_descriptors
+        if descriptors is None:
+            return self._open_commit_parent(relative)
+        parts = PurePosixPath(canonical_memory_path(relative)).parts
+        parent_key = parts[0] if len(parts) == 2 else ""
+        parent_descriptor = descriptors.get(parent_key)
+        if parent_descriptor is None:
+            raise MemoryValidationError(
+                "write_conflict",
+                f"memory parent directory changed during mutation: {relative}",
+                path=relative,
+            )
+        return os.dup(parent_descriptor)
 
     def _apply_commit(
         self,
@@ -1890,9 +2028,7 @@ class MemoryStore:
         canonical = canonical_memory_path(relative)
         parts = PurePosixPath(canonical).parts
         flags = (
-            os.O_RDONLY
-            | getattr(os, "O_DIRECTORY", 0)
-            | getattr(os, "O_NOFOLLOW", 0)
+            os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
         )
         root_descriptor = -1
         try:
@@ -1951,9 +2087,7 @@ class MemoryStore:
                 path=relative,
             )
         flags = (
-            os.O_RDONLY
-            | getattr(os, "O_NOFOLLOW", 0)
-            | getattr(os, "O_NONBLOCK", 0)
+            os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
         )
         try:
             descriptor = os.open(
