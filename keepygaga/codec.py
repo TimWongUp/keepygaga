@@ -6,8 +6,9 @@ import re
 import unicodedata
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import date as calendar_date
 from pathlib import PurePosixPath
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 import frontmatter
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -15,10 +16,15 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from keepygaga.errors import MemoryValidationError
 from keepygaga.paths import canonical_memory_path
 
-MAX_FACT_CONTENT_CHARS = 4096
-PROFILE_FACT_CONTENT_LIMIT = 300
-FACT_LINE_RE = re.compile(r"^- \[(stated|observed)\] (.+)$")
-FRONTMATTER_KEY_RE = re.compile(r"^(name|description|sources|aliases):")
+MAX_FACT_CONTENT_CHARS = 800
+MAX_STORED_FACT_CONTENT_CHARS = 4096
+FACT_LINE_RE = re.compile(
+    r"^- \[(stated|observed)\] (.+?)(?: \[(\d{4}-\d{2}-\d{2})\])?$"
+)
+FRONTMATTER_KEY_RE = re.compile(
+    r'''^\s*(?:(["'])(name|description|sources|aliases)\1|'''
+    r"(name|description|sources|aliases))\s*:"
+)
 FRONTMATTER_FENCE_RE = re.compile(r"^-{3,}\s*$")
 
 Basis = Literal["stated", "observed"]
@@ -41,11 +47,29 @@ class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class Fact(StrictModel):
+class FactSelector(StrictModel):
     basis: Basis = Field(
         description=(
-            "Evidence basis: stated for the user's explicit statement; observed only "
-            "where the Agent Contract permits a repeated behavioral observation."
+            "Evidence basis: stated for the user's explicit statement; observed for "
+            "Agent derivation or inference from current visible material."
+        )
+    )
+    content: str = Field(
+        max_length=MAX_STORED_FACT_CONTENT_CHARS,
+        description="Exact basis and content copied from an existing Page Snapshot.",
+    )
+
+    @field_validator("content", mode="before")
+    @classmethod
+    def validate_content(cls, value: object) -> object:
+        return _normalized_fact_content(value)
+
+
+class Fact(FactSelector):
+    basis: Basis = Field(
+        description=(
+            "Evidence basis: stated for the user's explicit statement; observed for "
+            "Agent derivation or inference from current visible material."
         )
     )
     content: str = Field(
@@ -53,15 +77,24 @@ class Fact(StrictModel):
         description="One complete, independently maintainable, single-line assertion.",
     )
 
-    @field_validator("content")
+
+class StoredFact(FactSelector):
+    date: str | None = None
+
+    @field_validator("date")
     @classmethod
-    def validate_content(cls, value: str) -> str:
-        normalized = normalize_text(value).strip()
-        if not normalized:
-            raise ValueError("fact content must not be empty")
-        if "\x00" in normalized or "\n" in normalized:
-            raise ValueError("fact content must be one non-empty line")
-        return normalized
+    def validate_date(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        try:
+            parsed = calendar_date.fromisoformat(value)
+        except ValueError as exc:
+            raise ValueError(
+                "fact date must be a valid YYYY-MM-DD calendar date"
+            ) from exc
+        if parsed.isoformat() != value:
+            raise ValueError("fact date must use YYYY-MM-DD")
+        return value
 
 
 @dataclass(frozen=True)
@@ -69,20 +102,56 @@ class MemoryDocument:
     name: str
     description: str
     aliases: tuple[str, ...]
-    facts: tuple[Fact, ...]
+    facts: tuple[StoredFact, ...]
 
 
 def _identity(value: str) -> str:
     return unicodedata.normalize("NFKC", value.strip()).casefold()
 
 
+def _frontmatter_key(line: str) -> str | None:
+    match = FRONTMATTER_KEY_RE.match(line)
+    if match is None:
+        return None
+    return match.group(2) or match.group(3)
+
+
+def _assert_no_duplicate_frontmatter_keys(header: str, path: str) -> None:
+    from ruamel.yaml import YAML
+    from ruamel.yaml.constructor import DuplicateKeyError
+    from ruamel.yaml.error import YAMLError
+
+    loader = YAML(typ="safe")
+    loader.allow_duplicate_keys = False
+    lines = normalize_text(header).splitlines()
+    payload = "\n".join(lines[1:-1])
+    try:
+        loader.load(payload)
+    except DuplicateKeyError as exc:
+        raise MemoryValidationError(
+            "invalid_source", f"{path} contains duplicate frontmatter fields", path=path
+        ) from exc
+    except YAMLError as exc:
+        raise MemoryValidationError(
+            "invalid_source",
+            f"{path} frontmatter could not be parsed: {type(exc).__name__}: {exc}",
+            path=path,
+        ) from exc
+
+
 def _one_line(value: str, field: str) -> str:
     normalized = normalize_text(value).strip()
     if not normalized:
         raise ValueError(f"{field} must not be empty")
-    if "\x00" in normalized or "\n" in normalized:
+    if "\x00" in normalized or len(normalized.splitlines()) != 1:
         raise ValueError(f"{field} must be one non-empty line")
     return normalized
+
+
+def _normalized_fact_content(value: object) -> object:
+    if not isinstance(value, str):
+        return value
+    return _one_line(value, "fact content")
 
 
 def _string_array(
@@ -111,8 +180,16 @@ def _string_array(
     return normalized
 
 
-def fact_key(fact: Fact) -> tuple[str, str]:
+def fact_key(fact: FactSelector) -> tuple[str, str]:
     return fact.basis, fact.content
+
+
+def stored_fact(fact: Fact | StoredFact, *, date: str | None = None) -> StoredFact:
+    return StoredFact(
+        basis=fact.basis,
+        content=fact.content,
+        date=fact.date if isinstance(fact, StoredFact) and date is None else date,
+    )
 
 
 def receipt(action: str, scope: str, contents: Sequence[str]) -> str:
@@ -151,18 +228,7 @@ def validate_page_metadata(document: MemoryDocument, path: str) -> MemoryDocumen
 
 def validate_document(document: MemoryDocument, path: str) -> MemoryDocument:
     metadata = validate_page_metadata(document, path)
-    facts = tuple(Fact.model_validate(fact) for fact in document.facts)
-    if (
-        path == "profile.md"
-        and sum(unicode_chars(fact.content) for fact in facts)
-        > PROFILE_FACT_CONTENT_LIMIT
-    ):
-        raise MemoryValidationError(
-            "invalid_entry",
-            "profile.md Fact.content cannot exceed "
-            f"{PROFILE_FACT_CONTENT_LIMIT} characters in total",
-            path=path,
-        )
+    facts = tuple(stored_fact(fact) for fact in document.facts)
     fact_keys = [fact_key(fact) for fact in facts]
     if len(fact_keys) != len(set(fact_keys)):
         raise MemoryValidationError(
@@ -217,7 +283,6 @@ def _assert_fact_body(body_text: str, path: str) -> None:
     if not body:
         return
     seen: set[tuple[str, str]] = set()
-    profile_chars = 0
     for line in body.splitlines():
         if not line.strip():
             continue
@@ -229,36 +294,25 @@ def _assert_fact_body(body_text: str, path: str) -> None:
                 path=path,
             )
         basis = match.group(1)
+        assert basis in ("stated", "observed")
         raw_content = match.group(2)
-        if len(raw_content) > MAX_FACT_CONTENT_CHARS:
-            raise MemoryValidationError(
-                "invalid_source",
-                f"{path} contains a fact that violates the page schema",
-                path=path,
-            )
+        raw_date = match.group(3)
         try:
-            content = _one_line(raw_content, "content")
+            fact = StoredFact(
+                basis=cast(Basis, basis), content=raw_content, date=raw_date
+            )
         except ValueError as orig_exc:
             raise MemoryValidationError(
                 "invalid_source",
                 f"{path} contains a fact that violates the page schema",
                 path=path,
             ) from orig_exc
-        key = (basis, content)
+        key = fact_key(fact)
         if key in seen:
             raise MemoryValidationError(
                 "invalid_entry", f"{path} contains duplicate facts", path=path
             )
         seen.add(key)
-        if path == "profile.md":
-            profile_chars += unicode_chars(content)
-            if profile_chars > PROFILE_FACT_CONTENT_LIMIT:
-                raise MemoryValidationError(
-                    "invalid_entry",
-                    "profile.md Fact.content cannot exceed "
-                    f"{PROFILE_FACT_CONTENT_LIMIT} characters in total",
-                    path=path,
-                )
 
 
 def _parse_frontmatter(
@@ -270,8 +324,11 @@ def _parse_frontmatter(
         )
     lines = normalized.split("\n")
     closing_index = next(
-        (index for index, line in enumerate(lines[1:], start=1)
-         if FRONTMATTER_FENCE_RE.fullmatch(line)),
+        (
+            index
+            for index, line in enumerate(lines[1:], start=1)
+            if FRONTMATTER_FENCE_RE.fullmatch(line)
+        ),
         None,
     )
     if closing_index is None:
@@ -281,9 +338,9 @@ def _parse_frontmatter(
             path=path,
         )
     field_order = [
-        match.group(1)
+        key
         for line in lines[1:closing_index]
-        if (match := FRONTMATTER_KEY_RE.match(line)) is not None
+        if (key := _frontmatter_key(line)) is not None
     ]
     accepted_orders = (
         ["name", "description", "aliases"],
@@ -296,6 +353,7 @@ def _parse_frontmatter(
             path=path,
         )
     header = "\n".join(lines[: closing_index + 1]) + "\n"
+    _assert_no_duplicate_frontmatter_keys(header, path)
     try:
         post = frontmatter.loads(header if not include_body else normalized)
     except Exception as exc:
@@ -331,9 +389,9 @@ def _parse_frontmatter(
     return metadata, body
 
 
-def _parse_facts(body_text: str, path: str) -> tuple[Fact, ...]:
+def _parse_facts(body_text: str, path: str) -> tuple[StoredFact, ...]:
     _assert_fact_body(body_text, path)
-    facts: list[Fact] = []
+    facts: list[StoredFact] = []
     body = normalize_text(body_text).strip()
     if not body:
         return ()
@@ -345,7 +403,13 @@ def _parse_facts(body_text: str, path: str) -> tuple[Fact, ...]:
         basis = match.group(1)
         assert basis in ("stated", "observed")
         try:
-            facts.append(Fact(basis=basis, content=match.group(2)))
+            facts.append(
+                StoredFact(
+                    basis=cast(Basis, basis),
+                    content=match.group(2),
+                    date=match.group(3),
+                )
+            )
         except ValueError as orig_exc:
             raise MemoryValidationError(
                 "invalid_source",
@@ -370,6 +434,154 @@ def parse_memory_file(text: str, path: str) -> MemoryDocument:
     )
 
 
+def _repair_frontmatter(normalized: str, path: str) -> tuple[dict[str, Any], list[str]]:
+    lines = normalized.split("\n")
+    if not lines or lines[0].strip() != "---":
+        raise MemoryValidationError(
+            "invalid_source", f"{path} must begin with YAML frontmatter", path=path
+        )
+    closing_index = next(
+        (
+            index
+            for index, line in enumerate(lines[1:], start=1)
+            if line.strip() == "---"
+        ),
+        None,
+    )
+    if closing_index is None:
+        raise MemoryValidationError(
+            "invalid_source",
+            f"{path} frontmatter must end with a --- delimiter",
+            path=path,
+        )
+    header_lines = lines[1:closing_index]
+    field_names = [
+        key
+        for line in header_lines
+        if (key := _frontmatter_key(line)) is not None
+    ]
+    if len(field_names) != len(set(field_names)):
+        raise MemoryValidationError(
+            "invalid_source", f"{path} contains duplicate frontmatter fields", path=path
+        )
+    header = "---\n" + "\n".join(header_lines) + "\n---\n"
+    _assert_no_duplicate_frontmatter_keys(header, path)
+    try:
+        metadata = dict(frontmatter.loads(header).metadata)
+    except Exception as exc:
+        raise MemoryValidationError(
+            "invalid_source",
+            f"{path} frontmatter could not be parsed: {type(exc).__name__}: {exc}",
+            path=path,
+        ) from exc
+    keys = set(metadata)
+    if not {"name", "description", "aliases"}.issubset(keys) or not keys.issubset(
+        {"name", "description", "sources", "aliases"}
+    ):
+        raise MemoryValidationError(
+            "invalid_source",
+            f"{path} frontmatter must contain name, description, aliases",
+            path=path,
+        )
+    if not isinstance(metadata["name"], str) or not isinstance(
+        metadata["description"], str
+    ):
+        raise MemoryValidationError(
+            "invalid_source", f"{path} name and description must be strings", path=path
+        )
+    if "sources" in metadata:
+        _string_array(metadata["sources"], "sources")
+    return metadata, lines[closing_index + 1 :]
+
+
+def _repair_aliases(value: object, path: str) -> tuple[str, ...]:
+    raw_aliases = value
+    if not isinstance(raw_aliases, list) or not all(
+        isinstance(alias, str) for alias in raw_aliases
+    ):
+        raise MemoryValidationError(
+            "invalid_source", "aliases must be a string array", path=path
+        )
+    try:
+        aliases = tuple(_one_line(alias, "aliases") for alias in raw_aliases)
+    except ValueError as exc:
+        raise MemoryValidationError("invalid_entry", str(exc), path=path) from exc
+    name_identity = _identity(PurePosixPath(path).stem)
+    repaired_aliases: list[str] = []
+    seen_aliases: set[str] = set()
+    for alias in aliases:
+        identity = _identity(alias)
+        if identity == name_identity or identity in seen_aliases:
+            continue
+        seen_aliases.add(identity)
+        repaired_aliases.append(alias)
+    if len(repaired_aliases) > 8:
+        raise MemoryValidationError(
+            "invalid_entry", "aliases cannot contain more than 8 values", path=path
+        )
+
+    return tuple(repaired_aliases)
+
+
+def _repair_facts(lines: Sequence[str], path: str) -> tuple[StoredFact, ...]:
+    facts: list[StoredFact] = []
+    seen_facts: dict[tuple[str, str], StoredFact] = {}
+    for raw_line in lines:
+        line = raw_line.strip()
+        if not line:
+            continue
+        match = FACT_LINE_RE.fullmatch(line)
+        if match is None:
+            raise MemoryValidationError(
+                "invalid_source",
+                f"{path} body may contain only - [stated]/[observed] bullets",
+                path=path,
+            )
+        try:
+            basis = match.group(1)
+            assert basis in ("stated", "observed")
+            fact = StoredFact(
+                basis=cast(Basis, basis),
+                content=match.group(2),
+                date=match.group(3),
+            )
+        except ValueError as exc:
+            raise MemoryValidationError(
+                "invalid_source",
+                f"{path} contains a fact that violates the page schema",
+                path=path,
+            ) from exc
+        key = fact_key(fact)
+        previous = seen_facts.get(key)
+        if previous is not None:
+            if previous != fact:
+                raise MemoryValidationError(
+                    "invalid_entry",
+                    f"{path} contains conflicting duplicate facts",
+                    path=path,
+                )
+            continue
+        seen_facts[key] = fact
+        facts.append(fact)
+    return tuple(facts)
+
+
+def repair_memory_file(text: str, path: str) -> MemoryDocument:
+    """Return the sole canonical document for mechanically repairable text."""
+    canonical_memory_path(path)
+    metadata, body_lines = _repair_frontmatter(normalize_text(text), path)
+
+    return validate_document(
+        MemoryDocument(
+            name=metadata["name"],
+            description=metadata["description"],
+            aliases=_repair_aliases(metadata["aliases"], path),
+            facts=_repair_facts(body_lines, path),
+        ),
+        path,
+    )
+
+
 def render_memory_file(document: MemoryDocument, path: str) -> str:
     validated = validate_document(document, path)
     lines = [
@@ -384,5 +596,9 @@ def render_memory_file(document: MemoryDocument, path: str) -> str:
     ]
     if validated.facts:
         lines.append("")
-        lines.extend(f"- [{fact.basis}] {fact.content}" for fact in validated.facts)
+        lines.extend(
+            f"- [{fact.basis}] {fact.content}"
+            + (f" [{fact.date}]" if fact.date is not None else "")
+            for fact in validated.facts
+        )
     return "\n".join(lines).rstrip() + "\n"

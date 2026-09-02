@@ -42,7 +42,9 @@ If Hook setup fails, inspect the target host's native event schema, the Keepygag
 ## Failure routing
 
 - Invalid config or Memory Root: run Doctor, fix the exact live path or malformed page, and retry. Do not initialize over invalid existing content.
-- `write_conflict`: reread the returned `latest` snapshot when present and reclassify; never retry an old version unchanged.
+- `write_conflict`: reread the returned `latest` snapshot when present and reclassify. A repair conflict returns only the current version; call scoped `list` again and retry only if it still marks the page repairable. Never retry an old version unchanged.
+- `capacity_exceeded`: for a fixed page, refine the candidate or ask the user what to remove. For a dynamic page, use scoped list/read and versioned move to reuse a suitable destination or create a bounded new one. A full target scope requires user-led organization; do not loop.
+- `repairable=true`: call `update(target=repair)` once with the returned path and version. Conflicts, non-repairable pages, and repair failures require an exact user-facing report rather than guessing.
 - `partial_commit`: treat reported components and backups as live evidence, inspect them, then rerun the same idempotent operation.
 - Contract marker corruption or duplicate managed blocks: fail closed and repair the exact host rules file manually.
 - MCP verification failure: inspect the stable launcher, absolute config path, and returned recovery data.
@@ -50,7 +52,7 @@ If Hook setup fails, inspect the target host's native event schema, the Keepygag
 - Upgrade succeeded but repair failed: the package is new while host projection may be old; resolve the reported host error and run `keepygaga repair --yes`.
 - Installer subprocess capture always decodes package-manager and host CLI output as UTF-8. Missing stdout/stderr is treated as empty so a Windows locale cannot turn an upgrade or repair failure into `UnicodeDecodeError` or `AttributeError`.
 
-Doctor reports non-sensitive metadata only. `ok` means applicable checks passed, `warning` requires reading the individual check, and `error` blocks setup. Dynamic-page or home-page capacity warnings may be soft; permissions, malformed content, identity conflicts, or unwritable paths are blocking.
+Doctor reports non-sensitive metadata only. `ok` means applicable checks passed, `warning` requires reading the individual check, and `error` blocks setup. Per-scope page counts and page-capacity warnings may be soft; missing legacy Fact dates are valid and produce no warning. Permissions, malformed content, invalid dates, or unwritable paths are blocking.
 
 ## Release
 

@@ -108,6 +108,8 @@ root = "{memory_root.as_posix()}"
                 move_schema_ok = (
                     isinstance(move_facts, dict)
                     and move_facts.get("minItems") == 1
+                    and move_facts.get("maxItems") == 30
+                    and "new_path" in move_definition["properties"]
                     and "fact" not in move_definition["properties"]
                 )
                 annotations_ok = all(
@@ -117,7 +119,7 @@ root = "{memory_root.as_posix()}"
                 )
                 invalid = await client.call_tool("list", {"unexpected": True})
                 invalid_top_level_ok = invalid.is_error is True
-                catalog = _payload(await client.call_tool("list", {}))
+                catalog = _payload(await client.call_tool("list", {"scope": "topics"}))
                 read = _payload(
                     await client.call_tool("read", {"paths": ["preferences.md"]})
                 )
@@ -203,7 +205,7 @@ root = "{memory_root.as_posix()}"
             else "error"
         )
         return {
-            "schema": "keepygaga-mcp-smoke-v5",
+            "schema": "keepygaga-mcp-smoke-v6",
             "status": status,
             "server": server_name,
             "protocol_version": protocol_version,
@@ -221,7 +223,7 @@ def main() -> int:
         report = asyncio.run(run_smoke(args.timeout, args.server_command))
     except Exception as exc:
         report = {
-            "schema": "keepygaga-mcp-smoke-v5",
+            "schema": "keepygaga-mcp-smoke-v6",
             "status": "error",
             "error": f"{type(exc).__name__}: {exc}",
         }

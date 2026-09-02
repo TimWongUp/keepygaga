@@ -24,6 +24,8 @@ Host-native memories can continue to own host-specific conversation recall and p
 
 The public MCP surface is exactly `list`, `read`, `create`, `add`, `update`, `move`, `rename`, and `delete`.
 
+Session bootstrap injects only `profile.md`, `preferences.md`, and descriptions of the three dynamic scopes. Agents call `list` for one of `topics`, `areas`, or `people` when they need page metadata. New or semantically updated Facts receive a Store-owned local date suffix; existing undated Facts remain readable and upgrades do not rewrite the Memory Root.
+
 ### Upgrading to 0.5
 
 Version 0.5 changes each `move` operation from a single `fact` field to a required `facts` array. Clients that cache MCP schemas must reconnect or refresh the Tool schema after upgrading, then group all exact Facts for one source/destination pair into that array. This is an MCP request-shape change only; the Markdown memory format and existing memory files are unchanged.

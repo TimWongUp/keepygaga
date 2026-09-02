@@ -16,6 +16,7 @@ from keepygaga.memory import (
     AddOperations,
     CreateOperations,
     DeleteOperations,
+    MemoryScope,
     MemoryStore,
     MoveOperations,
     ReadPaths,
@@ -81,9 +82,10 @@ class StrictMCPServer(MCPServer):
         return await super().call_tool(name, arguments, context)
 
 
-
 def _server_instructions() -> str:
-    return files("keepygaga").joinpath("mcp_instructions.md").read_text(encoding="utf-8")
+    return (
+        files("keepygaga").joinpath("mcp_instructions.md").read_text(encoding="utf-8")
+    )
 
 
 mcp = StrictMCPServer("Keepygaga", instructions=_server_instructions())
@@ -109,9 +111,9 @@ def _with_memory_store(
 
 
 @mcp.tool(name="list", annotations=READ_ONLY_ANNOTATIONS)
-def list_memory() -> dict[str, object]:
-    """Use when the current Route Catalog is missing or stale. Returns live canonical page paths, descriptions, and aliases; it does not return Facts or write versions."""
-    return _with_memory_store(MemoryStore.list_files)
+def list_memory(scope: MemoryScope) -> dict[str, object]:
+    """Return one complete live topics, areas, or people Route Catalog. No search, matching, pagination, Facts, or write versions."""
+    return _with_memory_store(lambda store: store.list_files(scope))
 
 
 @mcp.tool(name="read", annotations=READ_ONLY_ANNOTATIONS)
@@ -134,13 +136,13 @@ def add_facts(operations: AddOperations) -> dict[str, object]:
 
 @mcp.tool(name="update", annotations=MUTATING_ANNOTATIONS)
 def update_memory(operations: UpdateOperations) -> dict[str, object]:
-    """Replace an exact Fact or page metadata using the latest Page Snapshot. Use one operation per page. On applied, reuse returned Page Snapshots and receipts; do not verify with read or list."""
+    """Replace an exact Fact, update page metadata, or mechanically repair a repairable page using its latest version. On applied, reuse returned Page Snapshots and receipts; do not verify with read or list."""
     return _with_memory_store(lambda store: store.update(operations))
 
 
 @mcp.tool(name="move", annotations=MUTATING_ANNOTATIONS)
 def move_fact(operations: MoveOperations) -> dict[str, object]:
-    """Move one or more exact Facts between existing pages using both latest Page Snapshots. Put all Facts for one source/destination pair in one operation. On applied, reuse returned Page Snapshots and receipts; do not verify with read or list."""
+    """Move exact Facts to an existing page or atomically create a bounded new destination. Preserve Fact dates and leave at least one source Fact. On applied, reuse returned Page Snapshots and receipts; do not verify with read or list."""
     return _with_memory_store(lambda store: store.move(operations))
 
 

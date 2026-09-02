@@ -25,6 +25,9 @@ OPERATION_FIELDS = {
         "source_version",
         "destination_path",
         "destination_version",
+        "new_path",
+        "description",
+        "aliases",
         "facts",
     },
     "rename": {"path", "if_version", "new_path"},
@@ -37,34 +40,47 @@ def test_public_mcp_surface_and_exact_top_level_shapes() -> None:
     assert set(by_name) == EXPECTED_TOOLS
     for tool in tools:
         assert tool.input_schema["additionalProperties"] is False
-    assert by_name["list"].input_schema["properties"] == {}
+    list_schema = by_name["list"].input_schema
+    assert set(list_schema["properties"]) == {"scope"}
+    assert list_schema["required"] == ["scope"]
+    assert list_schema["properties"]["scope"]["enum"] == [
+        "topics",
+        "areas",
+        "people",
+    ]
     assert set(by_name["read"].input_schema["properties"]) == {"paths"}
     assert by_name["read"].input_schema["required"] == ["paths"]
     assert by_name["read"].input_schema["properties"]["paths"]["minItems"] == 1
-    assert by_name["read"].input_schema["properties"]["paths"]["maxItems"] == 20
+    assert by_name["read"].input_schema["properties"]["paths"]["maxItems"] == 15
 
     for tool_name, expected_fields in OPERATION_FIELDS.items():
         schema = by_name[tool_name].input_schema
         assert set(schema["properties"]) == {"operations"}
         assert schema["required"] == ["operations"]
         assert schema["properties"]["operations"]["minItems"] == 1
-        assert schema["properties"]["operations"]["maxItems"] == 20
+        assert schema["properties"]["operations"]["maxItems"] == 15
         reference = schema["properties"]["operations"]["items"]["$ref"]
         definition = schema["$defs"][reference.rsplit("/", 1)[-1]]
         assert set(definition["properties"]) == expected_fields
         assert definition["additionalProperties"] is False
 
+    for tool_name in {"update", "delete"}:
+        operations = by_name[tool_name].input_schema["properties"]["operations"]
+        assert operations["minItems"] == 1
+        assert operations["maxItems"] == 15
+
     create_schema = by_name["create"].input_schema
     create = create_schema["$defs"]["CreateOperation"]
     assert set(create["required"]) == {"path", "description", "aliases", "facts"}
-    assert create["properties"]["aliases"]["maxItems"] == 8
+    assert create["properties"]["description"]["maxLength"] == 80
+    assert create["properties"]["aliases"]["maxItems"] == 6
     assert "minItems" not in create["properties"]["facts"]
-    assert create["properties"]["facts"]["maxItems"] == 50
+    assert create["properties"]["facts"]["maxItems"] == 30
     fact_schema = create_schema["$defs"]["Fact"]
     assert set(fact_schema["properties"]) == {"basis", "content"}
     assert fact_schema["properties"]["basis"]["enum"] == ["stated", "observed"]
     fact_content = fact_schema["properties"]["content"]
-    assert fact_content["maxLength"] == 4096
+    assert fact_content["maxLength"] == 800
     descriptions = "".join(tool.description or "" for tool in tools)
     assert len(descriptions) < 2400
     assert "sources" not in descriptions.lower()
@@ -74,12 +90,16 @@ def test_public_mcp_surface_and_exact_top_level_shapes() -> None:
     update_items = update_schema["properties"]["operations"]["items"]
     assert update_items["discriminator"]["propertyName"] == "target"
     update_definitions = {
-        reference["$ref"].rsplit("/", 1)[-1]
-        for reference in update_items["oneOf"]
+        reference["$ref"].rsplit("/", 1)[-1] for reference in update_items["oneOf"]
     }
-    assert update_definitions == {"UpdateFactOperation", "UpdatePageOperation"}
+    assert update_definitions == {
+        "UpdateFactOperation",
+        "UpdatePageOperation",
+        "RepairPageOperation",
+    }
     update_fact = update_schema["$defs"]["UpdateFactOperation"]
     update_page = update_schema["$defs"]["UpdatePageOperation"]
+    repair_page = update_schema["$defs"]["RepairPageOperation"]
     assert set(update_fact["properties"]) == {
         "path",
         "if_version",
@@ -98,6 +118,18 @@ def test_public_mcp_surface_and_exact_top_level_shapes() -> None:
     assert update_page["additionalProperties"] is False
     assert update_fact["properties"]["target"]["const"] == "fact"
     assert update_page["properties"]["target"]["const"] == "page"
+    update_description = next(
+        branch
+        for branch in update_page["properties"]["description"]["anyOf"]
+        if branch.get("type") == "string"
+    )
+    update_aliases = next(
+        branch
+        for branch in update_page["properties"]["aliases"]["anyOf"]
+        if branch.get("type") == "array"
+    )
+    assert update_description["maxLength"] == 80
+    assert update_aliases["maxItems"] == 6
     assert set(update_fact["required"]) == {
         "path",
         "if_version",
@@ -106,13 +138,14 @@ def test_public_mcp_surface_and_exact_top_level_shapes() -> None:
         "new_fact",
     }
     assert set(update_page["required"]) == {"path", "if_version", "target"}
+    assert set(repair_page["properties"]) == {"path", "if_version", "target"}
+    assert repair_page["properties"]["target"]["const"] == "repair"
 
     delete_schema = by_name["delete"].input_schema
     delete_items = delete_schema["properties"]["operations"]["items"]
     assert delete_items["discriminator"]["propertyName"] == "target"
     delete_definitions = {
-        reference["$ref"].rsplit("/", 1)[-1]
-        for reference in delete_items["oneOf"]
+        reference["$ref"].rsplit("/", 1)[-1] for reference in delete_items["oneOf"]
     }
     assert delete_definitions == {"DeleteFactOperation", "DeletePageOperation"}
     delete_fact = delete_schema["$defs"]["DeleteFactOperation"]
@@ -156,34 +189,67 @@ def test_tool_protocol_is_discoverable_from_descriptions_and_schema() -> None:
     add = add_schema["$defs"]["AddOperation"]
     assert "latest Page Snapshot" in add["properties"]["if_version"]["description"]
     assert "exact duplicates only" in add["properties"]["facts"]["description"]
-    assert "each path must be unique" in (
-        add_schema["properties"]["operations"]["description"]
+    assert add["properties"]["facts"]["maxItems"] == 30
+    assert (
+        "each path must be unique"
+        in (add_schema["properties"]["operations"]["description"])
     )
 
     move_schema = by_name["move"].input_schema
     move = move_schema["$defs"]["MoveOperation"]
+    assert len(move["oneOf"]) == 2
+    assert move["oneOf"][0]["required"] == [
+        "destination_path",
+        "destination_version",
+    ]
+    assert move["oneOf"][1]["required"] == ["new_path", "description", "aliases"]
     assert move["properties"]["facts"]["minItems"] == 1
-    assert move["properties"]["facts"]["maxItems"] == 50
-    assert "all Facts for that pair" in (
-        move_schema["properties"]["operations"]["description"]
+    assert move["properties"]["facts"]["maxItems"] == 30
+    move_description = next(
+        branch
+        for branch in move["properties"]["description"]["anyOf"]
+        if branch.get("type") == "string"
     )
-    assert "one source/destination pair" in (by_name["move"].description or "")
+    move_aliases = next(
+        branch
+        for branch in move["properties"]["aliases"]["anyOf"]
+        if branch.get("type") == "array"
+    )
+    assert move_description["maxLength"] == 80
+    assert move_aliases["maxItems"] == 6
+    selector_schema = move_schema["$defs"]["FactSelector"]
+    assert set(selector_schema["properties"]) == {"basis", "content"}
+    assert selector_schema["properties"]["content"]["maxLength"] == 4096
+    assert (
+        "all Facts for that pair"
+        in (move_schema["properties"]["operations"]["description"])
+    )
+    assert "new destination" in (by_name["move"].description or "")
 
     update_schema = by_name["update"].input_schema
     update_fact = update_schema["$defs"]["UpdateFactOperation"]
     update_page = update_schema["$defs"]["UpdatePageOperation"]
+    repair_page = update_schema["$defs"]["RepairPageOperation"]
     assert "Fact replacement" in update_fact["properties"]["target"]["description"]
-    assert "cannot be downgraded" in (
-        update_fact["properties"]["new_fact"]["description"]
+    assert (
+        "cannot be downgraded" in (update_fact["properties"]["new_fact"]["description"])
     )
-    assert "page description or aliases" in (
-        update_page["properties"]["target"]["description"]
+    assert update_fact["properties"]["old_fact"]["$ref"].endswith("/FactSelector")
+    assert update_fact["properties"]["new_fact"]["$ref"].endswith("/Fact")
+    assert (
+        "page description or aliases"
+        in (update_page["properties"]["target"]["description"])
+    )
+    assert (
+        "Mechanically canonicalize"
+        in (repair_page["properties"]["target"]["description"])
     )
 
     delete_schema = by_name["delete"].input_schema
     delete_fact = delete_schema["$defs"]["DeleteFactOperation"]
-    assert "current-turn user authorization" in (
-        delete_fact["properties"]["authorization"]["description"]
+    assert (
+        "current-turn user authorization"
+        in (delete_fact["properties"]["authorization"]["description"])
     )
 
     for name in EXPECTED_TOOLS - {"list", "read"}:
@@ -194,8 +260,9 @@ def test_tool_protocol_is_discoverable_from_descriptions_and_schema() -> None:
 
     fact_schema = add_schema["$defs"]["Fact"]
     assert "explicit statement" in fact_schema["properties"]["basis"]["description"]
-    assert "independently maintainable" in (
-        fact_schema["properties"]["content"]["description"]
+    assert (
+        "independently maintainable"
+        in (fact_schema["properties"]["content"]["description"])
     )
 
 
@@ -257,20 +324,40 @@ def test_update_discriminated_operations_are_rejected_at_public_boundary() -> No
         assert result.is_error is True
 
 
-def test_runtime_rejects_unexpected_top_level_arguments() -> None:
-    tools = asyncio.run(mcp_server.mcp.list_tools())
-    for tool in tools:
-        arguments = {"paths": ["profile.md"]} if tool.name == "read" else {}
+def test_move_destination_modes_are_rejected_when_partial_or_mixed() -> None:
+    common = {
+        "source_path": "topics/source.md",
+        "source_version": "opaque",
+        "facts": [{"basis": "stated", "content": "Move me."}],
+    }
+    for destination in (
+        {"destination_path": "topics/destination.md"},
+        {
+            "destination_path": "topics/destination.md",
+            "destination_version": "opaque",
+            "new_path": "topics/new.md",
+            "description": "New page.",
+            "aliases": [],
+        },
+    ):
         result = asyncio.run(
-            _call_tool(tool.name, {**arguments, "unexpected": True})
+            _call_tool("move", {"operations": [{**common, **destination}]})
         )
         assert result.is_error is True
 
 
-def test_runtime_rejects_more_than_twenty_read_paths() -> None:
+def test_runtime_rejects_unexpected_top_level_arguments() -> None:
+    tools = asyncio.run(mcp_server.mcp.list_tools())
+    for tool in tools:
+        arguments = {"paths": ["profile.md"]} if tool.name == "read" else {}
+        result = asyncio.run(_call_tool(tool.name, {**arguments, "unexpected": True}))
+        assert result.is_error is True
+
+
+def test_runtime_rejects_more_than_fifteen_read_paths() -> None:
     result = asyncio.run(
         _call_tool(
-            "read", {"paths": [f"topics/page-{index}.md" for index in range(21)]}
+            "read", {"paths": [f"topics/page-{index}.md" for index in range(16)]}
         )
     )
     assert result.is_error is True

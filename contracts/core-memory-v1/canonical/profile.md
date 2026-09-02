@@ -4,4 +4,4 @@ description: "用户明确陈述的稳定身份、背景与长期角色。"
 aliases: ["identity"]
 ---
 
-- [stated] Contract profile fact.
+- [stated] Contract profile fact. [2026-09-02]

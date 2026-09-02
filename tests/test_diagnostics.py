@@ -27,7 +27,7 @@ def test_doctor_reports_missing_memory_root_as_warning(tmp_path: Path) -> None:
     result = run_doctor(path, project_root=tmp_path)
     checks = cast(list[dict[str, object]], result["checks"])
     memory = next(item for item in checks if item["id"] == "memory_tree")
-    assert result["schema"] == "keepygaga-doctor-v7"
+    assert result["schema"] == "keepygaga-doctor-v8"
     assert result["status"] == "warning"
     tools = result["tools"]
     assert isinstance(tools, list)
@@ -95,16 +95,18 @@ def test_doctor_config_error_returns_error(tmp_path: Path) -> None:
     assert checks[0]["id"] == "config"
     assert checks[0]["status"] == "error"
 
+
 def test_doctor_warns_when_dynamic_page_limit_is_exceeded(tmp_path: Path) -> None:
     from keepygaga import memory as memory_module
     from keepygaga.codec import MemoryDocument
-    from keepygaga.memory import Fact, render_memory_file
+    from keepygaga.memory import StoredFact, render_memory_file
 
     path = tmp_path / "keepygaga.toml"
     memory_root = tmp_path / "memory"
     config = MemoryFilesConfig(root=str(memory_root))
     assert initialize_memory_tree(memory_root, config)["status"] == "applied"
-    for index in range(memory_module.MAX_DYNAMIC_PAGES + 1):
+    limit = memory_module.DYNAMIC_PAGE_LIMITS["topics"]
+    for index in range(limit + 1):
         page = memory_root / "topics" / f"manual-{index}.md"
         page.write_text(
             render_memory_file(
@@ -112,7 +114,9 @@ def test_doctor_warns_when_dynamic_page_limit_is_exceeded(tmp_path: Path) -> Non
                     name=f"manual-{index}",
                     description=f"Manual page {index}.",
                     aliases=(),
-                    facts=(Fact(basis="stated", content=f"Manual fact {index}."),),
+                    facts=(
+                        StoredFact(basis="stated", content=f"Manual fact {index}."),
+                    ),
                 ),
                 f"topics/manual-{index}.md",
             ),
@@ -127,8 +131,10 @@ def test_doctor_warns_when_dynamic_page_limit_is_exceeded(tmp_path: Path) -> Non
     checks = cast(list[dict[str, object]], result["checks"])
     memory = next(item for item in checks if item["id"] == "memory_tree")
     details = cast(dict[str, object], memory["details"])
-    assert details["dynamic_page_limit_exceeded"] is True
-    assert details["dynamic_pages"] == memory_module.MAX_DYNAMIC_PAGES + 1
+    exceeded = cast(dict[str, bool], details["dynamic_page_limit_exceeded"])
+    dynamic_pages = cast(dict[str, int], details["dynamic_pages"])
+    assert exceeded["topics"] is True
+    assert dynamic_pages["topics"] == limit + 1
 
 
 @pytest.mark.skipif(
@@ -155,6 +161,7 @@ def test_doctor_warns_about_overbroad_existing_permissions(tmp_path: Path) -> No
     warnings = details["permission_warnings"]
     assert isinstance(warnings, list)
     assert any(
-        item["path"] == str(memory_root / "profile.md") for item in warnings  # type: ignore[index]
+        item["path"] == str(memory_root / "profile.md")
+        for item in warnings  # type: ignore[index]
     )
     assert (memory_root / "profile.md").stat().st_mode & 0o777 == 0o644
