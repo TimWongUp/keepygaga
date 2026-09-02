@@ -139,6 +139,29 @@ def _assert_no_duplicate_frontmatter_keys(header: str, path: str) -> None:
         ) from exc
 
 
+def _load_frontmatter(source: str, header: str, path: str) -> Any:
+    _assert_no_duplicate_frontmatter_keys(header, path)
+    try:
+        return frontmatter.loads(source)
+    except Exception as exc:
+        raise MemoryValidationError(
+            "invalid_source",
+            f"{path} frontmatter could not be parsed: {type(exc).__name__}: {exc}",
+            path=path,
+        ) from exc
+
+
+def _validate_frontmatter_metadata(metadata: dict[str, Any], path: str) -> None:
+    if not isinstance(metadata.get("name"), str) or not isinstance(
+        metadata.get("description"), str
+    ):
+        raise MemoryValidationError(
+            "invalid_source", f"{path} name and description must be strings", path=path
+        )
+    if "sources" in metadata:
+        _string_array(metadata["sources"], "sources")
+
+
 def _one_line(value: str, field: str) -> str:
     normalized = normalize_text(value).strip()
     if not normalized:
@@ -353,15 +376,7 @@ def _parse_frontmatter(
             path=path,
         )
     header = "\n".join(lines[: closing_index + 1]) + "\n"
-    _assert_no_duplicate_frontmatter_keys(header, path)
-    try:
-        post = frontmatter.loads(header if not include_body else normalized)
-    except Exception as exc:
-        raise MemoryValidationError(
-            "invalid_source",
-            f"{path} frontmatter could not be parsed: {type(exc).__name__}: {exc}",
-            path=path,
-        ) from exc
+    post = _load_frontmatter(header if not include_body else normalized, header, path)
     metadata = dict(post.metadata)
     accepted_keys = (
         ("name", "description", "aliases"),
@@ -373,14 +388,7 @@ def _parse_frontmatter(
             f"{path} frontmatter must contain name, description, aliases in order",
             path=path,
         )
-    if not isinstance(metadata["name"], str) or not isinstance(
-        metadata["description"], str
-    ):
-        raise MemoryValidationError(
-            "invalid_source", f"{path} name and description must be strings", path=path
-        )
-    if "sources" in metadata:
-        _string_array(metadata["sources"], "sources")
+    _validate_frontmatter_metadata(metadata, path)
     if include_body:
         return metadata, post.content
     body = "\n".join(lines[closing_index + 1 :])
@@ -465,15 +473,7 @@ def _repair_frontmatter(normalized: str, path: str) -> tuple[dict[str, Any], lis
             "invalid_source", f"{path} contains duplicate frontmatter fields", path=path
         )
     header = "---\n" + "\n".join(header_lines) + "\n---\n"
-    _assert_no_duplicate_frontmatter_keys(header, path)
-    try:
-        metadata = dict(frontmatter.loads(header).metadata)
-    except Exception as exc:
-        raise MemoryValidationError(
-            "invalid_source",
-            f"{path} frontmatter could not be parsed: {type(exc).__name__}: {exc}",
-            path=path,
-        ) from exc
+    metadata = dict(_load_frontmatter(header, header, path).metadata)
     keys = set(metadata)
     if not {"name", "description", "aliases"}.issubset(keys) or not keys.issubset(
         {"name", "description", "sources", "aliases"}
@@ -483,14 +483,7 @@ def _repair_frontmatter(normalized: str, path: str) -> tuple[dict[str, Any], lis
             f"{path} frontmatter must contain name, description, aliases",
             path=path,
         )
-    if not isinstance(metadata["name"], str) or not isinstance(
-        metadata["description"], str
-    ):
-        raise MemoryValidationError(
-            "invalid_source", f"{path} name and description must be strings", path=path
-        )
-    if "sources" in metadata:
-        _string_array(metadata["sources"], "sources")
+    _validate_frontmatter_metadata(metadata, path)
     return metadata, lines[closing_index + 1 :]
 
 

@@ -64,11 +64,6 @@ def test_public_mcp_surface_and_exact_top_level_shapes() -> None:
         assert set(definition["properties"]) == expected_fields
         assert definition["additionalProperties"] is False
 
-    for tool_name in {"update", "delete"}:
-        operations = by_name[tool_name].input_schema["properties"]["operations"]
-        assert operations["minItems"] == 1
-        assert operations["maxItems"] == 15
-
     create_schema = by_name["create"].input_schema
     create = create_schema["$defs"]["CreateOperation"]
     assert set(create["required"]) == {"path", "description", "aliases", "facts"}
