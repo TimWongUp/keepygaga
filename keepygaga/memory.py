@@ -10,41 +10,20 @@ from contextlib import suppress
 from dataclasses import dataclass
 from datetime import date as calendar_date
 from pathlib import Path, PurePosixPath
-from typing import Annotated, Literal
 
 from filelock import FileLock, Timeout
-from pydantic import ConfigDict, Field, field_validator, model_validator
 
 from keepygaga.codec import (
-    FACT_LINE_RE as FACT_LINE_RE,
-)
-from keepygaga.codec import (
-    FRONTMATTER_KEY_RE as FRONTMATTER_KEY_RE,
-)
-from keepygaga.codec import (
-    MAX_FACT_CONTENT_CHARS as MAX_FACT_CONTENT_CHARS,
-)
-from keepygaga.codec import (
-    Basis as Basis,
-)
-from keepygaga.codec import (
-    Fact as Fact,
-)
-from keepygaga.codec import (
-    FactSelector as FactSelector,
-)
-from keepygaga.codec import (
-    MemoryDocument as MemoryDocument,
-)
-from keepygaga.codec import (
-    StoredFact as StoredFact,
-)
-from keepygaga.codec import (
-    StrictModel as StrictModel,
-)
-from keepygaga.codec import (
+    FACT_LINE_RE,
+    FRONTMATTER_KEY_RE,
+    MAX_FACT_CONTENT_CHARS,
+    Basis,
+    Fact,
+    FactSelector,
+    MemoryDocument,
+    StoredFact,
+    StrictModel,
     _identity,
-    _one_line,
     fact_key,
     normalize_text,
     parse_memory_file,
@@ -59,48 +38,51 @@ from keepygaga.codec import (
 )
 from keepygaga.config import MemoryFilesConfig
 from keepygaga.errors import MemoryValidationError
-from keepygaga.paths import (
-    DYNAMIC_DIRS as DYNAMIC_DIRS,
+from keepygaga.memory_contract import (
+    DEFAULT_DESCRIPTIONS,
+    DYNAMIC_PAGE_LIMIT,
+    DYNAMIC_PAGE_LIMITS,
+    MAX_ALIASES_PER_PAGE,
+    MAX_DESCRIPTION_CHARS,
+    MAX_FACTS_PER_OPERATION,
+    MAX_MUTATION_OPERATIONS,
+    MAX_READ_PATHS,
+    MAX_REPAIR_INPUT_CHARS,
+    NEW_DIRECTORY_MODE,
+    NEW_FILE_MODE,
+    PREFERENCES_PAGE_LIMIT,
+    PROFILE_PAGE_LIMIT,
+    AddOperation,
+    AddOperations,
+    CreateOperation,
+    CreateOperations,
+    DeleteFactOperation,
+    DeleteOperation,
+    DeleteOperations,
+    DeletePageOperation,
+    MemoryScope,
+    MoveOperation,
+    MoveOperations,
+    ReadPaths,
+    RenameOperation,
+    RenameOperations,
+    RepairPageOperation,
+    UpdateFactOperation,
+    UpdateOperation,
+    UpdateOperations,
+    UpdatePageOperation,
+    page_limit,
 )
 from keepygaga.paths import (
-    DYNAMIC_STEM_RE as DYNAMIC_STEM_RE,
-)
-from keepygaga.paths import (
-    FIXED_PATHS as FIXED_PATHS,
-)
-from keepygaga.paths import (
-    canonical_memory_path as canonical_memory_path,
-)
-from keepygaga.paths import (
-    canonical_path as canonical_path,
-)
-from keepygaga.paths import (
+    DYNAMIC_DIRS,
+    DYNAMIC_STEM_RE,
+    FIXED_PATHS,
+    canonical_memory_path,
+    canonical_path,
     is_dynamic_path,
 )
 
-PROFILE_PAGE_LIMIT = 2000
-PREFERENCES_PAGE_LIMIT = 2000
-DYNAMIC_PAGE_LIMIT = 5000
-MAX_REPAIR_INPUT_CHARS = DYNAMIC_PAGE_LIMIT * 2
-MAX_DESCRIPTION_CHARS = 80
-MAX_ALIASES_PER_PAGE = 6
-MAX_READ_PATHS = 15
-MAX_MUTATION_OPERATIONS = 15
-MAX_FACTS_PER_OPERATION = 30
-DYNAMIC_PAGE_LIMITS = {"topics": 50, "areas": 50, "people": 100}
-NEW_DIRECTORY_MODE = 0o700
-NEW_FILE_MODE = 0o600
-
 VERSION_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
-
-DEFAULT_DESCRIPTIONS = {
-    "profile.md": "用户明确陈述的稳定身份、背景与长期角色。",
-    "preferences.md": "用户希望 Agent 长期遵循的回应方式、工作偏好与条件检索偏好。",
-}
-
-
-def _is_link_like(path: Path) -> bool:
-    return path.is_symlink() or path.is_junction()
 
 __all__ = [
     "AddOperation",
@@ -157,285 +139,8 @@ __all__ = [
 ]
 
 
-MemoryScope = Literal["topics", "areas", "people"]
-ExistingPagePath = Annotated[
-    str,
-    Field(description="Canonical existing page path from the current Route Catalog."),
-]
-DynamicPagePath = Annotated[
-    str,
-    Field(
-        description=(
-            "New direct topics/, areas/, or people/ Markdown path using a canonical slug."
-        )
-    ),
-]
-CurrentPageVersion = Annotated[
-    str,
-    Field(
-        description=(
-            "Opaque version from the latest Page Snapshot of this page; pass unchanged."
-        )
-    ),
-]
-
-
-def _agent_description(value: object) -> str:
-    if not isinstance(value, str):
-        raise ValueError("description must be a string")
-    normalized = _one_line(value, "description")
-    if unicode_chars(normalized) > MAX_DESCRIPTION_CHARS:
-        raise ValueError(
-            f"description cannot exceed {MAX_DESCRIPTION_CHARS} characters"
-        )
-    return normalized
-
-
-class CreateOperation(StrictModel):
-    path: DynamicPagePath
-    description: str = Field(max_length=MAX_DESCRIPTION_CHARS)
-    aliases: list[str] = Field(max_length=MAX_ALIASES_PER_PAGE)
-    facts: list[Fact] = Field(max_length=MAX_FACTS_PER_OPERATION)
-
-    @field_validator("description", mode="before")
-    @classmethod
-    def validate_description(cls, value: object) -> str:
-        return _agent_description(value)
-
-
-class AddOperation(StrictModel):
-    path: ExistingPagePath
-    if_version: CurrentPageVersion
-    facts: list[Fact] = Field(
-        min_length=1,
-        max_length=MAX_FACTS_PER_OPERATION,
-        description="Facts to append; Store validation rejects exact duplicates only.",
-    )
-
-
-class UpdateFactOperation(StrictModel):
-    path: ExistingPagePath
-    if_version: CurrentPageVersion
-    target: Literal["fact"] = Field(
-        description="Select exact Fact replacement rather than page metadata update."
-    )
-    old_fact: FactSelector
-    new_fact: Fact = Field(
-        description="Replacement Fact; a stated basis cannot be downgraded to observed."
-    )
-
-    @model_validator(mode="after")
-    def validate_change(self) -> UpdateFactOperation:
-        if fact_key(self.old_fact) == fact_key(self.new_fact):
-            raise ValueError("old_fact and new_fact must differ")
-        return self
-
-
-class UpdatePageOperation(StrictModel):
-    path: ExistingPagePath
-    if_version: CurrentPageVersion
-    target: Literal["page"] = Field(
-        description="Select page description or aliases update rather than Fact replacement."
-    )
-    description: str | None = Field(default=None, max_length=MAX_DESCRIPTION_CHARS)
-    aliases: list[str] | None = Field(default=None, max_length=MAX_ALIASES_PER_PAGE)
-
-    @field_validator("description", mode="before")
-    @classmethod
-    def validate_description(cls, value: object) -> str | None:
-        if value is None:
-            return None
-        return _agent_description(value)
-
-    @model_validator(mode="after")
-    def validate_change(self) -> UpdatePageOperation:
-        if self.description is None and self.aliases is None:
-            raise ValueError("page update requires description or aliases")
-        return self
-
-
-class RepairPageOperation(StrictModel):
-    path: ExistingPagePath
-    if_version: CurrentPageVersion
-    target: Literal["repair"] = Field(
-        description="Mechanically canonicalize one repairable page without semantic edits."
-    )
-
-
-class MoveOperation(StrictModel):
-    model_config = ConfigDict(
-        json_schema_extra={
-            "oneOf": [
-                {
-                    "required": ["destination_path", "destination_version"],
-                    "properties": {
-                        "destination_path": {"type": "string"},
-                        "destination_version": {"type": "string"},
-                        "new_path": {"type": "null"},
-                        "description": {"type": "null"},
-                        "aliases": {"type": "null"},
-                    },
-                },
-                {
-                    "required": ["new_path", "description", "aliases"],
-                    "properties": {
-                        "destination_path": {"type": "null"},
-                        "destination_version": {"type": "null"},
-                        "new_path": {"type": "string"},
-                        "description": {"type": "string"},
-                        "aliases": {"type": "array"},
-                    },
-                },
-            ]
-        }
-    )
-
-    source_path: ExistingPagePath
-    source_version: CurrentPageVersion
-    destination_path: ExistingPagePath | None = None
-    destination_version: CurrentPageVersion | None = None
-    new_path: DynamicPagePath | None = None
-    description: str | None = Field(default=None, max_length=MAX_DESCRIPTION_CHARS)
-    aliases: list[str] | None = Field(default=None, max_length=MAX_ALIASES_PER_PAGE)
-    facts: list[FactSelector] = Field(
-        min_length=1,
-        max_length=MAX_FACTS_PER_OPERATION,
-        description=(
-            "All exact Facts to move between this source/destination pair in one "
-            "operation; copy them unchanged from the latest source Page Snapshot."
-        ),
-    )
-
-    @field_validator("description", mode="before")
-    @classmethod
-    def validate_description(cls, value: object) -> str | None:
-        return _agent_description(value) if value is not None else None
-
-    @model_validator(mode="after")
-    def validate_destination(self) -> MoveOperation:
-        existing = (
-            self.destination_path is not None or self.destination_version is not None
-        )
-        new = (
-            self.new_path is not None
-            or self.description is not None
-            or self.aliases is not None
-        )
-        if existing == new:
-            raise ValueError(
-                "move requires exactly one existing or new destination mode"
-            )
-        if existing and (
-            self.destination_path is None or self.destination_version is None
-        ):
-            raise ValueError("existing destination requires path and version")
-        if new and (
-            self.new_path is None or self.description is None or self.aliases is None
-        ):
-            raise ValueError(
-                "new destination requires new_path, description, and aliases"
-            )
-        return self
-
-
-class RenameOperation(StrictModel):
-    path: ExistingPagePath
-    if_version: CurrentPageVersion
-    new_path: DynamicPagePath
-
-
-class DeleteFactOperation(StrictModel):
-    path: ExistingPagePath
-    if_version: CurrentPageVersion
-    target: Literal["fact"] = Field(description="Delete one exact Fact.")
-    fact: FactSelector
-    authorization: Literal["user_requested"] = Field(
-        description=(
-            "Audit assertion; set only after explicit current-turn user authorization."
-        )
-    )
-
-
-class DeletePageOperation(StrictModel):
-    path: ExistingPagePath
-    if_version: CurrentPageVersion
-    target: Literal["page"] = Field(description="Delete one dynamic page.")
-    authorization: Literal["user_requested"] = Field(
-        description=(
-            "Audit assertion; set only after explicit current-turn user authorization."
-        )
-    )
-
-
-DeleteOperation = Annotated[
-    DeleteFactOperation | DeletePageOperation,
-    Field(discriminator="target"),
-]
-UpdateOperation = Annotated[
-    UpdateFactOperation | UpdatePageOperation | RepairPageOperation,
-    Field(discriminator="target"),
-]
-
-CreateOperations = Annotated[
-    list[CreateOperation],
-    Field(
-        min_length=1,
-        max_length=MAX_MUTATION_OPERATIONS,
-        description="Page creations validated as one batch; repeated paths are rejected.",
-    ),
-]
-AddOperations = Annotated[
-    list[AddOperation],
-    Field(
-        min_length=1,
-        max_length=MAX_MUTATION_OPERATIONS,
-        description="Fact additions validated as one batch; each path must be unique.",
-    ),
-]
-UpdateOperations = Annotated[
-    list[UpdateOperation],
-    Field(
-        min_length=1,
-        max_length=MAX_MUTATION_OPERATIONS,
-        description="Exact updates validated as one batch; each path must be unique.",
-    ),
-]
-MoveOperations = Annotated[
-    list[MoveOperation],
-    Field(
-        min_length=1,
-        max_length=MAX_MUTATION_OPERATIONS,
-        description=(
-            "Exact Fact moves validated as one batch. Use one operation per disjoint "
-            "source/destination pair and include all Facts for that pair in facts; "
-            "every page path may appear only once across the batch."
-        ),
-    ),
-]
-RenameOperations = Annotated[
-    list[RenameOperation],
-    Field(
-        min_length=1,
-        max_length=MAX_MUTATION_OPERATIONS,
-        description="Dynamic page renames; every old and new path must be unique.",
-    ),
-]
-DeleteOperations = Annotated[
-    list[DeleteOperation],
-    Field(
-        min_length=1,
-        max_length=MAX_MUTATION_OPERATIONS,
-        description="Authorized exact deletions; each path must be unique.",
-    ),
-]
-ReadPaths = Annotated[
-    list[ExistingPagePath],
-    Field(
-        min_length=1,
-        max_length=MAX_READ_PATHS,
-        description="Unique canonical page paths from the current Route Catalog.",
-    ),
-]
+def _is_link_like(path: Path) -> bool:
+    return path.is_symlink() or path.is_junction()
 
 
 @dataclass(frozen=True)
@@ -444,14 +149,6 @@ class LoadedFile:
     document: MemoryDocument
     text: str
     version: str
-
-
-def page_limit(path: str) -> int:
-    if path == "profile.md":
-        return PROFILE_PAGE_LIMIT
-    if path == "preferences.md":
-        return PREFERENCES_PAGE_LIMIT
-    return DYNAMIC_PAGE_LIMIT
 
 
 def _local_date() -> str:
