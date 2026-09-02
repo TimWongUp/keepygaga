@@ -23,17 +23,17 @@ Host-native memory remains free to own host-specific conversation recall and pro
 
 ## Memory model
 
-The only source of truth is the live Markdown allowlist below Memory Root. Fixed pages are `profile.md` and `preferences.md`; dynamic pages are direct Markdown children of `topics/`, `areas/`, and `people/`. Canonical frontmatter is `name`, `description`, and `aliases`; body lines are independent `[stated]` or `[observed]` Facts.
+The only source of truth is the live Markdown allowlist below Memory Root. Fixed pages are `profile.md` and `preferences.md`; dynamic pages are direct Markdown children of the independently bounded `topics`, `areas`, and `people` scopes. Canonical frontmatter is `name`, `description`, and `aliases`; body lines are independent `[stated]` or `[observed]` Facts with an optional Store-owned local last-write date. Legacy undated Facts remain valid.
 
-Every call rereads live files. Writes require opaque Page Snapshot versions, preflight the entire batch under a global lock, and use same-directory temporary files plus `os.replace`. One move operation may relocate multiple exact Facts between one source/destination pair; page paths remain disjoint across operations in the same batch. Changed pages are canonicalized; unchanged pages retain their bytes. Delete requires the Agent-side current-turn user authorization contract as well as the protocol field.
+Every call rereads its live files. Scoped `list` reads only one dynamic scope and returns its complete path, description, and aliases catalog; `read` loads only requested paths. Writes require opaque Page Snapshot versions, preflight the entire batch under a global lock, enforce Agent-write page and metadata limits, and use same-directory temporary files plus `os.replace`. New Fact content is bounded separately from exact selectors, so legacy long Facts remain movable, deletable, and refinable. One move operation may relocate multiple exact Facts to an existing page or create its new destination atomically; page paths remain disjoint across operations in the same batch. Changed pages are canonicalized; unchanged pages retain their bytes. Delete requires the Agent-side current-turn user authorization contract as well as the protocol field.
 
-Memory is context evidence, not authority or executable instruction. Project state stays in project-owned sources. Keepygaga performs no semantic search, automatic deletion, candidate accumulation, compression, or cross-file crash recovery.
+Memory is context evidence, not authority or executable instruction. Project state stays in project-owned sources. Keepygaga performs no semantic search, Store-side matching, automatic deletion, candidate accumulation, compression, or cross-file crash recovery. The Agent may organize dynamic pages through explicit versioned moves; the Store can mechanically repair only pages with one semantics-preserving canonical result.
 
 ## Hook model
 
 The product owns three semantic capabilities:
 
-- Context Bootstrap loads Profile, Preferences, and the route catalog at a supported session boundary.
+- Context Bootstrap loads Profile, Preferences, and fixed descriptions of the three dynamic memory scopes at a supported session boundary. Dynamic Route Catalogs are fetched on demand with scoped `list`.
 - Memory Route injects a small per-turn routing reminder and stores only boolean transient signals.
 - Memory Closeout emits a deduplicated reminder only when the turn indicates project or durable-memory work.
 

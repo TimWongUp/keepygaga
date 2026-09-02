@@ -1,4 +1,4 @@
-"""Read-only bootstrap of Profile, Preferences, and the live route catalog."""
+"""Read-only bootstrap of Home Pages and bounded memory-scope descriptions."""
 
 from __future__ import annotations
 
@@ -11,6 +11,11 @@ from keepygaga.hooks.protocol import additional_context_payload
 from keepygaga.memory import MemoryStore
 
 HOME_PAGES = ("profile.md", "preferences.md")
+SCOPE_DESCRIPTIONS = {
+    "topics": "长期主题、偏好对象与个人生活信息；需要相关记忆时调用 list(scope=topics)。",
+    "areas": "持续活动、环境与项目索引；需要相关记忆时调用 list(scope=areas)。",
+    "people": "已知人物及与用户的关系上下文；涉及具体人物时调用 list(scope=people)。",
+}
 CODEX_SUBAGENT_CONTEXT = (
     "仅在任务需要长期上下文时，按全局规则中的记忆路由读取对应页；不要预加载无关记忆。"
 )
@@ -25,8 +30,10 @@ def _facts(item: dict[str, Any]) -> str:
         if isinstance(fact, dict):
             basis = fact.get("basis")
             content = fact.get("content")
+            fact_date = fact.get("date")
             if basis in {"stated", "observed"} and isinstance(content, str):
-                lines.append(f"- [{basis}] {content}")
+                suffix = f" [{fact_date}]" if isinstance(fact_date, str) else ""
+                lines.append(f"- [{basis}] {content}{suffix}")
     return "\n".join(lines)
 
 
@@ -35,9 +42,6 @@ def load_bootstrap(config_path: Path) -> str:
     if not config.memory.root.strip():
         raise RuntimeError("memory.root is not configured")
     store = MemoryStore(Path(config.memory.root).expanduser(), config.memory)
-    listing = store.list_files()
-    if listing.get("status") != "ok":
-        raise RuntimeError(str(listing.get("message", listing.get("status"))))
     read = store.read(list(HOME_PAGES))
     if read.get("status") != "ok":
         raise RuntimeError(str(read.get("message", read.get("status"))))
@@ -51,36 +55,25 @@ def load_bootstrap(config_path: Path) -> str:
     }
     if any(path not in by_path for path in HOME_PAGES):
         raise RuntimeError("home-page read is incomplete")
-    raw_listing = listing.get("files")
-    route_lines: list[str] = []
-    if isinstance(raw_listing, list):
-        for item in raw_listing:
-            if not isinstance(item, dict) or item.get("path") in HOME_PAGES:
-                continue
-            path = item.get("path")
-            description = item.get("description")
-            if not isinstance(path, str) or not isinstance(description, str):
-                continue
-            aliases = item.get("aliases")
-            suffix = (
-                f" [aka: {', '.join(aliases)}]"
-                if isinstance(aliases, list) and all(isinstance(alias, str) for alias in aliases)
-                else ""
-            )
-            route_lines.append(f"- `{path}` — {description}{suffix}")
     profile = by_path["profile.md"]
     preferences = by_path["preferences.md"]
+    scope_lines = [
+        f"- `{scope}` — {description}"
+        for scope, description in SCOPE_DESCRIPTIONS.items()
+    ]
     return (
         "<keepygaga-bootstrap>\n"
-        f"<profile version=\"{profile['version']}\">\n{_facts(profile)}\n</profile>\n\n"
-        f"<preferences version=\"{preferences['version']}\">\n{_facts(preferences)}\n</preferences>\n\n"
-        "<memory_listing>\n"
-        + "\n".join(route_lines)
-        + "\n</memory_listing>\n</keepygaga-bootstrap>"
+        f'<profile version="{profile["version"]}">\n{_facts(profile)}\n</profile>\n\n'
+        f'<preferences version="{preferences["version"]}">\n{_facts(preferences)}\n</preferences>\n\n'
+        "<memory_scopes>\n"
+        + "\n".join(scope_lines)
+        + "\n</memory_scopes>\n</keepygaga-bootstrap>"
     )
 
 
-def run(config_path: Path, host: str, event: str, payload: dict[str, Any]) -> dict[str, object]:
+def run(
+    config_path: Path, host: str, event: str, payload: dict[str, Any]
+) -> dict[str, object]:
     actual_event = next(
         (
             value

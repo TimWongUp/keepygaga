@@ -78,14 +78,19 @@ def validate_host_source(
     has_permission_warning = bool(
         isinstance(permission_warnings, list) and permission_warnings
     )
+    page_limit_exceeded = (
+        details.get("dynamic_page_limit_exceeded")
+        if isinstance(details, Mapping)
+        else None
+    )
+    has_page_limit_warning = isinstance(page_limit_exceeded, Mapping) and any(
+        value is True for value in page_limit_exceeded.values()
+    )
     soft_warning = (
         memory_status == "warning"
         and isinstance(details, Mapping)
         and not has_permission_warning
-        and (
-            details.get("split_recommended") is True
-            or details.get("dynamic_page_limit_exceeded") is True
-        )
+        and (details.get("split_recommended") is True or has_page_limit_warning)
     )
     invalid_checks = [
         str(check.get("id", "unknown"))

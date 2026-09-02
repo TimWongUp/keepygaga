@@ -15,6 +15,10 @@ class MemoryValidationError(ValueError):
         current: int | None = None,
         limit: int | None = None,
         recovery: str | None = None,
+        scope: str | None = None,
+        repairable: bool | None = None,
+        raw: str | None = None,
+        version: str | None = None,
     ):
         self.status = status
         self.path = path
@@ -23,20 +27,25 @@ class MemoryValidationError(ValueError):
         self.current = current
         self.limit = limit
         self.recovery = recovery
+        self.scope = scope
+        self.repairable = repairable
+        self.raw = raw
+        self.version = version
         super().__init__(message)
 
     def response(self) -> dict[str, object]:
         payload: dict[str, object] = {"status": self.status, "message": str(self)}
-        if self.path is not None:
-            payload["path"] = self.path
-        if self.latest is not None:
-            payload["latest"] = self.latest
-        if self.applied_paths:
-            payload["applied_paths"] = self.applied_paths
-        if self.current is not None:
-            payload["current"] = self.current
-        if self.limit is not None:
-            payload["limit"] = self.limit
-        if self.recovery is not None:
-            payload["recovery"] = self.recovery
+        optional: tuple[tuple[str, object | None], ...] = (
+            ("path", self.path),
+            ("latest", self.latest),
+            ("applied_paths", self.applied_paths or None),
+            ("current", self.current),
+            ("limit", self.limit),
+            ("recovery", self.recovery),
+            ("scope", self.scope),
+            ("repairable", self.repairable),
+            ("raw", self.raw),
+            ("version", self.version),
+        )
+        payload.update((key, value) for key, value in optional if value is not None)
         return payload

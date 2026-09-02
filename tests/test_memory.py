@@ -3,7 +3,9 @@ from __future__ import annotations
 import json
 import os
 import sys
+from datetime import date as calendar_date
 from pathlib import Path
+from typing import cast
 
 import pytest
 from pydantic import ValidationError
@@ -17,10 +19,13 @@ from keepygaga.memory import (
     DeleteFactOperation,
     DeletePageOperation,
     Fact,
+    FactSelector,
     MemoryDocument,
     MemoryStore,
     MoveOperation,
     RenameOperation,
+    RepairPageOperation,
+    StoredFact,
     UpdateFactOperation,
     UpdatePageOperation,
     initialize_memory_tree,
@@ -34,9 +39,10 @@ CONTRACT_ROOT = Path(__file__).resolve().parents[1] / "contracts" / "core-memory
 def test_memory_module_reexports_canonical_models_and_paths() -> None:
     assert memory_module.Basis is codec.Basis
     assert memory_module.Fact is codec.Fact
+    assert memory_module.FactSelector is codec.FactSelector
     assert memory_module.MemoryDocument is codec.MemoryDocument
+    assert memory_module.StoredFact is codec.StoredFact
     assert memory_module.MAX_FACT_CONTENT_CHARS == codec.MAX_FACT_CONTENT_CHARS
-    assert memory_module.PROFILE_FACT_CONTENT_LIMIT == codec.PROFILE_FACT_CONTENT_LIMIT
     assert memory_module.FACT_LINE_RE is codec.FACT_LINE_RE
     assert memory_module.FRONTMATTER_KEY_RE is codec.FRONTMATTER_KEY_RE
     assert memory_module.DYNAMIC_STEM_RE is paths.DYNAMIC_STEM_RE
@@ -56,32 +62,50 @@ def fact(content: str, basis: str = "stated") -> Fact:
     return Fact(basis=basis, content=content)  # type: ignore[arg-type]
 
 
+def selector(content: str, basis: str = "stated") -> FactSelector:
+    return FactSelector(basis=basis, content=content)  # type: ignore[arg-type]
+
+
 def test_core_memory_v1_contract_matches_current_page_format() -> None:
     documents = {
         "profile.md": MemoryDocument(
             name="profile",
             description="用户明确陈述的稳定身份、背景与长期角色。",
             aliases=("identity",),
-            facts=(fact("Contract profile fact."),),
+            facts=(
+                StoredFact(
+                    basis="stated",
+                    content="Contract profile fact.",
+                    date="2026-09-02",
+                ),
+            ),
         ),
         "preferences.md": MemoryDocument(
             name="preferences",
             description="用户希望 Agent 长期遵循的回应方式、工作偏好与条件检索偏好。",
             aliases=("working-style",),
-            facts=(fact("Contract preference fact."),),
+            facts=(
+                StoredFact(
+                    basis="stated",
+                    content="Contract preference fact.",
+                    date="2026-09-02",
+                ),
+            ),
         ),
     }
     for path, document in documents.items():
         canonical = (CONTRACT_ROOT / "canonical" / path).read_text(encoding="utf-8")
-        legacy = (CONTRACT_ROOT / "legacy-sources" / path).read_text(
-            encoding="utf-8"
-        )
+        legacy = (CONTRACT_ROOT / "legacy-sources" / path).read_text(encoding="utf-8")
         assert canonical == render_memory_file(document, path)
         assert parse_memory_file(canonical, path) == document
-        assert parse_memory_file(legacy, path) == document
+        legacy_document = parse_memory_file(legacy, path)
+        assert [fact.date for fact in legacy_document.facts] == [None]
+        assert [fact.content for fact in legacy_document.facts] == [
+            fact.content for fact in document.facts
+        ]
 
     manifest = json.loads((CONTRACT_ROOT / "contract.json").read_text(encoding="utf-8"))
-    assert manifest["schema_version"] == 1
+    assert manifest["schema_version"] == 2
     assert manifest["page_version"] == {
         "normalization": "crlf-and-cr-to-lf",
         "encoding": "utf-8",
@@ -92,16 +116,28 @@ def test_core_memory_v1_contract_matches_current_page_format() -> None:
         "line_pattern": codec.FACT_LINE_RE.pattern,
         "blank_lines": "ignored",
         "content_trim": "unicode-strip",
-        "max_content_chars": codec.MAX_FACT_CONTENT_CHARS,
-        "length_checked": "before-trim",
+        "max_write_content_chars": codec.MAX_FACT_CONTENT_CHARS,
+        "max_selector_content_chars": codec.MAX_STORED_FACT_CONTENT_CHARS,
+        "max_read_content_chars": codec.MAX_STORED_FACT_CONTENT_CHARS,
+        "length_checked": "after-trim",
         "duplicate_key": ["basis", "trimmed-content"],
-        "profile_path": "profile.md",
-        "profile_content_limit_chars": codec.PROFILE_FACT_CONTENT_LIMIT,
+        "date_suffix": " [YYYY-MM-DD]",
+        "legacy_date": None,
     }
-    assert manifest["limits"] == {"max_dynamic_pages": memory_module.MAX_DYNAMIC_PAGES}
+    assert manifest["limits"] == {
+        "max_dynamic_pages": memory_module.DYNAMIC_PAGE_LIMITS,
+        "max_description_chars": memory_module.MAX_DESCRIPTION_CHARS,
+        "max_aliases_per_page": memory_module.MAX_ALIASES_PER_PAGE,
+        "max_fixed_page_chars": memory_module.PROFILE_PAGE_LIMIT,
+        "max_dynamic_page_chars": memory_module.DYNAMIC_PAGE_LIMIT,
+        "max_read_paths": memory_module.MAX_READ_PATHS,
+        "max_mutation_operations": memory_module.MAX_MUTATION_OPERATIONS,
+        "max_facts_per_operation": memory_module.MAX_FACTS_PER_OPERATION,
+    }
     assert Fact(basis="stated", content="  padded  ").content == "padded"
+    assert len(Fact(basis="stated", content="  " + "x" * 800).content) == 800
     with pytest.raises(ValidationError):
-        Fact(basis="stated", content="  " + "x" * codec.MAX_FACT_CONTENT_CHARS)
+        Fact(basis="stated", content="x" * (codec.MAX_FACT_CONTENT_CHARS + 1))
     assert manifest["fixtures"] == {
         relative: codec.sha256_text(
             codec.normalize_text((CONTRACT_ROOT / relative).read_text(encoding="utf-8"))
@@ -115,7 +151,9 @@ def test_core_memory_v1_contract_matches_current_page_format() -> None:
     }
 
 
-def create(path: str, content: str, aliases: list[str] | None = None) -> CreateOperation:
+def create(
+    path: str, content: str, aliases: list[str] | None = None
+) -> CreateOperation:
     return CreateOperation(
         path=path,
         description=f"Route {path}.",
@@ -148,7 +186,9 @@ def test_fact_is_one_nonempty_line() -> None:
         fact("two\nlines")
 
 
-def test_initialize_creates_minimal_tree(memory_store: tuple[Path, MemoryStore]) -> None:
+def test_initialize_creates_minimal_tree(
+    memory_store: tuple[Path, MemoryStore],
+) -> None:
     root, _ = memory_store
     files = {
         path.relative_to(root).as_posix()
@@ -168,10 +208,15 @@ def test_initialize_creates_minimal_tree(memory_store: tuple[Path, MemoryStore])
     preferences = parse_memory_file(preferences_text, "preferences.md")
     assert profile.name == "profile"
     assert profile.description == "用户明确陈述的稳定身份、背景与长期角色。"
-    assert preferences.description == "用户希望 Agent 长期遵循的回应方式、工作偏好与条件检索偏好。"
+    assert (
+        preferences.description
+        == "用户希望 Agent 长期遵循的回应方式、工作偏好与条件检索偏好。"
+    )
 
 
-def test_initialize_returns_optional_onboarding_for_created_pages(tmp_path: Path) -> None:
+def test_initialize_returns_optional_onboarding_for_created_pages(
+    tmp_path: Path,
+) -> None:
     root = tmp_path / "memory"
     config = MemoryFilesConfig(root=str(root))
 
@@ -216,7 +261,7 @@ def test_initialize_never_overwrites_an_existing_page(tmp_path: Path) -> None:
             name="profile",
             description="Human-managed profile.",
             aliases=(),
-            facts=(fact("Human content."),),
+            facts=(StoredFact(basis="stated", content="Human content."),),
         ),
         "profile.md",
     )
@@ -243,7 +288,8 @@ def test_initialize_rejects_non_file_fixed_page(tmp_path: Path) -> None:
 
 
 def test_initialize_reports_created_directories_on_partial_failure(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     root = tmp_path / "memory"
     root.mkdir()
@@ -265,7 +311,8 @@ def test_initialize_reports_created_directories_on_partial_failure(
 
 
 def test_initialize_partial_file_commit_does_not_offer_onboarding(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     root = tmp_path / "memory"
     original_create = memory_module._exclusive_create
@@ -340,77 +387,108 @@ def test_legacy_sources_are_read_but_removed_on_write(
 
 def test_list_rejects_invalid_body(memory_store: tuple[Path, MemoryStore]) -> None:
     root, store = memory_store
-    page = root / "preferences.md"
+    page = root / "topics" / "broken.md"
     page.write_text(
-        page.read_text(encoding="utf-8") + "\nnot a fact\n", encoding="utf-8"
+        render_memory_file(
+            MemoryDocument(
+                name="broken",
+                description="Broken page.",
+                aliases=(),
+                facts=(),
+            ),
+            "topics/broken.md",
+        )
+        + "\nnot a fact\n",
+        encoding="utf-8",
     )
-    result = store.list_files()
+    result = store.list_files("topics")
     assert result["status"] == "invalid_source"
-    assert result["path"] == "preferences.md"
+    assert result["path"] == "topics/broken.md"
+    assert result["repairable"] is False
+    assert store.list_files("areas") == {"status": "ok", "files": []}
 
 
 def test_list_rejects_oversized_fact(memory_store: tuple[Path, MemoryStore]) -> None:
     root, store = memory_store
-    page = root / "preferences.md"
+    page = root / "topics" / "oversized.md"
     page.write_text(
-        page.read_text(encoding="utf-8") + f"\n- [stated] {chr(120) * 4097}\n",
+        "---\nname: oversized\ndescription: oversized\naliases: []\n---\n\n"
+        f"- [stated] {chr(120) * 4097}\n",
         encoding="utf-8",
     )
-    result = store.list_files()
+    result = store.list_files("topics")
     assert result["status"] == "invalid_source"
-    assert result["path"] == "preferences.md"
+    assert result["path"] == "topics/oversized.md"
 
 
-def test_list_rejects_padded_frontmatter_fence(memory_store: tuple[Path, MemoryStore]) -> None:
+def test_list_rejects_padded_frontmatter_fence(
+    memory_store: tuple[Path, MemoryStore],
+) -> None:
     root, store = memory_store
-    page = root / "profile.md"
+    page = root / "topics" / "padded.md"
     nl = chr(10)
     page.write_text(
-        "---" + nl
-        + "name: profile" + nl
-        + "description: desc" + nl
-        + "aliases: []" + nl
-        + "---   " + nl
-        + "- [stated] x" + nl
-        + "---" + nl,
+        "---"
+        + nl
+        + "name: padded"
+        + nl
+        + "description: desc"
+        + nl
+        + "aliases: []"
+        + nl
+        + "---   "
+        + nl
+        + "- [stated] x"
+        + nl
+        + "---"
+        + nl,
         encoding="utf-8",
     )
-    listed = store.list_files()
+    listed = store.list_files("topics")
     assert listed["status"] == "invalid_source"
-    assert listed["path"] == "profile.md"
+    assert listed["path"] == "topics/padded.md"
     other = store.read(["preferences.md"])
-    assert other["status"] == "invalid_source"
-    assert other["path"] == "profile.md"
+    assert other["status"] == "ok"
 
 
-def test_list_rejects_unicode_line_separator_fence(memory_store: tuple[Path, MemoryStore]) -> None:
+def test_list_rejects_unicode_line_separator_fence(
+    memory_store: tuple[Path, MemoryStore],
+) -> None:
     root, store = memory_store
-    page = root / "profile.md"
+    page = root / "people" / "broken.md"
     nl = chr(10)
     page.write_text(
-        "---" + nl
-        + "name: profile" + nl
-        + "description: desc" + nl
-        + "aliases: []" + chr(0x2028) + "---" + nl,
+        "---"
+        + nl
+        + "name: broken"
+        + nl
+        + "description: desc"
+        + nl
+        + "aliases: []"
+        + chr(0x2028)
+        + "---"
+        + nl,
         encoding="utf-8",
     )
-    listed = store.list_files()
+    listed = store.list_files("people")
     assert listed["status"] == "invalid_source"
-    assert listed["path"] == "profile.md"
+    assert listed["path"] == "people/broken.md"
     other = store.read(["preferences.md"])
-    assert other["status"] == "invalid_source"
-    assert other["path"] == "profile.md"
+    assert other["status"] == "ok"
 
 
 def test_list_is_minimal_and_read_is_structured(
     memory_store: tuple[Path, MemoryStore],
 ) -> None:
     _, store = memory_store
-    assert store.create([create("topics/ai.md", "AI fact.", ["人工智能"])])["status"] == "applied"
-    listed = store.list_files()
+    assert (
+        store.create([create("topics/ai.md", "AI fact.", ["人工智能"])])["status"]
+        == "applied"
+    )
+    listed = store.list_files("topics")
     assert listed["status"] == "ok"
     by_path = {item["path"]: item for item in listed["files"]}  # type: ignore[index]
-    assert set(by_path["profile.md"]) == {"path", "description"}
+    assert set(by_path["topics/ai.md"]) == {"path", "description", "aliases"}
     assert by_path["topics/ai.md"]["aliases"] == ["人工智能"]
     item = read_file(store, "topics/ai.md")
     assert set(item) == {
@@ -426,7 +504,7 @@ def test_list_is_minimal_and_read_is_structured(
 def test_read_rejects_invalid_count(memory_store: tuple[Path, MemoryStore]) -> None:
     _, store = memory_store
     assert store.read([])["status"] == "invalid_entry"
-    assert store.read(["profile.md"] * 21)["status"] == "invalid_entry"
+    assert store.read(["profile.md"] * 16)["status"] == "invalid_entry"
 
 
 def test_create_add_update_and_page_metadata(
@@ -472,9 +550,10 @@ def test_create_add_update_and_page_metadata(
     item = read_file(store, "areas/work.md")
     assert item["description"] == "Work context."
     assert item["aliases"] == ["工作"]
+    today = calendar_date.today().isoformat()
     assert item["facts"] == [
-        {"basis": "stated", "content": "Refined first fact."},
-        {"basis": "stated", "content": "Second fact."},
+        {"basis": "stated", "content": "Refined first fact.", "date": today},
+        {"basis": "stated", "content": "Second fact.", "date": today},
     ]
 
 
@@ -525,7 +604,11 @@ def test_observed_fact_can_be_promoted_to_stated(
 
     assert result["status"] == "applied"
     assert read_file(store, "preferences.md")["facts"] == [
-        {"basis": "stated", "content": "Prefers concise answers."}
+        {
+            "basis": "stated",
+            "content": "Prefers concise answers.",
+            "date": calendar_date.today().isoformat(),
+        }
     ]
 
 
@@ -572,8 +655,7 @@ def test_write_conflict_latest_can_be_reused_without_read(
     stale = version(store, "profile.md")
     page = root / "profile.md"
     page.write_text(
-        page.read_text(encoding="utf-8").rstrip()
-        + "\n- [stated] Human edit.\n",
+        page.read_text(encoding="utf-8").rstrip() + "\n- [stated] Human edit.\n",
         encoding="utf-8",
     )
 
@@ -601,29 +683,34 @@ def test_page_snapshots_preserve_capacity_signal(
     memory_store: tuple[Path, MemoryStore],
 ) -> None:
     root, store = memory_store
-    applied = store.add(
-        [
-            AddOperation(
-                path="preferences.md",
-                if_version=version(store, "preferences.md"),
-                facts=[fact("x" * 2100)],
-            )
-        ]
-    )
-    snapshot = applied["files"][0]  # type: ignore[index]
-    assert snapshot["split_recommended"] is True
-
     page = root / "preferences.md"
     page.write_text(
-        page.read_text(encoding="utf-8").rstrip()
-        + "\n- [stated] Concurrent edit.\n",
+        render_memory_file(
+            MemoryDocument(
+                name="preferences",
+                description="Preferences.",
+                aliases=(),
+                facts=tuple(
+                    StoredFact(basis="stated", content=str(index) * 700)
+                    for index in range(3)
+                ),
+            ),
+            "preferences.md",
+        ),
+        encoding="utf-8",
+    )
+    snapshot = read_file(store, "preferences.md")
+    assert snapshot["split_recommended"] is True
+
+    page.write_text(
+        page.read_text(encoding="utf-8").rstrip() + "\n- [stated] Concurrent edit.\n",
         encoding="utf-8",
     )
     conflicted = store.add(
         [
             AddOperation(
                 path="preferences.md",
-                if_version=snapshot["version"],
+                if_version=str(snapshot["version"]),
                 facts=[fact("Agent edit.")],
             )
         ]
@@ -646,8 +733,7 @@ def test_edit_during_commit_is_detected(
         original_verify(initial, changed_paths)
         if changed_paths == ["profile.md"] and not edited:
             page.write_text(
-                page.read_text(encoding="utf-8").rstrip()
-                + "\n- [stated] Late edit.\n",
+                page.read_text(encoding="utf-8").rstrip() + "\n- [stated] Late edit.\n",
                 encoding="utf-8",
             )
             edited = True
@@ -676,9 +762,20 @@ def test_edit_during_commit_is_detected(
 
 def test_move_fact(memory_store: tuple[Path, MemoryStore]) -> None:
     _, store = memory_store
-    assert store.create(
-        [create("topics/source.md", "Move me."), create("areas/destination.md", "Keep me.")]
-    )["status"] == "applied"
+    assert (
+        store.create(
+            [
+                CreateOperation(
+                    path="topics/source.md",
+                    description="Source.",
+                    aliases=[],
+                    facts=[fact("Stay."), fact("Move me.")],
+                ),
+                create("areas/destination.md", "Keep me."),
+            ]
+        )["status"]
+        == "applied"
+    )
     moved = store.move(
         [
             MoveOperation(
@@ -691,7 +788,9 @@ def test_move_fact(memory_store: tuple[Path, MemoryStore]) -> None:
         ]
     )
     assert moved["status"] == "applied"
-    assert read_file(store, "topics/source.md")["facts"] == []
+    source_facts = read_file(store, "topics/source.md")["facts"]
+    assert isinstance(source_facts, list)
+    assert [item["content"] for item in source_facts] == ["Stay."]
     destination_facts = read_file(store, "areas/destination.md")["facts"]
     assert isinstance(destination_facts, list)
     assert {item["content"] for item in destination_facts} == {
@@ -715,17 +814,20 @@ def test_move_multiple_facts_between_same_pages_in_one_operation(
     memory_store: tuple[Path, MemoryStore],
 ) -> None:
     _, store = memory_store
-    assert store.create(
-        [
-            CreateOperation(
-                path="topics/source.md",
-                description="Move related facts together.",
-                aliases=[],
-                facts=[fact("Move one."), fact("Move two.")],
-            ),
-            create("areas/destination.md", "Keep me."),
-        ]
-    )["status"] == "applied"
+    assert (
+        store.create(
+            [
+                CreateOperation(
+                    path="topics/source.md",
+                    description="Move related facts together.",
+                    aliases=[],
+                    facts=[fact("Stay."), fact("Move one."), fact("Move two.")],
+                ),
+                create("areas/destination.md", "Keep me."),
+            ]
+        )["status"]
+        == "applied"
+    )
 
     moved = store.move(
         [
@@ -740,7 +842,9 @@ def test_move_multiple_facts_between_same_pages_in_one_operation(
     )
 
     assert moved["status"] == "applied"
-    assert read_file(store, "topics/source.md")["facts"] == []
+    source_facts = read_file(store, "topics/source.md")["facts"]
+    assert isinstance(source_facts, list)
+    assert [item["content"] for item in source_facts] == ["Stay."]
     destination_facts = read_file(store, "areas/destination.md")["facts"]
     assert isinstance(destination_facts, list)
     assert [item["content"] for item in destination_facts] == [
@@ -757,17 +861,20 @@ def test_move_duplicate_page_in_batch_explains_recovery(
     memory_store: tuple[Path, MemoryStore],
 ) -> None:
     _, store = memory_store
-    assert store.create(
-        [
-            CreateOperation(
-                path="topics/source.md",
-                description="Source.",
-                aliases=[],
-                facts=[fact("Move one."), fact("Move two.")],
-            ),
-            create("areas/destination.md", "Keep me."),
-        ]
-    )["status"] == "applied"
+    assert (
+        store.create(
+            [
+                CreateOperation(
+                    path="topics/source.md",
+                    description="Source.",
+                    aliases=[],
+                    facts=[fact("Move one."), fact("Move two.")],
+                ),
+                create("areas/destination.md", "Keep me."),
+            ]
+        )["status"]
+        == "applied"
+    )
     source_version = version(store, "topics/source.md")
     destination_version = version(store, "areas/destination.md")
 
@@ -804,12 +911,15 @@ def test_move_multiple_facts_is_preflighted_before_commit(
     memory_store: tuple[Path, MemoryStore],
 ) -> None:
     _, store = memory_store
-    assert store.create(
-        [
-            create("topics/source.md", "Move me."),
-            create("areas/destination.md", "Keep me."),
-        ]
-    )["status"] == "applied"
+    assert (
+        store.create(
+            [
+                create("topics/source.md", "Move me."),
+                create("areas/destination.md", "Keep me."),
+            ]
+        )["status"]
+        == "applied"
+    )
 
     result = store.move(
         [
@@ -837,12 +947,15 @@ def test_rename_is_local_and_preserves_old_name_as_alias(
     memory_store: tuple[Path, MemoryStore],
 ) -> None:
     root, store = memory_store
-    assert store.create(
-        [
-            create("topics/source.md", "Source fact."),
-            create("areas/reference.md", "See [[topics/source]]."),
-        ]
-    )["status"] == "applied"
+    assert (
+        store.create(
+            [
+                create("topics/source.md", "Source fact."),
+                create("areas/reference.md", "See [[topics/source]]."),
+            ]
+        )["status"]
+        == "applied"
+    )
     reference_before = (root / "areas/reference.md").read_text(encoding="utf-8")
     renamed = store.rename(
         [
@@ -874,9 +987,12 @@ def test_rename_can_promote_an_existing_alias(
     memory_store: tuple[Path, MemoryStore],
 ) -> None:
     _, store = memory_store
-    assert store.create(
-        [create("topics/source.md", "Source fact.", ["assistant"])]
-    )["status"] == "applied"
+    assert (
+        store.create([create("topics/source.md", "Source fact.", ["assistant"])])[
+            "status"
+        ]
+        == "applied"
+    )
     renamed = store.rename(
         [
             RenameOperation(
@@ -914,7 +1030,10 @@ def test_delete_requires_authorization_and_protects_fixed_pages(
         ]
     )
     assert fixed["status"] == "invalid_path"
-    assert store.create([create("topics/delete.md", "Delete fact.")])["status"] == "applied"
+    assert (
+        store.create([create("topics/delete.md", "Delete fact.")])["status"]
+        == "applied"
+    )
     deleted_fact = store.delete(
         [
             DeleteFactOperation(
@@ -941,7 +1060,9 @@ def test_delete_requires_authorization_and_protects_fixed_pages(
     assert deleted_page["files"] == []
 
 
-def test_catalog_rejects_alias_collision(memory_store: tuple[Path, MemoryStore]) -> None:
+def test_catalog_allows_cross_page_alias_collision(
+    memory_store: tuple[Path, MemoryStore],
+) -> None:
     _, store = memory_store
     result = store.create(
         [
@@ -949,22 +1070,27 @@ def test_catalog_rejects_alias_collision(memory_store: tuple[Path, MemoryStore])
             create("topics/two.md", "Two.", ["Shared"]),
         ]
     )
-    assert result["status"] == "invalid_entry"
-    assert store.read(["topics/one.md"])["status"] == "not_found"
+    assert result["status"] == "applied"
+    listed = store.list_files("topics")
+    assert [item["aliases"] for item in listed["files"]] == [  # type: ignore[index]
+        ["shared"],
+        ["Shared"],
+    ]
 
 
-def test_profile_hard_limit(memory_store: tuple[Path, MemoryStore]) -> None:
+def test_fixed_page_hard_limit(memory_store: tuple[Path, MemoryStore]) -> None:
     _, store = memory_store
     result = store.add(
         [
             AddOperation(
                 path="profile.md",
                 if_version=version(store, "profile.md"),
-                facts=[fact("x" * 301)],
+                facts=[fact(str(index) * 650) for index in range(3)],
             )
         ]
     )
-    assert result["status"] == "invalid_entry"
+    assert result["status"] == "capacity_exceeded"
+    assert result["limit"] == 2000
 
 
 def test_canonical_paths_and_symlinks_are_rejected(
@@ -977,7 +1103,7 @@ def test_canonical_paths_and_symlinks_are_rejected(
     topics = root / "topics"
     topics.rmdir()
     topics.symlink_to(outside, target_is_directory=True)
-    assert store.list_files()["status"] == "invalid_source"
+    assert store.list_files("topics")["status"] == "invalid_source"
 
 
 def test_legacy_environment_is_outside_catalog(
@@ -987,17 +1113,22 @@ def test_legacy_environment_is_outside_catalog(
     environment = root / "environment"
     environment.mkdir()
     (environment / "macos.md").write_text("ignored\n", encoding="utf-8")
-    listed = store.list_files()
+    listed = store.list_files("topics")
     assert listed["status"] == "ok"
     assert "environment/macos.md" not in {
-        item["path"] for item in listed["files"]  # type: ignore[index]
+        item["path"]
+        for item in listed["files"]  # type: ignore[index]
     }
 
 
-def test_changed_pages_are_canonicalized(memory_store: tuple[Path, MemoryStore]) -> None:
+def test_changed_pages_are_canonicalized(
+    memory_store: tuple[Path, MemoryStore],
+) -> None:
     root, store = memory_store
     page = root / "preferences.md"
-    text = page.read_text(encoding="utf-8").replace("name: \"preferences\"", "name: preferences")
+    text = page.read_text(encoding="utf-8").replace(
+        'name: "preferences"', "name: preferences"
+    )
     page.write_text(text, encoding="utf-8")
     result = store.add(
         [
@@ -1012,7 +1143,9 @@ def test_changed_pages_are_canonicalized(memory_store: tuple[Path, MemoryStore])
     assert 'name: "preferences"' in page.read_text(encoding="utf-8")
 
 
-def test_applied_mutations_return_receipts(memory_store: tuple[Path, MemoryStore]) -> None:
+def test_applied_mutations_return_receipts(
+    memory_store: tuple[Path, MemoryStore],
+) -> None:
     _, store = memory_store
     result = store.create([create("topics/receipt.md", "Receipt fact.")])
     assert result["status"] == "applied"
@@ -1051,6 +1184,7 @@ def test_applied_files_can_chain_mutations_without_read(
     assert updated["files"][0]["facts"][-1] == {  # type: ignore[index]
         "basis": "stated",
         "content": "Refined preference.",
+        "date": calendar_date.today().isoformat(),
     }
 
 
@@ -1088,7 +1222,9 @@ def test_read_rejects_duplicate_paths(memory_store: tuple[Path, MemoryStore]) ->
     assert store.read(["profile.md", "profile.md"])["status"] == "invalid_entry"
 
 
-@pytest.mark.skipif(sys.platform == 'win32', reason='Windows does not support POSIX file modes')
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="Windows does not support POSIX file modes"
+)
 def test_mutation_preserves_existing_file_mode(
     memory_store: tuple[Path, MemoryStore],
 ) -> None:
@@ -1112,9 +1248,20 @@ def test_interrupted_move_duplicates_before_it_can_lose_a_fact(
     memory_store: tuple[Path, MemoryStore], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     root, store = memory_store
-    assert store.create(
-        [create("topics/source.md", "Move safely."), create("areas/destination.md", "Keep.")]
-    )["status"] == "applied"
+    assert (
+        store.create(
+            [
+                CreateOperation(
+                    path="topics/source.md",
+                    description="Safe source.",
+                    aliases=[],
+                    facts=[fact("Stay safely."), fact("Move safely.")],
+                ),
+                create("areas/destination.md", "Keep."),
+            ]
+        )["status"]
+        == "applied"
+    )
     original_replace = os.replace
 
     def fail_source_replace(source: str | Path, destination: str | Path) -> None:
@@ -1190,26 +1337,33 @@ def test_add_duplicate_path_in_batch_returns_duplicate_target(
     assert "First fact." not in content
     assert "Second fact." not in content
 
-@pytest.mark.skipif(sys.platform == 'win32', reason='Windows does not support POSIX file modes')
+
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="Windows does not support POSIX file modes"
+)
 def test_initialize_uses_private_posix_modes(tmp_path: Path) -> None:
     root = tmp_path / "nested" / "memory"
     result = initialize_memory_tree(root, MemoryFilesConfig(root=str(root)))
     assert result["status"] == "applied"
     assert root.stat().st_mode & 0o777 == memory_module.NEW_DIRECTORY_MODE
     for directory in ("topics", "areas", "people"):
-        assert (root / directory).stat().st_mode & 0o777 == memory_module.NEW_DIRECTORY_MODE
+        assert (
+            root / directory
+        ).stat().st_mode & 0o777 == memory_module.NEW_DIRECTORY_MODE
     for relative in ("profile.md", "preferences.md", ".keepygaga.lock"):
         assert (root / relative).stat().st_mode & 0o777 == memory_module.NEW_FILE_MODE
 
 
-@pytest.mark.skipif(sys.platform == 'win32', reason='Windows does not support POSIX file modes')
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="Windows does not support POSIX file modes"
+)
 def test_existing_overbroad_lock_mode_is_preserved(
     memory_store: tuple[Path, MemoryStore],
 ) -> None:
     root, store = memory_store
     lock_path = root / ".keepygaga.lock"
     lock_path.chmod(0o644)
-    listed = store.list_files()
+    listed = store.list_files("topics")
     assert listed["status"] == "ok"
     assert lock_path.stat().st_mode & 0o777 == 0o644
     inspected = store.inspect()
@@ -1218,19 +1372,23 @@ def test_existing_overbroad_lock_mode_is_preserved(
     assert any(item["path"] == str(lock_path) for item in warnings)  # type: ignore[index]
 
 
-@pytest.mark.skipif(sys.platform == 'win32', reason='Windows does not support POSIX file modes')
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="Windows does not support POSIX file modes"
+)
 def test_missing_lock_is_recreated_with_private_mode(
     memory_store: tuple[Path, MemoryStore],
 ) -> None:
     root, store = memory_store
     lock_path = root / ".keepygaga.lock"
     lock_path.unlink()
-    listed = store.list_files()
+    listed = store.list_files("topics")
     assert listed["status"] == "ok"
     assert lock_path.stat().st_mode & 0o777 == memory_module.NEW_FILE_MODE
 
 
-@pytest.mark.skipif(sys.platform == 'win32', reason='Windows does not support POSIX file modes')
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="Windows does not support POSIX file modes"
+)
 def test_create_uses_private_posix_mode_without_changing_existing_pages(
     memory_store: tuple[Path, MemoryStore],
 ) -> None:
@@ -1239,7 +1397,9 @@ def test_create_uses_private_posix_mode_without_changing_existing_pages(
     profile.chmod(0o644)
     result = store.create([create("topics/private.md", "New private page.")])
     assert result["status"] == "applied"
-    assert (root / "topics/private.md").stat().st_mode & 0o777 == memory_module.NEW_FILE_MODE
+    assert (
+        root / "topics/private.md"
+    ).stat().st_mode & 0o777 == memory_module.NEW_FILE_MODE
     assert profile.stat().st_mode & 0o777 == 0o644
 
 
@@ -1247,10 +1407,10 @@ def test_create_rejects_more_than_max_dynamic_pages(
     memory_store: tuple[Path, MemoryStore],
 ) -> None:
     _, store = memory_store
-    existing = memory_module.MAX_DYNAMIC_PAGES - 1
+    limit = memory_module.DYNAMIC_PAGE_LIMITS["topics"]
+    existing = limit - 1
     for index in range(existing):
-        directory = ("topics", "areas", "people")[index % 3]
-        path = f"{directory}/page-{index}.md"
+        path = f"topics/page-{index}.md"
         assert store.create([create(path, f"Fact {index}.")])["status"] == "applied"
     overflow = store.create(
         [
@@ -1260,27 +1420,28 @@ def test_create_rejects_more_than_max_dynamic_pages(
     )
     assert overflow["status"] == "capacity_exceeded"
     assert overflow["current"] == existing
-    assert overflow["limit"] == memory_module.MAX_DYNAMIC_PAGES
+    assert overflow["limit"] == limit
+    assert overflow["scope"] == "topics"
     assert "topics/limit-a.md" not in {
-        item["path"] for item in store.list_files()["files"]  # type: ignore[index]
+        item["path"]
+        for item in store.list_files("topics")["files"]  # type: ignore[index]
     }
     allowed = store.create([create("topics/limit-a.md", "Last allowed.")])
     assert allowed["status"] == "applied"
     blocked = store.create([create("topics/limit-b.md", "Over the limit.")])
     assert blocked["status"] == "capacity_exceeded"
-    assert blocked["current"] == memory_module.MAX_DYNAMIC_PAGES
-    listed = store.list_files()
+    assert blocked["current"] == limit
+    listed = store.list_files("topics")
     assert listed["status"] == "ok"
-
 
 
 def test_create_capacity_check_runs_after_path_validation(
     memory_store: tuple[Path, MemoryStore],
 ) -> None:
     _, store = memory_store
-    for index in range(memory_module.MAX_DYNAMIC_PAGES):
-        directory = ("topics", "areas", "people")[index % 3]
-        path = f"{directory}/page-{index}.md"
+    limit = memory_module.DYNAMIC_PAGE_LIMITS["topics"]
+    for index in range(limit):
+        path = f"topics/page-{index}.md"
         assert store.create([create(path, f"Fact {index}.")])["status"] == "applied"
     invalid = store.create([create("profile.md", "Fixed page.")])
     assert invalid["status"] == "invalid_path"
@@ -1294,7 +1455,8 @@ def test_existing_tree_over_dynamic_page_limit_remains_readable(
     memory_store: tuple[Path, MemoryStore],
 ) -> None:
     root, store = memory_store
-    for index in range(memory_module.MAX_DYNAMIC_PAGES + 1):
+    limit = memory_module.DYNAMIC_PAGE_LIMITS["topics"]
+    for index in range(limit + 1):
         path = root / "topics" / f"manual-{index}.md"
         path.write_text(
             render_memory_file(
@@ -1302,7 +1464,9 @@ def test_existing_tree_over_dynamic_page_limit_remains_readable(
                     name=f"manual-{index}",
                     description=f"Manual page {index}.",
                     aliases=(),
-                    facts=(fact(f"Manual fact {index}."),),
+                    facts=(
+                        StoredFact(basis="stated", content=f"Manual fact {index}."),
+                    ),
                 ),
                 f"topics/manual-{index}.md",
             ),
@@ -1310,9 +1474,11 @@ def test_existing_tree_over_dynamic_page_limit_remains_readable(
         )
     inspected = store.inspect()
     assert inspected["status"] == "ok"
-    assert inspected["dynamic_pages"] == memory_module.MAX_DYNAMIC_PAGES + 1
-    assert inspected["dynamic_page_limit_exceeded"] is True
-    listed = store.list_files()
+    dynamic_pages = cast(dict[str, int], inspected["dynamic_pages"])
+    exceeded = cast(dict[str, bool], inspected["dynamic_page_limit_exceeded"])
+    assert dynamic_pages["topics"] == limit + 1
+    assert exceeded["topics"] is True
+    listed = store.list_files("topics")
     assert listed["status"] == "ok"
     first = read_file(store, "topics/manual-0.md")
     renamed = store.rename(
@@ -1327,3 +1493,354 @@ def test_existing_tree_over_dynamic_page_limit_remains_readable(
     assert renamed["status"] == "applied"
     blocked = store.create([create("topics/another.md", "Still blocked.")])
     assert blocked["status"] == "capacity_exceeded"
+
+
+def test_fact_dates_are_optional_validated_and_rendered() -> None:
+    legacy = MemoryDocument(
+        name="example",
+        description="Example.",
+        aliases=(),
+        facts=(StoredFact(basis="stated", content="Legacy."),),
+    )
+    assert "- [stated] Legacy.\n" in render_memory_file(legacy, "topics/example.md")
+    dated = MemoryDocument(
+        name="example",
+        description="Example.",
+        aliases=(),
+        facts=(
+            StoredFact(
+                basis="observed",
+                content="Dated inference.",
+                date="2026-09-02",
+            ),
+        ),
+    )
+    rendered = render_memory_file(dated, "topics/example.md")
+    assert "- [observed] Dated inference. [2026-09-02]\n" in rendered
+    assert parse_memory_file(rendered, "topics/example.md") == dated
+    invalid = rendered.replace("2026-09-02", "2026-02-30")
+    with pytest.raises(memory_module.MemoryValidationError):
+        parse_memory_file(invalid, "topics/example.md")
+
+
+def test_mutation_date_is_captured_once_and_move_preserves_it(
+    memory_store: tuple[Path, MemoryStore], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, store = memory_store
+    calls = 0
+
+    def fixed_date() -> str:
+        nonlocal calls
+        calls += 1
+        return "2030-01-02"
+
+    monkeypatch.setattr(memory_module, "_local_date", fixed_date)
+    created = store.create(
+        [
+            CreateOperation(
+                path="people/person.md",
+                description="Known person.",
+                aliases=["P"],
+                facts=[fact("Core fact."), fact("Work fact.", "observed")],
+            )
+        ]
+    )
+    assert created["status"] == "applied"
+    assert calls == 1
+    monkeypatch.setattr(
+        memory_module,
+        "_local_date",
+        lambda: pytest.fail("move must not generate a new Fact date"),
+    )
+    moved = store.move(
+        [
+            MoveOperation(
+                source_path="people/person.md",
+                source_version=version(store, "people/person.md"),
+                new_path="people/person-work.md",
+                description="Work context for this person.",
+                aliases=["P"],
+                facts=[fact("Work fact.", "observed")],
+            )
+        ]
+    )
+    assert moved["status"] == "applied"
+    destination = read_file(store, "people/person-work.md")
+    assert destination["facts"] == [
+        {
+            "basis": "observed",
+            "content": "Work fact.",
+            "date": "2030-01-02",
+        }
+    ]
+    source = read_file(store, "people/person.md")
+    assert source["facts"] == [
+        {"basis": "stated", "content": "Core fact.", "date": "2030-01-02"}
+    ]
+
+
+def test_legacy_long_fact_can_be_selected_for_move_and_update(
+    memory_store: tuple[Path, MemoryStore], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root, store = memory_store
+    long_content = "L" * 900
+    with pytest.raises(ValidationError):
+        fact(long_content)
+    legacy = root / "topics" / "legacy-long.md"
+    legacy.write_text(
+        render_memory_file(
+            MemoryDocument(
+                name="legacy-long",
+                description="Legacy long Fact.",
+                aliases=(),
+                facts=(
+                    StoredFact(basis="stated", content="Keep me."),
+                    StoredFact(basis="observed", content=long_content),
+                ),
+            ),
+            "topics/legacy-long.md",
+        ),
+        encoding="utf-8",
+    )
+    moved = store.move(
+        [
+            MoveOperation(
+                source_path="topics/legacy-long.md",
+                source_version=version(store, "topics/legacy-long.md"),
+                new_path="topics/legacy-long-detail.md",
+                description="Legacy detail.",
+                aliases=[],
+                facts=[selector(long_content, "observed")],
+            )
+        ]
+    )
+    assert moved["status"] == "applied"
+    destination = read_file(store, "topics/legacy-long-detail.md")
+    assert destination["facts"] == [
+        {"basis": "observed", "content": long_content, "date": None}
+    ]
+    monkeypatch.setattr(memory_module, "_local_date", lambda: "2031-04-05")
+    refined = store.update(
+        [
+            UpdateFactOperation(
+                path="topics/legacy-long-detail.md",
+                if_version=str(destination["version"]),
+                target="fact",
+                old_fact=selector(long_content, "observed"),
+                new_fact=fact("Refined legacy detail.", "observed"),
+            )
+        ]
+    )
+    assert refined["status"] == "applied"
+    assert read_file(store, "topics/legacy-long-detail.md")["facts"] == [
+        {
+            "basis": "observed",
+            "content": "Refined legacy detail.",
+            "date": "2031-04-05",
+        }
+    ]
+
+
+def test_scoped_list_is_sorted_isolated_and_has_constant_aliases(
+    memory_store: tuple[Path, MemoryStore],
+) -> None:
+    root, store = memory_store
+    assert (
+        store.create(
+            [create("topics/zeta.md", "Zeta."), create("topics/alpha.md", "Alpha.")]
+        )["status"]
+        == "applied"
+    )
+    (root / "areas" / "broken.md").write_text("not frontmatter\n", encoding="utf-8")
+
+    listed = store.list_files("topics")
+
+    assert listed == {
+        "status": "ok",
+        "files": [
+            {
+                "path": "topics/alpha.md",
+                "description": "Route topics/alpha.md.",
+                "aliases": [],
+            },
+            {
+                "path": "topics/zeta.md",
+                "description": "Route topics/zeta.md.",
+                "aliases": [],
+            },
+        ],
+    }
+    assert store.list_files("areas")["status"] == "invalid_source"
+
+
+def test_scoped_list_reports_unreadable_page_path_and_manual_recovery(
+    memory_store: tuple[Path, MemoryStore],
+) -> None:
+    root, store = memory_store
+    (root / "people" / "broken.md").write_bytes(b"\xff")
+
+    failure = store.list_files("people")
+
+    assert failure["status"] == "invalid_source"
+    assert failure["path"] == "people/broken.md"
+    assert failure["repairable"] is False
+    assert "Fix the exact page manually" in str(failure["recovery"])
+
+
+def test_repair_is_explicit_versioned_and_semantics_preserving(
+    memory_store: tuple[Path, MemoryStore],
+) -> None:
+    root, store = memory_store
+    page = root / "topics" / "repairable.md"
+    original = (
+        "---\n"
+        'aliases: ["same", "same", "repairable"]\n'
+        'description: "Repairable page."\n'
+        'name: "repairable"\n'
+        "---\n\n"
+        "- [stated] Keep this fact.\n"
+        "- [stated] Keep this fact.\n"
+    )
+    page.write_text(original, encoding="utf-8")
+
+    failure = store.list_files("topics")
+
+    assert failure["status"] == "invalid_source"
+    assert failure["repairable"] is True
+    assert failure["raw"] == original
+    assert page.read_text(encoding="utf-8") == original
+    repaired = store.update(
+        [
+            RepairPageOperation(
+                path="topics/repairable.md",
+                if_version=str(failure["version"]),
+                target="repair",
+            )
+        ]
+    )
+    assert repaired["status"] == "applied"
+    item = read_file(store, "topics/repairable.md")
+    assert item["aliases"] == ["same"]
+    assert item["facts"] == [
+        {"basis": "stated", "content": "Keep this fact.", "date": None}
+    ]
+
+
+def test_agent_metadata_limits_do_not_invalidate_legacy_pages(
+    memory_store: tuple[Path, MemoryStore],
+) -> None:
+    root, store = memory_store
+    CreateOperation(
+        path="topics/eighty.md",
+        description="  " + "x" * 80 + "  ",
+        aliases=[str(index) for index in range(6)],
+        facts=[fact("Allowed.")],
+    )
+    with pytest.raises(ValidationError):
+        CreateOperation(
+            path="topics/too-long.md",
+            description="x" * 81,
+            aliases=[],
+            facts=[fact("Rejected.")],
+        )
+    with pytest.raises(ValidationError):
+        CreateOperation(
+            path="topics/too-many.md",
+            description="Aliases.",
+            aliases=[str(index) for index in range(7)],
+            facts=[fact("Rejected.")],
+        )
+    legacy = root / "topics" / "legacy.md"
+    legacy.write_text(
+        render_memory_file(
+            MemoryDocument(
+                name="legacy",
+                description="d" * 81,
+                aliases=tuple(str(index) for index in range(7)),
+                facts=(StoredFact(basis="stated", content="Readable."),),
+            ),
+            "topics/legacy.md",
+        ),
+        encoding="utf-8",
+    )
+    assert store.list_files("topics")["status"] == "ok"
+    snapshot = read_file(store, "topics/legacy.md")
+    rename_blocked = store.rename(
+        [
+            RenameOperation(
+                path="topics/legacy.md",
+                if_version=str(snapshot["version"]),
+                new_path="topics/legacy-renamed.md",
+            )
+        ]
+    )
+    assert rename_blocked["status"] == "invalid_entry"
+    partial_metadata_update = store.update(
+        [
+            UpdatePageOperation(
+                path="topics/legacy.md",
+                if_version=str(snapshot["version"]),
+                target="page",
+                description="Converged description.",
+            )
+        ]
+    )
+    assert partial_metadata_update["status"] == "invalid_entry"
+    converged = store.update(
+        [
+            UpdatePageOperation(
+                path="topics/legacy.md",
+                if_version=str(snapshot["version"]),
+                target="page",
+                description="Converged description.",
+                aliases=[str(index) for index in range(6)],
+            )
+        ]
+    )
+    assert converged["status"] == "applied"
+
+
+def test_dynamic_page_limit_rejects_growth_but_allows_reduction(
+    memory_store: tuple[Path, MemoryStore],
+) -> None:
+    root, store = memory_store
+    page = root / "topics" / "over.md"
+    page.write_text(
+        render_memory_file(
+            MemoryDocument(
+                name="over",
+                description="Over capacity.",
+                aliases=(),
+                facts=tuple(
+                    StoredFact(basis="stated", content=str(index) * 700)
+                    for index in range(7)
+                ),
+            ),
+            "topics/over.md",
+        ),
+        encoding="utf-8",
+    )
+    assert read_file(store, "topics/over.md")["split_recommended"] is True
+    blocked = store.add(
+        [
+            AddOperation(
+                path="topics/over.md",
+                if_version=version(store, "topics/over.md"),
+                facts=[fact("Cannot grow.")],
+            )
+        ]
+    )
+    assert blocked["status"] == "capacity_exceeded"
+    reduced = store.delete(
+        [
+            DeleteFactOperation(
+                path="topics/over.md",
+                if_version=version(store, "topics/over.md"),
+                target="fact",
+                fact=fact("0" * 700),
+                authorization="user_requested",
+            )
+        ]
+    )
+    assert reduced["status"] == "applied"
+    assert "split_recommended" not in read_file(store, "topics/over.md")

@@ -16,7 +16,7 @@ PUBLIC_MCP_TOOLS = (
     "rename",
     "delete",
 )
-DOCTOR_SCHEMA = "keepygaga-doctor-v7"
+DOCTOR_SCHEMA = "keepygaga-doctor-v8"
 
 
 def _check(
@@ -105,13 +105,24 @@ def _memory_checks(config: KeepygagaConfig, checks: list[dict[str, object]]) -> 
         )
         return
     split_recommended = inspected.get("split_recommended") is True
-    dynamic_page_limit_exceeded = inspected.get("dynamic_page_limit_exceeded") is True
+    raw_page_limit_exceeded = inspected.get("dynamic_page_limit_exceeded")
+    dynamic_page_limit_exceeded = (
+        raw_page_limit_exceeded if isinstance(raw_page_limit_exceeded, dict) else {}
+    )
+    exceeded_scopes = [
+        str(scope)
+        for scope, exceeded in dynamic_page_limit_exceeded.items()
+        if exceeded is True
+    ]
     permission_warnings = inspected.get("permission_warnings") or []
     if not isinstance(permission_warnings, list):
         permission_warnings = []
-    warning = bool(split_recommended or dynamic_page_limit_exceeded or permission_warnings)
-    if dynamic_page_limit_exceeded:
-        message = "memory tree is valid; dynamic page count exceeds the create limit"
+    warning = bool(split_recommended or exceeded_scopes or permission_warnings)
+    if exceeded_scopes:
+        message = (
+            "memory tree is valid; page count exceeds the create limit for: "
+            + ", ".join(exceeded_scopes)
+        )
     elif permission_warnings:
         message = "memory tree is valid; one or more paths are more readable than the private default"
     elif split_recommended:

@@ -1093,7 +1093,9 @@ def test_setup_accepts_dynamic_page_limit_warning(
                 {
                     "id": "memory_tree",
                     "status": "warning",
-                    "details": {"dynamic_page_limit_exceeded": True},
+                    "details": {
+                        "dynamic_page_limit_exceeded": {"topics": True}
+                    },
                 }
             ],
         },
@@ -1139,7 +1141,7 @@ def test_setup_rejects_permission_warning_even_with_soft_flags(
                     "status": "warning",
                     "details": {
                         "split_recommended": True,
-                        "dynamic_page_limit_exceeded": True,
+                        "dynamic_page_limit_exceeded": {"topics": True},
                         "permission_warnings": [
                             {
                                 "path": str(memory_root / "profile.md"),

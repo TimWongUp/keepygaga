@@ -19,7 +19,7 @@ from keepygaga.hooks import (
     route,
 )
 from keepygaga.host_common import HostSetupError
-from keepygaga.memory import initialize_memory_tree
+from keepygaga.memory import CreateOperation, Fact, MemoryStore, initialize_memory_tree
 
 
 def _commands(value: object) -> list[str]:
@@ -217,9 +217,26 @@ def test_hook_merge_preserves_external_runtime_path_lookalike(tmp_path: Path) ->
     assert merged["hooks"]["Stop"][0]["hooks"][0]["command"] == command
 
 
-def test_context_bootstrap_contains_home_pages_and_catalog(tmp_path: Path) -> None:
+def test_context_bootstrap_contains_home_pages_and_scope_descriptions(
+    tmp_path: Path,
+) -> None:
     memory_root = tmp_path / "agents-memory"
-    initialize_memory_tree(memory_root, MemoryFilesConfig(root=str(memory_root)))
+    memory_config = MemoryFilesConfig(root=str(memory_root))
+    initialize_memory_tree(memory_root, memory_config)
+    store = MemoryStore(memory_root, memory_config)
+    assert (
+        store.create(
+            [
+                CreateOperation(
+                    path="people/not-in-bootstrap.md",
+                    description="Must stay out of bootstrap.",
+                    aliases=[],
+                    facts=[Fact(basis="stated", content="Known person.")],
+                )
+            ]
+        )["status"]
+        == "applied"
+    )
     config = tmp_path / "config.toml"
     config.write_text(
         f"[memory]\nroot = {json.dumps(str(memory_root))}\n", encoding="utf-8"
@@ -229,7 +246,12 @@ def test_context_bootstrap_contains_home_pages_and_catalog(tmp_path: Path) -> No
 
     assert "<profile version=" in rendered
     assert "<preferences version=" in rendered
-    assert "<memory_listing>" in rendered
+    assert "<memory_scopes>" in rendered
+    assert "`topics`" in rendered
+    assert "`areas`" in rendered
+    assert "`people`" in rendered
+    assert "people/not-in-bootstrap.md" not in rendered
+    assert "<memory_listing>" not in rendered
 
 
 def test_route_state_stores_no_raw_prompt_and_closeout_deduplicates(
