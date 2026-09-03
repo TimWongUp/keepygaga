@@ -237,6 +237,7 @@ def test_tool_protocol_is_discoverable_from_descriptions_and_schema() -> None:
     )
     assert move_description["maxLength"] == 80
     assert move_aliases["maxItems"] == 6
+    assert "new destination" in move["properties"]["aliases"]["description"]
     source_description = next(
         branch
         for branch in move["properties"]["source_description"]["anyOf"]

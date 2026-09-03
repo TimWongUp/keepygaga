@@ -132,14 +132,7 @@ class UpdatePageOperation(StrictModel):
         description="Select page description or aliases update rather than Fact replacement."
     )
     description: str | None = Field(default=None, max_length=MAX_DESCRIPTION_CHARS)
-    aliases: list[str] | None = Field(
-        default=None,
-        max_length=MAX_ALIASES_PER_PAGE,
-        description=(
-            "Required initial aliases for a new destination; omit for an existing "
-            "destination and update them separately with target=page."
-        ),
-    )
+    aliases: list[str] | None = Field(default=None, max_length=MAX_ALIASES_PER_PAGE)
 
     @field_validator("description", mode="before")
     @classmethod
@@ -203,7 +196,14 @@ class MoveOperation(StrictModel):
             "description for a new destination."
         ),
     )
-    aliases: list[str] | None = Field(default=None, max_length=MAX_ALIASES_PER_PAGE)
+    aliases: list[str] | None = Field(
+        default=None,
+        max_length=MAX_ALIASES_PER_PAGE,
+        description=(
+            "Required initial aliases for a new destination; omit for an existing "
+            "destination and update them separately with target=page."
+        ),
+    )
     source_description: str | None = Field(
         default=None,
         max_length=MAX_DESCRIPTION_CHARS,
