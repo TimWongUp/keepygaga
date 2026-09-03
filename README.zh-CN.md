@@ -38,8 +38,10 @@ Keepygaga 独立提供完整运行时：八个 raw Tool 的 MCP Server、精简�
 
 ```shell
 uv tool install ./keepygaga-X.Y.Z-py3-none-any.whl
-keepygaga install
+uv tool update-shell
 ```
+
+重开终端使工具目录进入 `PATH`，然后运行 `keepygaga install`。
 
 交互安装会先让用户确认或输入 Memory Root，再检测可用宿主并由用户选择。已有 `agents-memory` 记忆树可以直接接入；配置完成后，后续新增 Agent 会自动复用该目录。自动化安装必须显式列出全部目标：
 

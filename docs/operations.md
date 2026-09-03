@@ -4,7 +4,7 @@
 
 The `keepygaga` CLI installs and maintains the product; it is not the routine interface for browsing or editing memory. Users inspect, correct, and organize the shared Memory Root in Obsidian or another Markdown editor, while Agents use MCP and Hooks.
 
-Download `keepygaga-X.Y.Z-py3-none-any.whl` from the latest GitHub Release, install it with `uv tool install ./keepygaga-X.Y.Z-py3-none-any.whl`, then run `keepygaga install`. Interactive installation prompts for the Memory Root before host selection. An existing configured root is reused automatically when adding another host. Non-interactive first installation requires `--yes`, one or more explicit `--host` values, and an explicit `--memory-root` only when reusing a private, trusted tree.
+Download `keepygaga-X.Y.Z-py3-none-any.whl` from the latest GitHub Release, install it with `uv tool install ./keepygaga-X.Y.Z-py3-none-any.whl`, and run `uv tool update-shell`. Restart the terminal so the tool directory is on `PATH`, then run `keepygaga install`. Interactive installation prompts for the Memory Root before host selection. An existing configured root is reused automatically when adding another host. Non-interactive first installation requires `--yes`, one or more explicit `--host` values, and an explicit `--memory-root` only when reusing a private, trusted tree.
 
 - `keepygaga status` reads live config and Doctor, compares recorded Contract versions, and labels host checks that still require live verification.
 - `keepygaga repair --yes` reruns idempotent desired-state reconciliation for recorded hosts, including removal of obsolete Keepygaga-owned Hook entries.

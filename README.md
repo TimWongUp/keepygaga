@@ -38,8 +38,10 @@ Download the `keepygaga-X.Y.Z-py3-none-any.whl` asset from the [latest GitHub Re
 
 ```shell
 uv tool install ./keepygaga-X.Y.Z-py3-none-any.whl
-keepygaga install
+uv tool update-shell
 ```
+
+Restart the terminal so the tool directory is on `PATH`, then run `keepygaga install`.
 
 Interactive installation first offers a Memory Root path, then detects available hosts without selecting them on the user's behalf. Point it at an existing `agents-memory` tree to connect another Agent to the same memory. Once configured, later installs reuse that root automatically. Automation must name every target explicitly:
 
