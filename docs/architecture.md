@@ -37,6 +37,8 @@ The product owns three semantic capabilities:
 - Memory Route injects a small per-turn routing reminder and stores only boolean transient signals.
 - Memory Closeout emits a deduplicated reminder only when the turn indicates project or durable-memory work.
 
+Both reminders direct the Agent to keep no-op memory decisions silent and return only the response required by the original task.
+
 Adapters project those capabilities into native host events. The merger removes only commands matching Keepygaga-owned current or legacy markers, then preserves all unrelated entries. Unsupported host capabilities are omitted honestly; no temporary or downloaded Hook implementation is synthesized.
 
 Grok uses the managed Agent Contract as its Memory Closeout fallback. Its native `Stop` event is not projected because model-visible feedback necessarily starts another inference round and can replace the original final response in headless clients.

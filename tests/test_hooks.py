@@ -298,6 +298,12 @@ def test_route_state_stores_no_raw_prompt_and_closeout_deduplicates(
     assert closeout.run("codex", "PostToolUse", payload)
 
 
+def test_memory_hook_reminders_keep_noop_decisions_silent() -> None:
+    for reminder in (route.REMINDER, route.COMPACT_REMINDER, closeout.REMINDER):
+        assert "静默" in reminder
+        assert "原任务" in reminder
+
+
 def test_route_scrubs_legacy_prompt_hash_when_state_is_rewritten(
     tmp_path: Path, monkeypatch
 ) -> None:
