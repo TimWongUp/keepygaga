@@ -1121,7 +1121,8 @@ def setup_grok_host(
     hook_python: Path | None = None,
     hook_config_path: Path | None = None,
 ) -> dict[str, object]:
-    memory_root, doctor = _validated_source(config_path, config)
+    _memory_root, doctor = _validated_source(config_path, config)
+    del hook_config_path
     home = _resolve_home(host_home, ".grok", "grok")
     if home.name != ".grok":
         raise HostSetupError(
@@ -1135,13 +1136,8 @@ def setup_grok_host(
         raise HostSetupError(f"grok setup lock could not be acquired: {exc}") from exc
     components: dict[str, object] = {}
     try:
-        selection = _prepare_hook_selection(
-            "grok",
-            memory_root,
-            hook_runtime,
-            hook_python,
-            config_path=config_path,
-            hook_config_path=hook_config_path,
+        fragment, merger = _hook_material_for_removal(
+            "grok", config_path, hook_runtime, hook_python
         )
         mcp_plan = _prepare_grok_mcp(
             home,
@@ -1150,22 +1146,26 @@ def setup_grok_host(
             grok_binary=grok_binary,
         )
         rules_plan = _prepare_rules(_grok_rules_path(home))
-        hooks_plan = _prepare_json_hooks(home / "hooks" / "keepygaga.json", selection)
+        hooks_path = home / "hooks" / "keepygaga.json"
+        hooks_plan = _prepare_json_hooks_removal(hooks_path, fragment, merger)
         legacy_hooks_plan = _prepare_json_hooks_removal(
             home / "hooks" / "agent-hook-runtime.json",
-            selection.fragment,
-            selection.merger,
+            fragment,
+            merger,
         )
         try:
             components["mcp"] = _apply_grok_mcp(mcp_plan)
             components["rules"] = _apply_file(rules_plan)
-            components["hooks"] = (
-                _apply_hooks(hooks_plan, selection)
-                if hooks_plan is not None and selection is not None
+            hooks_result = (
+                _apply_file(hooks_plan)
+                if hooks_plan is not None
                 else _json_result(
-                    "skipped", reason="compatible Agent Hook Runtime was not selected"
+                    "no_op",
+                    path=str(hooks_path),
+                    reason="Grok closeout uses the managed Agent Contract",
                 )
             )
+            components["hooks"] = {**hooks_result, "mode": "rules_fallback"}
             components["legacy_hooks"] = (
                 _apply_file(legacy_hooks_plan)
                 if legacy_hooks_plan is not None

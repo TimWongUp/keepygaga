@@ -344,21 +344,6 @@ def build_fragment(
                 }
             ],
         }
-    elif enabled and host == "grok":
-        payload = {
-            "Stop": [
-                {
-                    "hooks": [
-                        _entry(
-                            _command(
-                                launcher, config_path, "closeout", platform, "Stop"
-                            ),
-                            2,
-                        )
-                    ]
-                }
-            ]
-        }
     elif enabled and host == "hermes":
         payload = {
             "pre_llm_call": [

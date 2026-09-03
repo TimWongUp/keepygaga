@@ -39,9 +39,13 @@ The product owns three semantic capabilities:
 
 Adapters project those capabilities into native host events. The merger removes only commands matching Keepygaga-owned current or legacy markers, then preserves all unrelated entries. Unsupported host capabilities are omitted honestly; no temporary or downloaded Hook implementation is synthesized.
 
+Grok uses the managed Agent Contract as its Memory Closeout fallback. Its native `Stop` event is not projected because model-visible feedback necessarily starts another inference round and can replace the original final response in headless clients.
+
 ## Host reconciliation
 
 Supported adapters are Codex, Claude Code, WorkBuddy, Grok, Hermes, and Antigravity CLI. Setup order is MCP, Agent Contract, Hooks. Each stage uses preflight data and detects concurrent changes; partial commits report applied components and recovery evidence. Repeated setup converges to `no_op`.
+
+Repair reconciles recorded hosts to the current desired state, including removal of obsolete Keepygaga-owned Hook projections. Upgrade first replaces the packaged runtime, then invokes that repair path so Hook changes and removals take effect without enabling new hosts or touching unrelated entries.
 
 Uninstall removes only the `keepygaga` MCP registration, managed Contract block, and Keepygaga-owned Hook entries. It preserves Memory Root, product configuration, install package, unrelated MCP registrations, and unrelated Hooks. Repeated uninstall converges to `no_op`.
 

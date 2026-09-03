@@ -731,6 +731,33 @@ def test_grok_setup_uses_user_cli_and_is_idempotent(
     home.mkdir()
     (home / "config.toml").write_text("[unrelated]\nkeep = true\n", encoding="utf-8")
     (home / "AGENTS.md").write_text("# Existing Grok rules\n", encoding="utf-8")
+    hooks_path = home / "hooks" / "keepygaga.json"
+    hooks_path.parent.mkdir()
+    hooks_path.write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "Stop": [
+                        {
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": "keepygaga --config /old/config.toml hook run closeout --owner=keepygaga-hook-v1 --host grok --event Stop",
+                                    "timeout": 2,
+                                }
+                            ]
+                        },
+                        {
+                            "hooks": [
+                                {"type": "command", "command": "unrelated-stop-hook"}
+                            ]
+                        },
+                    ]
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
     fake_binary = Path(sys.executable)
     registrations: list[dict[str, Any]] = []
     add_calls = 0
@@ -793,8 +820,13 @@ def test_grok_setup_uses_user_cli_and_is_idempotent(
 
     assert first["status"] == "applied"
     assert first["mcp"]["status"] == "applied"  # type: ignore[index]
+    assert first["hooks"]["status"] == "applied"  # type: ignore[index]
+    assert first["hooks"]["mode"] == "rules_fallback"  # type: ignore[index]
     assert second["status"] == "no_op"
     assert second["mcp"]["status"] == "no_op"  # type: ignore[index]
+    migrated_hooks = json.loads(hooks_path.read_text(encoding="utf-8"))
+    assert "hook run closeout" not in json.dumps(migrated_hooks)
+    assert "unrelated-stop-hook" in json.dumps(migrated_hooks)
     assert add_calls == 1
     assert registrations == [
         {
@@ -813,6 +845,18 @@ def test_grok_setup_uses_user_cli_and_is_idempotent(
         "<!-- KEEPYGAGA:START -->"
     ) == 1
     assert "Agents.md" not in {entry.name for entry in home.iterdir()}
+
+    hooks_path.unlink()
+    third = setup_grok_host(
+        config_path,
+        config,
+        host_home=home,
+        python=Path(sys.executable),
+        grok_binary=fake_binary,
+    )
+    assert third["status"] == "no_op"
+    assert third["hooks"]["mode"] == "rules_fallback"  # type: ignore[index]
+    assert not hooks_path.exists()
 
 
 def test_grok_reports_partial_commit_when_cli_verification_fails(

@@ -15,12 +15,8 @@ REMINDER = (
 def run(host: str, event: str, payload: dict[str, Any]) -> dict[str, object]:
     if payload.get("stop_hook_active") or payload.get("stopHookActive"):
         return {}
-    if host == "grok" and event == "Stop":
-        return (
-            closeout_payload(host, REMINDER)
-            if payload.get("reason") == "end_turn"
-            else {}
-        )
+    if host == "grok":
+        return {}
     try:
         return closeout_payload(host, REMINDER) if consume_closeout(host, payload) else {}
     except OSError:

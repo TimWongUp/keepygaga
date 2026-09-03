@@ -7,12 +7,14 @@ The `keepygaga` CLI installs and maintains the product; it is not the routine in
 Install a published release with `uv tool install keepygaga`, then run `keepygaga install`. Interactive installation prompts for the Memory Root before host selection. An existing configured root is reused automatically when adding another host. Non-interactive first installation requires `--yes`, one or more explicit `--host` values, and an explicit `--memory-root` only when reusing a private, trusted tree.
 
 - `keepygaga status` reads live config and Doctor, compares recorded Contract versions, and labels host checks that still require live verification.
-- `keepygaga repair --yes` reruns idempotent reconciliation for recorded hosts.
-- `keepygaga upgrade --yes` upgrades the published `uv` tool and then repairs recorded hosts.
+- `keepygaga repair --yes` reruns idempotent desired-state reconciliation for recorded hosts, including removal of obsolete Keepygaga-owned Hook entries.
+- `keepygaga upgrade --yes` upgrades the published `uv` tool and then runs that repair path, so changed or removed Hook projections are applied to every recorded host while unrelated Hooks survive.
 - `keepygaga uninstall --yes` removes recorded host wiring while preserving config and memory.
 - `keepygaga host setup|uninstall HOST` remains the deterministic expert path.
 
 Install state is discovery evidence only. If it disagrees with a host's live configuration, the host file and official diagnostic win.
+
+Running the package manager directly updates only the runtime. After `uv tool upgrade keepygaga` or `pipx upgrade keepygaga`, run `keepygaga repair --yes` to apply changed or removed host projections. The integrated `keepygaga upgrade --yes` command performs both steps.
 
 ## Repository verification
 
