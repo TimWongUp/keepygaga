@@ -7,6 +7,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from keepygaga.memory_contract import (
+    DYNAMIC_PAGE_LIMIT,
+    DYNAMIC_PAGE_LIMITS,
+    PROFILE_PAGE_LIMIT,
+)
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 CONFIG_ENV_VAR = "KEEPYGAGA_CONFIG"
 
@@ -36,13 +42,39 @@ DEFAULT_CONFIG_PATH = _default_config_path()
 
 
 @dataclass
+class MemoryLimitsConfig:
+    fixed_page_chars: int = PROFILE_PAGE_LIMIT
+    dynamic_page_chars: int = DYNAMIC_PAGE_LIMIT
+    topics_pages: int = DYNAMIC_PAGE_LIMITS["topics"]
+    areas_pages: int = DYNAMIC_PAGE_LIMITS["areas"]
+    people_pages: int = DYNAMIC_PAGE_LIMITS["people"]
+
+    def __post_init__(self) -> None:
+        for name, value in vars(self).items():
+            if type(value) is not int or value < 1:
+                raise ValueError(f"memory.limits.{name} must be a positive integer")
+
+    def as_dict(self) -> dict[str, int]:
+        return dict(vars(self))
+
+    def dynamic_pages(self) -> dict[str, int]:
+        return {
+            "topics": self.topics_pages,
+            "areas": self.areas_pages,
+            "people": self.people_pages,
+        }
+
+
+@dataclass
 class MemoryFilesConfig:
     root: str = ""
+    limits: MemoryLimitsConfig = field(default_factory=MemoryLimitsConfig)
 
 
 @dataclass
 class KeepygagaConfig:
     memory: MemoryFilesConfig = field(default_factory=MemoryFilesConfig)
+    limits_source: str = "defaults"
 
 
 def resolve_config_path(path: Path | str | None = None) -> Path:
@@ -69,5 +101,18 @@ def load_config(path: Path | str | None = None) -> KeepygagaConfig:
             data = tomllib.load(handle)
 
     memory = data.get("memory", {})
+    if not isinstance(memory, dict):
+        raise ValueError("memory must be a TOML table")
     config.memory.root = str(memory.get("root", config.memory.root))
+
+    raw_limits = memory.get("limits")
+    if raw_limits is not None:
+        if not isinstance(raw_limits, dict):
+            raise ValueError("memory.limits must be a TOML table")
+        known = set(vars(config.memory.limits))
+        unknown = sorted(set(raw_limits) - known)
+        if unknown:
+            raise ValueError("unknown memory.limits field(s): " + ", ".join(unknown))
+        config.memory.limits = MemoryLimitsConfig(**raw_limits)
+        config.limits_source = str(config_path)
     return config

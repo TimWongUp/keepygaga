@@ -5,7 +5,7 @@ from typing import cast
 
 import pytest
 
-from keepygaga.config import MemoryFilesConfig
+from keepygaga.config import MemoryFilesConfig, MemoryLimitsConfig
 from keepygaga.diagnostics import PUBLIC_MCP_TOOLS, run_doctor
 from keepygaga.memory import initialize_memory_tree
 
@@ -81,6 +81,30 @@ def test_doctor_reports_healthy_initialized_memory(
     checks = cast(list[dict[str, object]], result["checks"])
     memory = next(item for item in checks if item["id"] == "memory_tree")
     assert memory["status"] == "ok"
+
+
+def test_doctor_reports_effective_memory_limits_and_source(tmp_path: Path) -> None:
+    path = tmp_path / "keepygaga.toml"
+    memory_root = tmp_path / "memory"
+    config = MemoryFilesConfig(
+        root=str(memory_root),
+        limits=MemoryLimitsConfig(topics_pages=7),
+    )
+    assert initialize_memory_tree(memory_root, config)["status"] == "applied"
+    path.write_text(
+        f"[memory]\nroot = '{memory_root.as_posix()}'\n"
+        "[memory.limits]\ntopics_pages = 7\n",
+        encoding="utf-8",
+    )
+
+    result = run_doctor(path, project_root=tmp_path)
+
+    checks = cast(list[dict[str, object]], result["checks"])
+    config_check = next(item for item in checks if item["id"] == "config")
+    details = cast(dict[str, object], config_check["details"])
+    limits = cast(dict[str, int], details["memory_limits"])
+    assert limits["topics_pages"] == 7
+    assert details["limits_source"] == str(path)
 
 
 def test_doctor_config_error_returns_error(tmp_path: Path) -> None:

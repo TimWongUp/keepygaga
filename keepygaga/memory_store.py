@@ -32,12 +32,10 @@ from keepygaga.codec import (
 from keepygaga.config import MemoryFilesConfig
 from keepygaga.errors import MemoryValidationError
 from keepygaga.memory_contract import (
-    DYNAMIC_PAGE_LIMITS,
     MAX_ALIASES_PER_PAGE,
     MAX_DESCRIPTION_CHARS,
     MAX_MUTATION_OPERATIONS,
     MAX_READ_PATHS,
-    MAX_REPAIR_INPUT_CHARS,
     NEW_DIRECTORY_MODE,
     NEW_FILE_MODE,
     AddOperation,
@@ -51,7 +49,6 @@ from keepygaga.memory_contract import (
     UpdateFactOperation,
     UpdateOperation,
     UpdatePageOperation,
-    page_limit,
 )
 from keepygaga.memory_files import (
     _absolute_without_resolving_links,
@@ -122,8 +119,17 @@ def _with_page_changes(
 class MemoryStore:
     def __init__(self, root: Path, _config: MemoryFilesConfig):
         self.root = _absolute_without_resolving_links(root)
+        self.limits = _config.limits
         self.lock_path = self.root / ".keepygaga.lock"
         self.lock = FileLock(str(self.lock_path), timeout=30)
+
+    def _page_limit(self, path: str) -> int:
+        if path in FIXED_PATHS:
+            return self.limits.fixed_page_chars
+        return self.limits.dynamic_page_chars
+
+    def _repair_input_limit(self) -> int:
+        return self.limits.dynamic_page_chars * 2
 
     def list_files(self, scope: MemoryScope) -> dict[str, object]:
         return self._run_locked(lambda: self._list_locked(scope))
@@ -417,7 +423,7 @@ class MemoryStore:
             try:
                 document = parse_page_metadata(text, path)
             except MemoryValidationError as exc:
-                if unicode_chars(text) > MAX_REPAIR_INPUT_CHARS:
+                if unicode_chars(text) > self._repair_input_limit():
                     repairable = False
                     recovery = (
                         "The invalid page is above the bounded repair input; organize it manually, "
@@ -434,7 +440,7 @@ class MemoryStore:
                             render_memory_file(repaired_document, path)
                         )
                         used = unicode_chars(text)
-                        limit = page_limit(path)
+                        limit = self._page_limit(path)
                         repairable = repaired_used <= limit or (
                             used > limit and repaired_used < used
                         )
@@ -508,8 +514,8 @@ class MemoryStore:
         capacities = {
             str(self.root / path): {
                 "used": unicode_chars(loaded.text),
-                "limit": page_limit(path),
-                "over_limit": unicode_chars(loaded.text) > page_limit(path),
+                "limit": self._page_limit(path),
+                "over_limit": unicode_chars(loaded.text) > self._page_limit(path),
             }
             for path, loaded in files.items()
         }
@@ -518,8 +524,8 @@ class MemoryStore:
             for scope in DYNAMIC_DIRS
         }
         page_limit_exceeded = {
-            scope: dynamic_pages[scope] > DYNAMIC_PAGE_LIMITS[scope]
-            for scope in DYNAMIC_DIRS
+            scope: dynamic_pages[scope] > limit
+            for scope, limit in self.limits.dynamic_pages().items()
         }
         permission_warnings = self._permission_warnings()
         return {
@@ -529,7 +535,7 @@ class MemoryStore:
                 bool(item["over_limit"]) for item in capacities.values()
             ),
             "dynamic_pages": dynamic_pages,
-            "max_dynamic_pages": dict(DYNAMIC_PAGE_LIMITS),
+            "max_dynamic_pages": self.limits.dynamic_pages(),
             "dynamic_page_limit_exceeded": page_limit_exceeded,
             "permission_warnings": permission_warnings,
         }
@@ -691,7 +697,7 @@ class MemoryStore:
             try:
                 text = normalize_text(
                     self._read_catalog_text(
-                        target, path, max_chars=MAX_REPAIR_INPUT_CHARS
+                        target, path, max_chars=self._repair_input_limit()
                     )
                 )
             except FileNotFoundError as exc:
@@ -1000,11 +1006,12 @@ class MemoryStore:
             ],
         }
 
-    @staticmethod
     def _validate_scope_capacity(
-        initial: dict[str, LoadedFile], working: dict[str, LoadedFile]
+        self,
+        initial: dict[str, LoadedFile],
+        working: dict[str, LoadedFile],
     ) -> None:
-        for scope, limit in DYNAMIC_PAGE_LIMITS.items():
+        for scope, limit in self.limits.dynamic_pages().items():
             before = sum(1 for path in initial if path.startswith(f"{scope}/"))
             after = sum(1 for path in working if path.startswith(f"{scope}/"))
             if after > limit and after > before:
@@ -1020,8 +1027,8 @@ class MemoryStore:
                     ),
                 )
 
-    @staticmethod
     def _validate_page_capacity(
+        self,
         initial: dict[str, LoadedFile],
         working: dict[str, LoadedFile],
         mutations: list[dict[str, object]],
@@ -1036,7 +1043,7 @@ class MemoryStore:
             if before is not None and before.text == after.text:
                 continue
             used = unicode_chars(after.text)
-            limit = page_limit(path)
+            limit = self._page_limit(path)
             if used <= limit:
                 continue
             if before is not None:
@@ -1241,7 +1248,7 @@ class MemoryStore:
             "facts": [fact.model_dump() for fact in loaded.document.facts],
             "version": loaded.version,
         }
-        if unicode_chars(loaded.text) > page_limit(loaded.path):
+        if unicode_chars(loaded.text) > self._page_limit(loaded.path):
             item["split_recommended"] = True
         return item
 

@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from keepygaga.config import load_config
+import pytest
+
+from keepygaga.config import MemoryLimitsConfig, load_config
 
 
 def test_config_memory_defaults(tmp_path: Path) -> None:
@@ -10,6 +12,8 @@ def test_config_memory_defaults(tmp_path: Path) -> None:
     path.write_text("", encoding="utf-8")
     config = load_config(path)
     assert config.memory.root == ""
+    assert config.memory.limits == MemoryLimitsConfig()
+    assert config.limits_source == "defaults"
 
 
 def test_load_config_reads_memory_root_and_ignores_legacy_hard_caps(
@@ -28,7 +32,54 @@ content_limit = 1
         encoding="utf-8",
     )
     config = load_config(path)
-    assert vars(config.memory) == {"root": "/tmp/memory"}
+    assert config.memory.root == "/tmp/memory"
+    assert config.memory.limits == MemoryLimitsConfig()
+
+
+def test_load_config_reads_partial_memory_limit_overrides(tmp_path: Path) -> None:
+    path = tmp_path / "keepygaga.toml"
+    path.write_text(
+        """
+[memory]
+root = "/tmp/memory"
+
+[memory.limits]
+fixed_page_chars = 2500
+topics_pages = 75
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    config = load_config(path)
+
+    assert config.memory.limits.fixed_page_chars == 2500
+    assert config.memory.limits.dynamic_page_chars == 5000
+    assert config.memory.limits.topics_pages == 75
+    assert config.limits_source == str(path)
+
+
+@pytest.mark.parametrize(
+    "setting",
+    (
+        "topics_pages = 0",
+        "areas_pages = -1",
+        'people_pages = "many"',
+        "fixed_page_chars = true",
+        "unknown_limit = 5",
+    ),
+)
+def test_load_config_rejects_invalid_memory_limits(
+    tmp_path: Path, setting: str
+) -> None:
+    path = tmp_path / "keepygaga.toml"
+    path.write_text(
+        f"[memory]\nroot = '/tmp/memory'\n[memory.limits]\n{setting}\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises((TypeError, ValueError), match="memory.limits"):
+        load_config(path)
 
 
 def test_load_config_missing_file_keeps_defaults(tmp_path: Path) -> None:

@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 
 from mcp import Client
 
 from keepygaga import server as mcp_server
+from keepygaga.config import MemoryFilesConfig
+from keepygaga.memory import initialize_memory_tree
 
 EXPECTED_TOOLS = {
     "list",
@@ -33,6 +36,36 @@ OPERATION_FIELDS = {
     },
     "rename": {"path", "if_version", "new_path"},
 }
+
+
+def test_store_only_limits_hot_reload_on_the_next_call(
+    tmp_path: Path, monkeypatch
+) -> None:
+    root = tmp_path / "memory"
+    config_path = tmp_path / "config.toml"
+    assert (
+        initialize_memory_tree(root, MemoryFilesConfig(root=str(root)))["status"]
+        == "applied"
+    )
+    monkeypatch.setenv("KEEPYGAGA_CONFIG", str(config_path))
+
+    def write_limit(value: int) -> None:
+        config_path.write_text(
+            f"[memory]\nroot = '{root.as_posix()}'\n"
+            f"[memory.limits]\ntopics_pages = {value}\n",
+            encoding="utf-8",
+        )
+
+    def current_limit() -> object:
+        result = mcp_server._with_memory_store(lambda store: store.inspect())
+        limits = result["max_dynamic_pages"]
+        assert isinstance(limits, dict)
+        return limits["topics"]
+
+    write_limit(2)
+    assert current_limit() == 2
+    write_limit(3)
+    assert current_limit() == 3
 
 
 def test_public_mcp_surface_and_exact_top_level_shapes() -> None:

@@ -28,6 +28,10 @@ def test_install_uses_selected_hosts_and_records_observational_state(
     assert calls == ["codex"]
     assert state.exists()
     assert memory_root.joinpath("profile.md").exists()
+    generated = config_path.read_text(encoding="utf-8")
+    assert "[memory.limits]" in generated
+    assert "fixed_page_chars = 2000" in generated
+    assert "lowering never deletes existing pages" in generated
 
 
 def test_uninstall_preserves_config_and_memory(tmp_path: Path, monkeypatch) -> None:

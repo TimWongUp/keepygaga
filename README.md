@@ -55,6 +55,24 @@ Supported adapters are Codex, Claude Code, WorkBuddy, Grok, Hermes, and Antigrav
 
 The default configuration and memory paths are platform-native. To reuse an existing private memory tree non-interactively, pass `--memory-root` during the first install. Do not place the memory tree in a public or automatically published directory.
 
+New installations include five optional memory-capacity settings with the current defaults and adjustment notes. Existing configuration files are never rewritten. Edit the live `config.toml`; the next MCP call reloads these Store-only limits without requiring a schema refresh:
+
+```toml
+[memory.limits]
+# Raise for richer profile/preferences; lower to reduce baseline context.
+fixed_page_chars = 2000
+# Raise for fewer, larger routed pages; lower to encourage earlier splitting.
+dynamic_page_chars = 5000
+# Raise to allow more topic pages; lowering never deletes existing pages.
+topics_pages = 50
+# Raise to allow more area pages; lowering never deletes existing pages.
+areas_pages = 50
+# Raise to allow more people pages; lowering never deletes existing pages.
+people_pages = 100
+```
+
+Every value must be a positive integer. Lower limits report existing excess through Doctor and constrain later growth; they do not delete or rewrite memory. The bounded repair input is derived as twice `dynamic_page_chars`.
+
 ## Operate
 
 ```shell

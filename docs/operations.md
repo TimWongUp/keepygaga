@@ -13,6 +13,8 @@ Download `keepygaga-X.Y.Z-py3-none-any.whl` from the latest GitHub Release, inst
 
 Install state is discovery evidence only. If it disagrees with a host's live configuration, the host file and official diagnostic win.
 
+The optional `[memory.limits]` table controls fixed-page characters, dynamic-page characters, and the `topics`, `areas`, and `people` page counts. New installations write the current defaults with adjustment comments; repair and upgrade preserve existing configuration bytes. The Store reloads these limits on every MCP call. Doctor and status report both effective values and whether they came from built-in defaults or the live configuration path. Invalid, unknown, non-integer, or non-positive values fail with the exact `memory.limits` field instead of falling back silently.
+
 To upgrade through the current GitHub Release channel, download the newer wheel, run `uv tool install --force ./keepygaga-X.Y.Z-py3-none-any.whl`, then run `keepygaga repair --yes` to apply changed or removed host projections. `keepygaga upgrade --yes` is available only when the installation's package-manager source can resolve a newer release; it is not the update path for a versioned GitHub Release wheel.
 
 ### Contract 3 project-index migration
