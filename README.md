@@ -46,7 +46,7 @@ The [Agent Install To-do](docs/agent-install.md) is the authoritative procedure 
 
 ### Manual installation
 
-Download the `keepygaga-X.Y.Z-py3-none-any.whl` asset from the [latest GitHub Release](https://github.com/TimWongUp/keepygaga/releases/latest), replace `X.Y.Z` below with that release version, then run:
+Download the `keepygaga-X.Y.Z-py3-none-any.whl` asset and `SHA256SUMS` from the same [latest GitHub Release](https://github.com/TimWongUp/keepygaga/releases/latest). Verify that the wheel matches its SHA-256 entry before executing it, replace `X.Y.Z` below with that release version, then run:
 
 ```shell
 uv tool install ./keepygaga-X.Y.Z-py3-none-any.whl
@@ -54,6 +54,8 @@ uv tool update-shell
 ```
 
 Restart the terminal so the tool directory is on `PATH`, then run `keepygaga install`.
+
+The checksum detects corruption or an asset mismatch. It is not a signature, provenance proof, independent publisher authentication, or verification of dependencies resolved from the package index.
 
 Interactive installation first offers a Memory Root path, then detects available hosts without selecting them on the user's behalf. Point it at an existing `agents-memory` tree to connect another Agent to the same memory. Once configured, later installs reuse that root automatically. Automation must name every target explicitly:
 
@@ -94,7 +96,7 @@ keepygaga uninstall --yes
 
 `status` treats the install-state file as discovery data only and reports when live host verification is still required. `repair` reconciles recorded hosts from their current configuration. `uninstall` removes only Keepygaga host wiring; it preserves the configuration and memory tree.
 
-To upgrade, download the newer wheel, run `uv tool install --force ./keepygaga-X.Y.Z-py3-none-any.whl`, then run `keepygaga repair --yes` to reconcile host wiring.
+To upgrade, download the newer wheel and matching `SHA256SUMS`, verify the wheel, run `uv tool install --force ./keepygaga-X.Y.Z-py3-none-any.whl`, then run `keepygaga repair --yes` to reconcile host wiring.
 
 Advanced deterministic host commands remain available as `keepygaga host setup|uninstall HOST`.
 

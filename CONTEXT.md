@@ -45,7 +45,7 @@ _Avoid_: 项目档案、项目状态
 _Avoid_: 动态页摘要、路由目录
 
 **Home Page Source Choice**：
-为每条长期 Profile 或 Preference 含义指定唯一注入真源的初始化选择：Keepygaga Home Page 或当前宿主的有效全局规则入口。
+为每条长期 Profile 或 Preference 含义指定唯一注入真源的初始化选择：Keepygaga Home Page，或完整宿主清单中的一个有效全局规则入口；无法完整清点自定义入口时不迁移。
 _Avoid_: 复制后可选清理、重复注入、宿主原生记忆迁移
 
 **Preference Fact**：
