@@ -2,3 +2,15 @@
 # Keep this private and outside the Keepygaga checkout or public directories.
 # It contains the fixed memory pages and topics/areas/people children.
 root = "/path/to/your/agents-memory"
+
+[memory.limits]
+# Raise for richer profile/preferences; lower to reduce baseline context.
+fixed_page_chars = 2000
+# Raise for fewer, larger routed pages; lower to encourage earlier splitting.
+dynamic_page_chars = 5000
+# Raise to allow more topic pages; lowering never deletes existing pages.
+topics_pages = 50
+# Raise to allow more area pages; lowering never deletes existing pages.
+areas_pages = 50
+# Raise to allow more people pages; lowering never deletes existing pages.
+people_pages = 100

@@ -13,7 +13,12 @@ from pathlib import Path
 from typing import Any
 
 from keepygaga import __version__
-from keepygaga.config import PROJECT_ROOT, KeepygagaConfig, load_config
+from keepygaga.config import (
+    PROJECT_ROOT,
+    KeepygagaConfig,
+    MemoryLimitsConfig,
+    load_config,
+)
 from keepygaga.diagnostics import run_doctor
 from keepygaga.host_common import (
     HostSetupError,
@@ -103,7 +108,21 @@ def state_path(config_path: Path | None = None) -> Path:
 
 def _config_bytes(memory_root: Path) -> bytes:
     escaped = str(memory_root.resolve()).replace("\\", "\\\\").replace('"', '\\"')
-    return f'[memory]\nroot = "{escaped}"\n'.encode()
+    limits = MemoryLimitsConfig()
+    return (
+        f'[memory]\nroot = "{escaped}"\n\n'
+        "[memory.limits]\n"
+        "# Raise for richer profile/preferences; lower to reduce baseline context.\n"
+        f"fixed_page_chars = {limits.fixed_page_chars}\n"
+        "# Raise for fewer, larger routed pages; lower to encourage earlier splitting.\n"
+        f"dynamic_page_chars = {limits.dynamic_page_chars}\n"
+        "# Raise to allow more topic pages; lowering never deletes existing pages.\n"
+        f"topics_pages = {limits.topics_pages}\n"
+        "# Raise to allow more area pages; lowering never deletes existing pages.\n"
+        f"areas_pages = {limits.areas_pages}\n"
+        "# Raise to allow more people pages; lowering never deletes existing pages.\n"
+        f"people_pages = {limits.people_pages}\n"
+    ).encode()
 
 
 def ensure_config(config_path: Path, memory_root: Path) -> dict[str, object]:
@@ -411,6 +430,8 @@ def status(config_path: Path) -> dict[str, object]:
         "install_channel": state.get("install_channel", "unknown"),
         "config_path": str(config_path.resolve()),
         "memory_root": config.memory.root or None,
+        "memory_limits": config.memory.limits.as_dict(),
+        "limits_source": config.limits_source,
         "doctor": doctor.get("status"),
         "hosts": {
             host: {

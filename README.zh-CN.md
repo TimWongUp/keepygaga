@@ -55,6 +55,24 @@ keepygaga install --yes --host codex --host claude-code
 
 默认配置与记忆目录使用各平台原生路径。非交互首次安装如需复用已有私有记忆树，可传入 `--memory-root`；不要把记忆树放进公开或自动发布目录。
 
+新安装会写入五项可选记忆容量设置，保留当前默认值并附带调整说明；已有配置文件不会被升级流程改写。编辑当前 `config.toml` 后，下一次 MCP 调用会重新加载这些仅由 Store 使用的限制，不需要刷新 Tool Schema：
+
+```toml
+[memory.limits]
+# 调高可容纳更丰富的 Profile/Preferences；调低可减少基础上下文占用。
+fixed_page_chars = 2000
+# 调高可使用更少、更大的动态页；调低会更早建议拆页。
+dynamic_page_chars = 5000
+# 调高可增加 topics 页面；调低不会删除已有页面。
+topics_pages = 50
+# 调高可增加 areas 页面；调低不会删除已有页面。
+areas_pages = 50
+# 调高可增加 people 页面；调低不会删除已有页面。
+people_pages = 100
+```
+
+所有值都必须是正整数。调低后，Doctor 会报告已有超限内容并限制后续扩张，但不会删除或重写记忆；repair 输入上限始终由 `dynamic_page_chars × 2` 派生。
+
 ## 运维
 
 ```shell

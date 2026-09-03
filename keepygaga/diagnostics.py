@@ -66,7 +66,11 @@ def run_doctor(
         check_id="config",
         status="ok",
         message="configuration loaded",
-        details={"path": str(config_path)},
+        details={
+            "path": str(config_path),
+            "memory_limits": config.memory.limits.as_dict(),
+            "limits_source": config.limits_source,
+        },
     )
     _memory_checks(config, checks)
 

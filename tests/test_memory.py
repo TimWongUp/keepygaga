@@ -12,7 +12,7 @@ from pydantic import ValidationError
 from keepygaga import codec, memory_files, memory_init, paths
 from keepygaga import memory as memory_module
 from keepygaga import memory_store as memory_store_module
-from keepygaga.config import MemoryFilesConfig
+from keepygaga.config import MemoryFilesConfig, MemoryLimitsConfig
 from keepygaga.memory import (
     AddOperation,
     CreateOperation,
@@ -1967,6 +1967,43 @@ def test_dynamic_page_limits_are_literal_contract() -> None:
         "areas": 50,
         "people": 100,
     }
+
+
+def test_configured_scope_and_page_limits_control_store_behavior(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "memory"
+    config = MemoryFilesConfig(
+        root=str(root),
+        limits=MemoryLimitsConfig(
+            fixed_page_chars=100,
+            dynamic_page_chars=120,
+            topics_pages=1,
+            areas_pages=2,
+            people_pages=3,
+        ),
+    )
+    assert initialize_memory_tree(root, config)["status"] == "applied"
+    store = MemoryStore(root, config)
+
+    first = store.create([create("topics/first.md", "Short.")])
+    assert first["status"] == "applied"
+    second = store.create([create("topics/second.md", "Blocked by scope.")])
+    assert second["status"] == "capacity_exceeded"
+    assert second["limit"] == 1
+
+    oversized = store.create([create("areas/oversized.md", "x" * 100)])
+    assert oversized["status"] == "capacity_exceeded"
+    assert oversized["limit"] == 120
+
+    inspected = store.inspect()
+    assert inspected["max_dynamic_pages"] == {
+        "topics": 1,
+        "areas": 2,
+        "people": 3,
+    }
+    capacities = cast(dict[str, dict[str, object]], inspected["capacities"])
+    assert capacities[str(root / "profile.md")]["limit"] == 100
 
 
 def test_full_target_scope_blocks_new_move_and_cross_scope_rename(
