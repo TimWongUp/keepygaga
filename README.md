@@ -46,10 +46,10 @@ The [Agent Install To-do](docs/agent-install.md) is the authoritative procedure 
 
 ### Manual installation
 
-Download the `keepygaga-X.Y.Z-py3-none-any.whl` asset and `SHA256SUMS` from the same [latest GitHub Release](https://github.com/TimWongUp/keepygaga/releases/latest). Verify that the wheel matches its SHA-256 entry before executing it, replace `X.Y.Z` below with that release version, then run:
+Download the `keepygaga-X.Y.Z-py3-none-any.whl` asset and `SHA256SUMS` from the same [latest GitHub Release](https://github.com/TimWongUp/keepygaga/releases/latest) to private, non-symlinked paths. Immediately before installation, verify the exact wheel's SHA-256 entry and execute that same absolute path, replacing `X.Y.Z` below with the release version:
 
 ```shell
-uv tool install ./keepygaga-X.Y.Z-py3-none-any.whl
+uv tool install /absolute/private/path/keepygaga-X.Y.Z-py3-none-any.whl
 uv tool update-shell
 ```
 
@@ -96,7 +96,7 @@ keepygaga uninstall --yes
 
 `status` treats the install-state file as discovery data only and reports when live host verification is still required. `repair` reconciles recorded hosts from their current configuration. `uninstall` removes only Keepygaga host wiring; it preserves the configuration and memory tree.
 
-To upgrade, download the newer wheel and matching `SHA256SUMS`, verify the wheel, run `uv tool install --force ./keepygaga-X.Y.Z-py3-none-any.whl`, then run `keepygaga repair --yes` to reconcile host wiring.
+To upgrade, download the newer wheel and matching `SHA256SUMS`, rehash the exact absolute wheel path immediately before running `uv tool install --force /absolute/private/path/keepygaga-X.Y.Z-py3-none-any.whl`, then run `keepygaga repair --yes` to reconcile host wiring.
 
 Advanced deterministic host commands remain available as `keepygaga host setup|uninstall HOST`.
 

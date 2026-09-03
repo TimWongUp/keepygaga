@@ -46,10 +46,10 @@ Keepygaga 独立提供完整运行时：八个 raw Tool 的 MCP Server、精简�
 
 ### 手动安装
 
-从同一个[最新 GitHub Release](https://github.com/TimWongUp/keepygaga/releases/latest)下载 `keepygaga-X.Y.Z-py3-none-any.whl` 与 `SHA256SUMS`。执行 wheel 前先核对其 SHA-256 条目，将下方的 `X.Y.Z` 替换为该版本号，然后执行：
+从同一个[最新 GitHub Release](https://github.com/TimWongUp/keepygaga/releases/latest)把 `keepygaga-X.Y.Z-py3-none-any.whl` 与 `SHA256SUMS` 下载到私有、非符号链接路径。安装前立即核对将要执行的那个 wheel 的 SHA-256，并用同一个绝对路径执行；将下方的 `X.Y.Z` 替换为该版本号：
 
 ```shell
-uv tool install ./keepygaga-X.Y.Z-py3-none-any.whl
+uv tool install /absolute/private/path/keepygaga-X.Y.Z-py3-none-any.whl
 uv tool update-shell
 ```
 
@@ -96,7 +96,7 @@ keepygaga uninstall --yes
 
 `status` 只把安装状态文件当作发现线索，并明确标识仍需真实宿主验证的部分。`repair` 依据 live 配置重新对齐已记录宿主；`uninstall` 只拆除 Keepygaga 接线，保留配置与记忆树。
 
-升级时下载新版 wheel 与同一 Release 的 `SHA256SUMS`，校验 wheel 后执行 `uv tool install --force ./keepygaga-X.Y.Z-py3-none-any.whl`，再运行 `keepygaga repair --yes` 对齐宿主接线。
+升级时下载新版 wheel 与同一 Release 的 `SHA256SUMS`，在安装前立即重新校验将要执行的绝对路径，然后运行 `uv tool install --force /absolute/private/path/keepygaga-X.Y.Z-py3-none-any.whl`，再执行 `keepygaga repair --yes` 对齐宿主接线。
 
 高级确定性入口仍为 `keepygaga host setup|uninstall HOST`。
 
