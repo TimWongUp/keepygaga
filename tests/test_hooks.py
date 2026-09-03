@@ -398,12 +398,13 @@ def test_route_rejects_symlinked_state_root_ancestor(
     assert not (outside / "nested").exists()
 
 
-def test_grok_closeout_honors_reentry_guard() -> None:
-    assert closeout.run("grok", "Stop", {"reason": "end_turn"})
-    assert (
-        closeout.run("grok", "Stop", {"reason": "end_turn", "stop_hook_active": True})
-        == {}
+def test_grok_closeout_is_not_projected() -> None:
+    fragment = build_fragment(
+        "grok", launcher=Path("/keepygaga"), config_path=Path("/config.toml")
     )
+
+    assert fragment["payload"] == {}
+    assert closeout.run("grok", "Stop", {"reason": "end_turn"}) == {}
 
 
 def test_antigravity_uninstall_fragment_targets_installed_group(tmp_path: Path) -> None:

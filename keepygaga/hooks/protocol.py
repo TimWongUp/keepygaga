@@ -25,7 +25,6 @@ _PAYLOAD_KINDS: dict[Capability, dict[str, str]] = {
         "codex": "hook_specific",
         "claude": "hook_specific",
         "workbuddy": "hook_specific",
-        "grok": "hook_specific",
         "hermes": "context",
     },
 }
@@ -34,7 +33,6 @@ _CLOSEOUT_EVENTS = {
     "codex": "PostToolUse",
     "claude": "PostToolUse",
     "workbuddy": "PostToolUse",
-    "grok": "Stop",
 }
 
 

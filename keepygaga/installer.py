@@ -191,7 +191,8 @@ def _call_host(host: str, action: str, config_path: Path, config: KeepygagaConfi
     return selected(config_path, config)
 
 
-def _host_state(*, hooks: bool) -> dict[str, object]:
+def _host_state(host: str) -> dict[str, object]:
+    hooks = host != "grok"
     return {
         "contract_version": CONTRACT_VERSION,
         "hook_protocol_version": HOOK_PROTOCOL_VERSION if hooks else None,
@@ -255,7 +256,7 @@ def install(
                     },
                 ) from exc
             raise
-        state_hosts[host] = _host_state(hooks=True)
+        state_hosts[host] = _host_state(host)
         try:
             _write_state(config_path, memory_root, state_hosts)
         except HostSetupError as exc:

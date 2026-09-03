@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 
@@ -96,6 +97,22 @@ def test_explicit_configs_have_independent_state_paths(tmp_path: Path) -> None:
     assert installer.state_path(first) != installer.state_path(second)
 
 
+def test_install_records_grok_rules_fallback(tmp_path: Path, monkeypatch) -> None:
+    config_path = tmp_path / "config.toml"
+    memory_root = tmp_path / "memory"
+    monkeypatch.setattr(
+        installer,
+        "_call_host",
+        lambda *_args: {"status": "no_op"},
+    )
+
+    installer.install(config_path, memory_root, ["grok"])
+
+    state = json.loads(installer.state_path(config_path).read_text(encoding="utf-8"))
+    assert state["hosts"]["grok"]["hooks_enabled"] is False
+    assert state["hosts"]["grok"]["hook_protocol_version"] is None
+
+
 def test_upgrade_without_recorded_hosts_skips_repair(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -115,6 +132,38 @@ def test_upgrade_without_recorded_hosts_skips_repair(
     assert result["status"] == "applied"
     assert result["repair"] == "skipped"
     assert len(calls) == 1
+
+
+def test_upgrade_repairs_recorded_grok_host(tmp_path: Path, monkeypatch) -> None:
+    config_path = tmp_path / "config.toml"
+    monkeypatch.setattr(
+        installer,
+        "_load_state",
+        lambda _path: {"install_channel": "uv-tool", "hosts": {"grok": {}}},
+    )
+    monkeypatch.setattr(installer.shutil, "which", lambda name: f"/bin/{name}")
+    calls: list[list[str]] = []
+    monkeypatch.setattr(
+        installer,
+        "run_captured",
+        lambda command, **_kwargs: (
+            calls.append(command) or subprocess.CompletedProcess(command, 0, "", "")
+        ),
+    )
+
+    result = installer.upgrade(config_path, apply=True)
+
+    assert result["status"] == "applied"
+    assert calls == [
+        ["/bin/uv", "tool", "upgrade", "keepygaga"],
+        [
+            "/bin/keepygaga",
+            "--config",
+            str(config_path.resolve()),
+            "repair",
+            "--yes",
+        ],
+    ]
 
 
 def test_upgrade_timeout_becomes_host_setup_error(tmp_path: Path, monkeypatch) -> None:
