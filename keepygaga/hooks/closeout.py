@@ -8,7 +8,8 @@ from keepygaga.hooks.protocol import closeout_payload
 from keepygaga.hooks.route import consume_closeout
 
 REMINDER = (
-    "收尾前按已加载规则检查项目上下文和用户长期记忆；需要则完成更新，否则结束。"
+    "收尾前按已加载规则检查项目上下文和用户长期记忆；需要则完成更新，"
+    "无需更新时静默完成收尾，只向用户回复原任务所需内容。"
 )
 
 

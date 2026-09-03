@@ -22,13 +22,15 @@ Keepygaga 只保存少量、能跨任务长期发挥作用的信息：用户是�
 
 Keepygaga 独立提供完整运行时：八个 raw Tool 的 MCP Server、精简全局 Agent Contract、内置跨宿主 Hook，以及 CLI 控制面。它不依赖数据库、向量索引、源码 checkout 或外部 Hook Runtime；Obsidian 是推荐的人类界面，不是运行依赖。
 
-核心记忆由 `profile.md`、`preferences.md` 以及 `topics/`、`areas/`、`people/` 的直属页面组成。对代码项目来说，Keepygaga 不替代仓库自己的术语、架构、操作说明、重要决定与当前状态，只保留项目位置和已完成重大里程碑。
+核心记忆由 `profile.md`、`preferences.md` 以及 `topics/`、`areas/`、`people/` 的直属页面组成。持续项目统一登记在 `areas/projects.md`：每个项目只用一条 Fact 保存简介、规范项目真源和可选的最新重大节点，后续变化直接替换原 Fact。完整历史、术语、架构、操作说明、重要决定与当前状态仍由项目仓库或其他直接真源负责。
 
 宿主原生记忆可以继续负责该宿主的会话召回与项目内学习；Keepygaga 只负责应当随用户跨宿主流动的少量稳定事实。
 
 公开 MCP Tool 固定为 `list`、`read`、`create`、`add`、`update`、`move`、`rename`、`delete`。
 
 会话启动时只注入 `profile.md`、`preferences.md` 和三个动态分区的描述。Agent 需要页面元数据时，再对 `topics`、`areas` 或 `people` 中的一个分区调用 `list`。新建或语义更新的 Fact 会获得由 Store 生成的本地日期后缀；已有无日期 Fact 仍可读取，升级也不会改写 Memory Root。
+
+已有项目页面的 Contract 3 用户，应在 Contract 4 首次写入项目记忆前完成[项目索引迁移](docs/operations.md#contract-3-project-index-migration)。
 
 ## 安装
 

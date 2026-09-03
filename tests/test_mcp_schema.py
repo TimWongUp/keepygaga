@@ -168,6 +168,14 @@ def test_public_mcp_surface_and_exact_top_level_shapes() -> None:
 def test_tool_protocol_is_discoverable_from_descriptions_and_schema() -> None:
     tools = asyncio.run(mcp_server.mcp.list_tools())
     by_name = {tool.name: tool for tool in tools}
+    instructions = mcp_server._server_instructions()
+
+    assert "`areas/projects.md`" in instructions
+    assert "exactly one Fact per maintained project" in instructions
+    assert "<https://github.com/owner/repo>" in instructions
+    assert "use `create` with the initial project Fact" in instructions
+    assert "do not create a duplicate canonical page" in instructions
+    assert "must use `update`" in instructions
 
     assert "Route Catalog" in (by_name["list"].description or "")
     assert "opaque write versions" in (by_name["read"].description or "")

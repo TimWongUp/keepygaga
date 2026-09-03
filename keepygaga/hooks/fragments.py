@@ -360,14 +360,6 @@ def build_fragment(
                     "timeout": 2,
                 },
             ],
-            "pre_verify": [
-                {
-                    "command": _command(
-                        launcher, config_path, "closeout", platform, "pre_verify"
-                    ),
-                    "timeout": 2,
-                }
-            ],
         }
     elif enabled and host == "antigravity":
         payload = {

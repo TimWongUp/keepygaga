@@ -22,13 +22,15 @@ The product has three deliberately separate surfaces:
 
 Keepygaga ships the complete runtime: an eight-tool MCP server, a concise global Agent Contract, built-in cross-host Hooks, and the CLI control plane. It does not require a database, embeddings, a source checkout, or an external Hook runtime. Obsidian is the recommended human interface, not a runtime dependency.
 
-Core memory contains `profile.md`, `preferences.md`, and direct pages below `topics/`, `areas/`, and `people/`. For code projects, Keepygaga does not replace repository-owned terms, architecture, operating guides, decisions, or current state; it keeps only project locations and completed major milestones.
+Core memory contains `profile.md`, `preferences.md`, and direct pages below `topics/`, `areas/`, and `people/`. Ongoing projects share one canonical index at `areas/projects.md`: one Fact per project holds a brief, its canonical Authority, and optionally its latest completed major milestone, with later changes replacing that Fact. Complete history, terminology, architecture, operating guides, decisions, and current state remain in the repository or another direct project source.
 
 Host-native memories can continue to own host-specific conversation recall and project learning. Keepygaga owns the small set of stable user facts that should follow the user across hosts.
 
 The public MCP surface is exactly `list`, `read`, `create`, `add`, `update`, `move`, `rename`, and `delete`.
 
 Session bootstrap injects only `profile.md`, `preferences.md`, and descriptions of the three dynamic scopes. Agents call `list` for one of `topics`, `areas`, or `people` when they need page metadata. New or semantically updated Facts receive a Store-owned local date suffix; existing undated Facts remain readable and upgrades do not rewrite the Memory Root.
+
+Contract 3 users with existing project pages should follow the [project-index migration](docs/operations.md#contract-3-project-index-migration) before the first Contract 4 project-memory write.
 
 ## Install
 

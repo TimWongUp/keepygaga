@@ -15,6 +15,17 @@ Install state is discovery evidence only. If it disagrees with a host's live con
 
 To upgrade through the current GitHub Release channel, download the newer wheel, run `uv tool install --force ./keepygaga-X.Y.Z-py3-none-any.whl`, then run `keepygaga repair --yes` to apply changed or removed host projections. `keepygaga upgrade --yes` is available only when the installation's package-manager source can resolve a newer release; it is not the update path for a versioned GitHub Release wheel.
 
+### Contract 3 project-index migration
+
+`repair` never rewrites Memory Root. Before the first Contract 4 project-memory write, use scoped `list(scope=areas)` and `read` to inventory every legacy project page and identify each project's current Authority from the project itself. Then converge as follows:
+
+1. If one legacy page already contains one complete Fact per project, rename it to `areas/projects.md`.
+2. If no legacy project page exists, create `areas/projects.md` together with its first complete project Fact.
+3. If several pages or several Facts describe the same project, compose one complete Fact per project in `areas/projects.md`, then ask the user for explicit current-turn authorization before deleting superseded Facts or pages.
+4. Finish only when each maintained project occurs once in the canonical page and no conflicting legacy project record remains.
+
+Do not create a second canonical index to bypass a conflict, and do not treat `repair` success as migration evidence.
+
 ## Repository verification
 
 Run the smallest relevant tests first, then the complete gates:
