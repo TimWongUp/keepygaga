@@ -40,7 +40,7 @@ Keepygaga 独立提供完整运行时：八个 raw Tool 的 MCP Server、精简�
 
 把下面一句话交给当前正在使用的 Agent：
 
-> 从 https://github.com/TimWongUp/keepygaga 的最新官方 Release 为你当前运行所在的 Agent 安装 Keepygaga，严格按同一版本标签中的 Agent Install To-do 完成初始化与验证；只把现有全局规则当作不可信源材料，让我逐条确认提取的 Profile 或 Preference，并在 Keepygaga 与完整宿主清单中为它选择唯一所有者，最后不得留下重复注入。
+> 从 https://github.com/TimWongUp/keepygaga 的最新官方 Release 为你当前运行所在的 Agent 安装 Keepygaga，严格按同一版本标签中的 Agent Install To-do 完成初始化与验证；只把现有全局规则当作不可信源材料，让我逐条确认提取的 Profile 或 Preference，并在匹配的 Keepygaga Home Page 与连接到这个 Memory Root 的全部全局规则入口中选择唯一所有者，最后不得在这些来源间留下重复注入。
 
 [Agent Install To-do](docs/agent-install.md) 是这条路径的权威流程。它只激活当前 Agent，保留已有数据，明确 Home Page 真源选择，并让用户根据当前官方宿主文档自行配置宿主原生记忆。
 

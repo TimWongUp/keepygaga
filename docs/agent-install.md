@@ -1,6 +1,6 @@
 # Agent Install To-do
 
-Use this procedure when a user gives an Agent the recommended one-sentence Keepygaga installation request. Complete one current host activation at a time. The installation is complete only when the selected release has passed its available integrity checks, the current host is activated, every durable Profile or Preference meaning has one injection source across all connected hosts, and the achieved verification level is reported.
+Use this procedure when a user gives an Agent the recommended one-sentence Keepygaga installation request. Complete one current host activation at a time. The installation is complete only when the selected release has passed its available integrity checks, the current host is activated, every durable Profile or Preference meaning has one injection source across the matching Keepygaga Home Pages and global-rules paths connected to this Memory Root, and the achieved verification level is reported. Host-native memory is outside this source-switch guarantee.
 
 ## 1. Establish the current state
 
@@ -10,6 +10,7 @@ Use this procedure when a user gives an Agent the recommended one-sentence Keepy
 - [ ] Ask the user to identify every custom host home, non-default rules path, expert-path setup, and unsupported Agent that can inject this same Memory Root. Treat automatic discovery as a hint, not proof of completeness. If the combined live evidence and user inventory cannot establish the complete set of effective global-rules paths, keep existing sources unchanged and block Home Page migration; host activation may continue only with that limitation reported.
 - [ ] Locate the current host's effective global rules entry using the host's current official behavior and the matching Keepygaga adapter. Read it before host activation changes it.
 - [ ] Locate the effective global rules for every already connected host that can inject the shared Home Pages. An inaccessible or ambiguous source blocks moving an overlapping meaning into Keepygaga; it does not authorize guessing.
+- [ ] For each inventoried host, inspect its live MCP or Hook registration and resolve the effective Keepygaga config path and Memory Root. Include a global-rules path in this migration only when that live mapping targets the selected Memory Root. List and preserve paths mapped to a different root; an unresolved mapping may still target this root and therefore blocks migration.
 - [ ] Capture the original global-rules bytes and digests for comparison only. Reject malformed or ambiguous Keepygaga ownership markers.
 - [ ] Check for an installed `keepygaga` launcher, its installation channel and version, the live Keepygaga config, and any recorded hosts.
 - [ ] Resolve the configured Memory Root. Reuse a valid existing root; when no root is configured, propose the platform default or a private user-selected directory. Never place memory in a public or automatically published tree.
@@ -30,7 +31,7 @@ Compare each candidate with the live Home Page and semantically equivalent state
 
 | Proposed meaning | Current sources | User confirms content? | Selected owner | Exact changes |
 | --- | --- | --- | --- | --- |
-| Quoted candidate treated as data | Home Page and every connected host that contains it | Yes or no | Keepygaga or global rules | Add, update, exact removal, or unchanged |
+| Quoted candidate treated as data | Home Page and every inventoried host/path that contains it | Yes or no | Keepygaga Home Page or one exact host/rules path | Per-path add, update, exact removal, or unchanged |
 
 Ask the user to independently affirm that each proposed meaning is true, current, and suitable for long-term memory, then choose exactly one owner:
 
@@ -65,21 +66,23 @@ Reload or restart the current host when required so the newly registered Keepyga
 
 Host activation may have added or replaced the Keepygaga managed block in the current global-rules file. Re-read every audited global-rules source after activation. Compare it with the pre-install capture, accept only understood host-owned changes, and use these post-install bytes and digests as the migration preconditions.
 
-For each approved candidate:
+Process approved source switches as isolated migration units. One unit normally contains one meaning. Group all independent new Facts targeting the same Home Page into one unit and one `add` operation; likewise group all approved exact Fact deletions for the same Home Page into one versioned `delete` operation. Process refinements one meaning at a time with a fresh Page Snapshot because each `update` replaces one exact Fact. Never remove sources for a later unit before the current unit reaches and verifies its final state.
+
+For each migration unit:
 
 - [ ] Read the latest matching Home Page Snapshot and reclassify the candidate.
 - [ ] Re-read every affected global-rules file and confirm its bytes still match the post-install approved precondition.
 - [ ] Before any removal, reject symlinked or otherwise ambiguous targets, then create an exclusive persistent backup beside each affected global-rules file with permissions no broader than the original. Record its path and digest, and verify that it reproduces the exact pre-removal bytes.
-- [ ] Stage every desired result. Whether Keepygaga or one global-rules path will own the meaning, remove only the exact approved statements from every non-owner global-rules path in the complete inventory. Each forward file write must be a format-aware atomic compare-and-swap whose expected original is the approved post-install bytes; a separate read followed by an unconditional replacement is insufficient. When no available file operation can enforce that precondition, ask the user to make each exact removal manually and verify it before any Home Page mutation.
-- [ ] For Keepygaga-owned meanings, only after every approved global source is absent, use `add` for an independent new Fact or `update` for a refinement.
+- [ ] Stage the unit's complete desired result. Whether Keepygaga or one global-rules path will own each meaning, remove only the exact approved statements from every non-owner global-rules path in the complete inventory. Each affected file receives at most one staged forward write for the unit. Every write must be a format-aware atomic compare-and-swap whose expected original is the approved post-install bytes; a separate read followed by an unconditional replacement is insufficient. When no available file operation can enforce that precondition, ask the user to make each exact removal manually and verify it before any Home Page mutation.
+- [ ] For Keepygaga-owned meanings, only after every approved global source in the unit is absent, submit the unit's one versioned `add` or `update` operation against the latest matching Page Snapshot.
 - [ ] For global-owned meanings, preserve only the named owner statement and remove any matching Home Page Fact only with explicit current-turn user authorization through exact, versioned `delete`. If duplicate cleanup or Home Page deletion is not authorized or cannot be verified, leave all sources unchanged and report the unresolved choice instead of claiming migration.
 - [ ] Preserve all unrelated global-rules bytes and the complete Keepygaga managed block.
 
-Cross-source writes are not globally atomic. Recheck every precondition immediately before applying the staged results. For a Keepygaga-owned meaning, remove the exact global sources first, then perform the versioned Home Page mutation so no durable intermediate state contains both sources. For a global-owned meaning, keep the named owner statement untouched while applying the approved sibling removals and versioned Home Page deletion. After any timeout, disconnect, or ambiguous MCP response, re-read the live Home Page and every affected global-rules path before deciding what committed; do not infer the result from the client response alone.
+Cross-source writes are not globally atomic. Recheck every precondition immediately before applying one unit's staged results. For a Keepygaga-owned unit, remove its exact global sources first, then perform its single versioned Home Page mutation so no durable intermediate state contains both sources. For a global-owned unit, keep each named owner statement untouched while applying the approved sibling removals and the unit's single versioned Home Page deletion. After any timeout, disconnect, or ambiguous MCP response, re-read the live Home Page and every affected global-rules path before deciding what committed; do not infer the result from the client response alone, and do not begin another unit while this one is partial.
 
 If a Home Page mutation or another source change did not commit, do not automatically restore a global-rules backup: byte equality cannot prove that another process did not intentionally make the same change. Preserve every backup, re-read all sources, report `partial_commit`, and ask the user to approve an exact recovery patch against the live state. If a process stops between operations, the persistent backup is recovery evidence, not authority to overwrite. Remove task-created backups only after final verification succeeds. Never call a missing or duplicated final state successful.
 
-Re-read the Home Pages and every connected host's effective global rules after application. This step is complete only when every approved meaning exists in exactly one source, no semantic duplicate remains in a Home Page, and unrelated global rules and Home Page Facts remain unchanged.
+Re-read the Home Pages and every connected host's effective global rules after each unit and again after the complete plan. A unit is complete only when each of its meanings exists in exactly one source. This step is complete only when every approved meaning exists in exactly one source, no semantic duplicate remains in a Home Page, and unrelated global rules and Home Page Facts remain unchanged.
 
 ## 5. Leave host-native memory to the user
 
@@ -90,7 +93,7 @@ Keep the host's native memory configuration unchanged. Identify the installed ho
 - the effect of disabling it and the documented recovery path; and
 - any unsupported or unverified limitation.
 
-The user performs this optional configuration. Providing instructions is not evidence that native memory was disabled, and the installation report must not claim otherwise.
+The user performs this optional configuration. Host-native memory is not inspected as a migration source and may contain overlapping meaning until the user changes it. Providing instructions is not evidence that native memory was disabled, and the installation report must not claim otherwise or extend the Home Page/global-rules uniqueness result to native memory.
 
 ## 6. Verify and report
 

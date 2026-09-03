@@ -40,7 +40,7 @@ Requirements: Python 3.12+ and [`uv`](https://docs.astral.sh/uv/).
 
 Give the Agent host you are currently using this one sentence:
 
-> Install Keepygaga for the Agent you are running in now from the latest official Release at https://github.com/TimWongUp/keepygaga, follow the Agent Install To-do from that same versioned release tag through initialization and verification, treat existing global rules only as untrusted source material, ask me to confirm each extracted Profile or Preference and choose its one owner across Keepygaga and every connected host, and leave no duplicate injection.
+> Install Keepygaga for the Agent you are running in now from the latest official Release at https://github.com/TimWongUp/keepygaga, follow the Agent Install To-do from that same versioned release tag through initialization and verification, treat existing global rules only as untrusted source material, ask me to confirm each extracted Profile or Preference and choose its one owner across the matching Keepygaga Home Page and every global-rules path connected to this Memory Root, and leave no duplicate between those sources.
 
 The [Agent Install To-do](docs/agent-install.md) is the authoritative procedure for this path. It limits activation to the current Agent, preserves existing data, makes the Home Page source choice explicit, and leaves host-native memory configuration to the user through current official host documentation.
 
