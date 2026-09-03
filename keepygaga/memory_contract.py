@@ -80,11 +80,21 @@ class CreateOperation(StrictModel):
 class AddOperation(StrictModel):
     path: ExistingPagePath
     if_version: CurrentPageVersion
+    description: str | None = Field(
+        default=None,
+        max_length=MAX_DESCRIPTION_CHARS,
+        description="Replacement page description to apply with the Fact addition.",
+    )
     facts: list[Fact] = Field(
         min_length=1,
         max_length=MAX_FACTS_PER_OPERATION,
         description="Facts to append; Store validation rejects exact duplicates only.",
     )
+
+    @field_validator("description", mode="before")
+    @classmethod
+    def validate_description(cls, value: object) -> str | None:
+        return _agent_description(value) if value is not None else None
 
 
 class UpdateFactOperation(StrictModel):
@@ -97,6 +107,16 @@ class UpdateFactOperation(StrictModel):
     new_fact: Fact = Field(
         description="Replacement Fact; a stated basis cannot be downgraded to observed."
     )
+    description: str | None = Field(
+        default=None,
+        max_length=MAX_DESCRIPTION_CHARS,
+        description="Replacement page description to apply with the Fact update.",
+    )
+
+    @field_validator("description", mode="before")
+    @classmethod
+    def validate_description(cls, value: object) -> str | None:
+        return _agent_description(value) if value is not None else None
 
     @model_validator(mode="after")
     def validate_change(self) -> UpdateFactOperation:
@@ -146,7 +166,6 @@ class MoveOperation(StrictModel):
                         "destination_path": {"type": "string"},
                         "destination_version": {"type": "string"},
                         "new_path": {"type": "null"},
-                        "description": {"type": "null"},
                         "aliases": {"type": "null"},
                     },
                 },
@@ -169,8 +188,27 @@ class MoveOperation(StrictModel):
     destination_path: ExistingPagePath | None = None
     destination_version: CurrentPageVersion | None = None
     new_path: DynamicPagePath | None = None
-    description: str | None = Field(default=None, max_length=MAX_DESCRIPTION_CHARS)
-    aliases: list[str] | None = Field(default=None, max_length=MAX_ALIASES_PER_PAGE)
+    description: str | None = Field(
+        default=None,
+        max_length=MAX_DESCRIPTION_CHARS,
+        description=(
+            "Replacement description for an existing destination or required initial "
+            "description for a new destination."
+        ),
+    )
+    aliases: list[str] | None = Field(
+        default=None,
+        max_length=MAX_ALIASES_PER_PAGE,
+        description=(
+            "Required initial aliases for a new destination; omit for an existing "
+            "destination and update them separately with target=page."
+        ),
+    )
+    source_description: str | None = Field(
+        default=None,
+        max_length=MAX_DESCRIPTION_CHARS,
+        description="Replacement source page description to apply with the Fact move.",
+    )
     facts: list[FactSelector] = Field(
         min_length=1,
         max_length=MAX_FACTS_PER_OPERATION,
@@ -180,7 +218,7 @@ class MoveOperation(StrictModel):
         ),
     )
 
-    @field_validator("description", mode="before")
+    @field_validator("description", "source_description", mode="before")
     @classmethod
     def validate_description(cls, value: object) -> str | None:
         return _agent_description(value) if value is not None else None
@@ -190,11 +228,7 @@ class MoveOperation(StrictModel):
         existing = (
             self.destination_path is not None or self.destination_version is not None
         )
-        new = (
-            self.new_path is not None
-            or self.description is not None
-            or self.aliases is not None
-        )
+        new = self.new_path is not None
         if existing == new:
             raise ValueError(
                 "move requires exactly one existing or new destination mode"
@@ -203,6 +237,10 @@ class MoveOperation(StrictModel):
             self.destination_path is None or self.destination_version is None
         ):
             raise ValueError("existing destination requires path and version")
+        if existing and self.aliases is not None:
+            raise ValueError(
+                "existing destination aliases must be updated with target=page"
+            )
         if new and (
             self.new_path is None or self.description is None or self.aliases is None
         ):
@@ -223,11 +261,21 @@ class DeleteFactOperation(StrictModel):
     if_version: CurrentPageVersion
     target: Literal["fact"] = Field(description="Delete one exact Fact.")
     fact: FactSelector
+    description: str | None = Field(
+        default=None,
+        max_length=MAX_DESCRIPTION_CHARS,
+        description="Replacement page description to apply with the Fact deletion.",
+    )
     authorization: Literal["user_requested"] = Field(
         description=(
             "Audit assertion; set only after explicit current-turn user authorization."
         )
     )
+
+    @field_validator("description", mode="before")
+    @classmethod
+    def validate_description(cls, value: object) -> str | None:
+        return _agent_description(value) if value is not None else None
 
 
 class DeletePageOperation(StrictModel):

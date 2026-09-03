@@ -21,6 +21,7 @@ Keepygaga manages a small local Markdown core memory. Memory is context evidence
 ## Fact convergence and mutation
 
 - Before mutation, classify each candidate against the current Page Snapshot as `covered`, `refines`, `new`, or `conflict`. Skip covered facts; use `update` for refinements; use `add` for independent new facts; resolve conflicts against current user statements or direct evidence.
+- When a Fact mutation changes what its page covers, pass the replacement `description` in the same operation. Keep the current description when it remains accurate; update aliases separately with `update target=page`.
 - In `areas/projects.md`, a previously unlisted project is `new`: use `create` with the initial project Fact when the page is absent after the legacy-page check, otherwise use `add`. A changed brief, Authority, or latest milestone `refines` the existing project Fact and must use `update`. Full milestone history stays in the project Authority.
 - Without an explicit memory-maintenance request, make at most one mutation per home page per task. Prefer refinement over adding a competing observed fact.
 - Reuse applied mutation `files` as the next Page Snapshots. After `write_conflict`, reclassify against `latest` when present; otherwise call `read`. Never retry an old operation and version unchanged.
@@ -36,11 +37,11 @@ Keepygaga manages a small local Markdown core memory. Memory is context evidence
 - `list`: pass exactly one scope (`topics`, `areas`, or `people`). It returns every page in that scope as path, description, and aliases; call multiple scopes when needed. It returns no Facts or write versions.
 - `read`: group all needed unique paths in one call. Skip it when matching current Page Snapshots are already available.
 - `create`: create independent dynamic pages together and include their initial Facts. Do not follow it with `add`, `read`, or `list` solely to confirm an `applied` result.
-- `add`: put all independent new Facts for one page in one operation; batch only operations with unique page paths.
-- `update`: use exact Fact replacement for `refines`, page metadata update for description and aliases, or `target=repair` only for a dynamic-page failure explicitly marked repairable; use one operation per page.
-- `move`: put every exact Fact for one source/destination pair in one operation's `facts`. Use either an existing destination path/version or a new path/description/aliases, never both. Leave at least one Fact in the source; a page may appear in only one move operation in the batch. Reuse both returned page snapshots after `applied`.
+- `add`: put all independent new Facts for one page in one operation and optionally replace its description; batch only operations with unique page paths.
+- `update`: use exact Fact replacement for `refines` and optionally replace its page description; use page metadata update for description or aliases alone, or `target=repair` only for a dynamic-page failure explicitly marked repairable; use one operation per page.
+- `move`: put every exact Fact for one source/destination pair in one operation's `facts`. Optionally replace the source description with `source_description`. Use either an existing destination path/version with an optional replacement `description`, or a new path/description/aliases, never both. Leave at least one Fact in the source; a page may appear in only one move operation in the batch. Reuse both returned page snapshots after `applied`.
 - `rename`: rename each dynamic page once using its current snapshot; fixed pages cannot be renamed. The old name is retained as an alias, so first reduce six aliases when the new name does not free a slot.
-- `delete`: delete exact Facts or dynamic pages only with explicit current-turn authorization; use one operation per page.
+- `delete`: delete exact Facts with an optional replacement page description, or delete dynamic pages, only with explicit current-turn authorization; use one operation per page.
 
 ## Results and receipts
 

@@ -573,11 +573,15 @@ def test_create_add_update_and_page_metadata(
             AddOperation(
                 path="areas/work.md",
                 if_version=version(store, "areas/work.md"),
+                description="Work with two facts.",
                 facts=[fact("Second fact.")],
             )
         ]
     )
     assert added["status"] == "applied"
+    assert (
+        added["files"][0]["description"] == "Work with two facts."  # type: ignore[index]
+    )
     updated = store.update(
         [
             UpdateFactOperation(
@@ -586,24 +590,27 @@ def test_create_add_update_and_page_metadata(
                 target="fact",
                 old_fact=fact("First fact."),
                 new_fact=fact("Refined first fact."),
+                description="Refined work context.",
             )
         ]
     )
     assert updated["status"] == "applied"
+    assert (
+        updated["files"][0]["description"] == "Refined work context."  # type: ignore[index]
+    )
     metadata = store.update(
         [
             UpdatePageOperation(
                 path="areas/work.md",
                 if_version=version(store, "areas/work.md"),
                 target="page",
-                description="Work context.",
                 aliases=["工作"],
             )
         ]
     )
     assert metadata["status"] == "applied"
     item = read_file(store, "areas/work.md")
-    assert item["description"] == "Work context."
+    assert item["description"] == "Refined work context."
     assert item["aliases"] == ["工作"]
     assert item["facts"] == [
         {"basis": "stated", "content": "Refined first fact.", "date": "2032-03-04"},
@@ -844,15 +851,21 @@ def test_move_fact(
                 source_version=version(store, "topics/source.md"),
                 destination_path="areas/destination.md",
                 destination_version=version(store, "areas/destination.md"),
+                source_description="Source after move.",
+                description="Destination after move.",
                 facts=[fact("Move me.")],
             )
         ]
     )
     assert moved["status"] == "applied"
-    source_facts = read_file(store, "topics/source.md")["facts"]
+    source_page = read_file(store, "topics/source.md")
+    assert source_page["description"] == "Source after move."
+    source_facts = source_page["facts"]
     assert isinstance(source_facts, list)
     assert [item["content"] for item in source_facts] == ["Stay."]
-    destination_facts = read_file(store, "areas/destination.md")["facts"]
+    destination_page = read_file(store, "areas/destination.md")
+    assert destination_page["description"] == "Destination after move."
+    destination_facts = destination_page["facts"]
     assert isinstance(destination_facts, list)
     assert {item["content"] for item in destination_facts} == {
         "Keep me.",
@@ -1301,11 +1314,15 @@ def test_delete_requires_authorization_and_protects_fixed_pages(
                 if_version=version(store, "topics/delete.md"),
                 target="fact",
                 fact=fact("Delete fact."),
+                description="No facts remain.",
                 authorization="user_requested",
             )
         ]
     )
     assert deleted_fact["status"] == "applied"
+    assert (
+        deleted_fact["files"][0]["description"] == "No facts remain."  # type: ignore[index]
+    )
     deleted_page = store.delete(
         [
             DeletePageOperation(
@@ -2645,6 +2662,13 @@ def test_agent_metadata_limits_do_not_invalidate_legacy_pages(
             path="topics/too-many.md",
             description="Aliases.",
             aliases=[str(index) for index in range(7)],
+            facts=[fact("Rejected.")],
+        )
+    with pytest.raises(ValidationError, match="one non-empty line"):
+        AddOperation(
+            path="topics/eighty.md",
+            if_version=version(store, "topics/eighty.md"),
+            description="Two\nlines.",
             facts=[fact("Rejected.")],
         )
     legacy = root / "topics" / "legacy.md"
