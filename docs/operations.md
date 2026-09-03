@@ -4,17 +4,16 @@
 
 The `keepygaga` CLI installs and maintains the product; it is not the routine interface for browsing or editing memory. Users inspect, correct, and organize the shared Memory Root in Obsidian or another Markdown editor, while Agents use MCP and Hooks.
 
-Install a published release with `uv tool install keepygaga`, then run `keepygaga install`. Interactive installation prompts for the Memory Root before host selection. An existing configured root is reused automatically when adding another host. Non-interactive first installation requires `--yes`, one or more explicit `--host` values, and an explicit `--memory-root` only when reusing a private, trusted tree.
+Download `keepygaga-X.Y.Z-py3-none-any.whl` from the latest GitHub Release, install it with `uv tool install ./keepygaga-X.Y.Z-py3-none-any.whl`, and run `uv tool update-shell`. Restart the terminal so the tool directory is on `PATH`, then run `keepygaga install`. Interactive installation prompts for the Memory Root before host selection. An existing configured root is reused automatically when adding another host. Non-interactive first installation requires `--yes`, one or more explicit `--host` values, and an explicit `--memory-root` only when reusing a private, trusted tree.
 
 - `keepygaga status` reads live config and Doctor, compares recorded Contract versions, and labels host checks that still require live verification.
 - `keepygaga repair --yes` reruns idempotent desired-state reconciliation for recorded hosts, including removal of obsolete Keepygaga-owned Hook entries.
-- `keepygaga upgrade --yes` upgrades the published `uv` tool and then runs that repair path, so changed or removed Hook projections are applied to every recorded host while unrelated Hooks survive.
 - `keepygaga uninstall --yes` removes recorded host wiring while preserving config and memory.
 - `keepygaga host setup|uninstall HOST` remains the deterministic expert path.
 
 Install state is discovery evidence only. If it disagrees with a host's live configuration, the host file and official diagnostic win.
 
-Running the package manager directly updates only the runtime. After `uv tool upgrade keepygaga` or `pipx upgrade keepygaga`, run `keepygaga repair --yes` to apply changed or removed host projections. The integrated `keepygaga upgrade --yes` command performs both steps.
+To upgrade through the current GitHub Release channel, download the newer wheel, run `uv tool install --force ./keepygaga-X.Y.Z-py3-none-any.whl`, then run `keepygaga repair --yes` to apply changed or removed host projections. `keepygaga upgrade --yes` is available only when the installation's package-manager source can resolve a newer release; it is not the update path for a versioned GitHub Release wheel.
 
 ## Repository verification
 

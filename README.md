@@ -30,18 +30,18 @@ The public MCP surface is exactly `list`, `read`, `create`, `add`, `update`, `mo
 
 Session bootstrap injects only `profile.md`, `preferences.md`, and descriptions of the three dynamic scopes. Agents call `list` for one of `topics`, `areas`, or `people` when they need page metadata. New or semantically updated Facts receive a Store-owned local date suffix; existing undated Facts remain readable and upgrades do not rewrite the Memory Root.
 
-### Upgrading to 0.5
-
-Version 0.5 changes each `move` operation from a single `fact` field to a required `facts` array. Clients that cache MCP schemas must reconnect or refresh the Tool schema after upgrading, then group all exact Facts for one source/destination pair into that array. This is an MCP request-shape change only; the Markdown memory format and existing memory files are unchanged.
-
 ## Install
 
 Requirements: Python 3.12+ and [`uv`](https://docs.astral.sh/uv/).
 
+Download the `keepygaga-X.Y.Z-py3-none-any.whl` asset from the [latest GitHub Release](https://github.com/TimWongUp/keepygaga/releases/latest), replace `X.Y.Z` below with that release version, then run:
+
 ```shell
-uv tool install keepygaga
-keepygaga install
+uv tool install ./keepygaga-X.Y.Z-py3-none-any.whl
+uv tool update-shell
 ```
+
+Restart the terminal so the tool directory is on `PATH`, then run `keepygaga install`.
 
 Interactive installation first offers a Memory Root path, then detects available hosts without selecting them on the user's behalf. Point it at an existing `agents-memory` tree to connect another Agent to the same memory. Once configured, later installs reuse that root automatically. Automation must name every target explicitly:
 
@@ -58,12 +58,13 @@ The default configuration and memory paths are platform-native. To reuse an exis
 ```shell
 keepygaga status
 keepygaga repair --yes
-keepygaga upgrade --yes
 keepygaga doctor --json
 keepygaga uninstall --yes
 ```
 
-`status` treats the install-state file as discovery data only and reports when live host verification is still required. `repair` reconciles recorded hosts from their current configuration. `upgrade` installs the latest published release through `uv` and then repairs recorded hosts. `uninstall` removes only Keepygaga host wiring; it preserves the configuration and memory tree.
+`status` treats the install-state file as discovery data only and reports when live host verification is still required. `repair` reconciles recorded hosts from their current configuration. `uninstall` removes only Keepygaga host wiring; it preserves the configuration and memory tree.
+
+To upgrade, download the newer wheel, run `uv tool install --force ./keepygaga-X.Y.Z-py3-none-any.whl`, then run `keepygaga repair --yes` to reconcile host wiring.
 
 Advanced deterministic host commands remain available as `keepygaga host setup|uninstall HOST`.
 

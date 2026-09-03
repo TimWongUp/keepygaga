@@ -437,7 +437,7 @@ def upgrade(config_path: Path, *, apply: bool) -> dict[str, object]:
     if not command:
         raise HostSetupError(
             f"automatic upgrade for {channel} could not locate its package manager; "
-            "reinstall the latest GitHub/PyPI release manually"
+            "reinstall a newer GitHub Release wheel manually"
         )
     if not apply:
         return {

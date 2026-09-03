@@ -4,7 +4,7 @@
 
 Keepygaga is a user-owned cross-host core-memory layer: one Memory Root is shared by every configured Agent host. The recommended human interface is a private Obsidian vault, while any Markdown editor remains compatible. Obsidian is not a runtime dependency.
 
-Keepygaga is one independently installable Python product. The published wheel owns the MCP server, stable launchers, memory store, Agent Contract, built-in Hooks, host adapters, installation and operations control plane, and diagnostics. The `keepygaga` CLI performs installation, host wiring, status, diagnosis, repair, upgrades, and uninstall; it is not a daily memory browser or editor. It neither imports nor packages `keepygaga-knowledge`, `agent-runtime-config`, or an external Agent Hook Runtime.
+Keepygaga is one independently installable Python product. The published wheel owns the MCP server, stable launchers, memory store, Agent Contract, built-in Hooks, host adapters, installation and operations control plane, and diagnostics. The `keepygaga` CLI performs installation, host wiring, status, diagnosis, repair, package-manager upgrades when the installation source supports discovery, and uninstall; it is not a daily memory browser or editor. It neither imports nor packages `keepygaga-knowledge`, `agent-runtime-config`, or an external Agent Hook Runtime.
 
 The sibling `keepygaga-knowledge` repository may consume the same Markdown ecosystem, but it is not a runtime dependency and exposes no tool through this server.
 
@@ -45,7 +45,7 @@ Grok uses the managed Agent Contract as its Memory Closeout fallback. Its native
 
 Supported adapters are Codex, Claude Code, WorkBuddy, Grok, Hermes, and Antigravity CLI. Setup order is MCP, Agent Contract, Hooks. Each stage uses preflight data and detects concurrent changes; partial commits report applied components and recovery evidence. Repeated setup converges to `no_op`.
 
-Repair reconciles recorded hosts to the current desired state, including removal of obsolete Keepygaga-owned Hook projections. Upgrade first replaces the packaged runtime, then invokes that repair path so Hook changes and removals take effect without enabling new hosts or touching unrelated entries.
+Repair reconciles recorded hosts to the current desired state, including removal of obsolete Keepygaga-owned Hook projections. A package-manager upgrade first replaces the packaged runtime, then invokes that repair path so Hook changes and removals take effect without enabling new hosts or touching unrelated entries. The canonical GitHub Release wheel path reinstalls the newer wheel and runs repair explicitly.
 
 Uninstall removes only the `keepygaga` MCP registration, managed Contract block, and Keepygaga-owned Hook entries. It preserves Memory Root, product configuration, install package, unrelated MCP registrations, and unrelated Hooks. Repeated uninstall converges to `no_op`.
 
