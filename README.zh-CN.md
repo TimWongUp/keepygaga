@@ -30,6 +30,8 @@ Keepygaga 独立提供完整运行时：八个 raw Tool 的 MCP Server、精简�
 
 会话启动时只注入 `profile.md`、`preferences.md` 和三个动态分区的描述。Agent 需要页面元数据时，再对 `topics`、`areas` 或 `people` 中的一个分区调用 `list`。新建或语义更新的 Fact 会获得由 Store 生成的本地日期后缀；已有无日期 Fact 仍可读取，升级也不会改写 Memory Root。
 
+已有项目页面的 Contract 3 用户，应在 Contract 4 首次写入项目记忆前完成[项目索引迁移](docs/operations.md#contract-3-project-index-migration)。
+
 ## 安装
 
 要求 Python 3.12+ 和 [`uv`](https://docs.astral.sh/uv/)。

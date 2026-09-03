@@ -37,7 +37,7 @@ The product owns three semantic capabilities:
 - Memory Route injects a small per-turn routing reminder and stores only boolean transient signals.
 - Memory Closeout emits a deduplicated reminder only when the turn indicates project or durable-memory work.
 
-Both reminders direct the Agent to keep no-op memory decisions silent and return only the response required by the original task.
+Every projected reminder directs the Agent to keep no-op memory decisions silent and return only the response required by the original task. Hermes receives Context Bootstrap and Memory Route through `pre_llm_call`; its edited-code-only `pre_verify` event is not a general Memory Closeout surface and is intentionally omitted.
 
 Adapters project those capabilities into native host events. The merger removes only commands matching Keepygaga-owned current or legacy markers, then preserves all unrelated entries. Unsupported host capabilities are omitted honestly; no temporary or downloaded Hook implementation is synthesized.
 

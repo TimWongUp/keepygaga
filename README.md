@@ -30,6 +30,8 @@ The public MCP surface is exactly `list`, `read`, `create`, `add`, `update`, `mo
 
 Session bootstrap injects only `profile.md`, `preferences.md`, and descriptions of the three dynamic scopes. Agents call `list` for one of `topics`, `areas`, or `people` when they need page metadata. New or semantically updated Facts receive a Store-owned local date suffix; existing undated Facts remain readable and upgrades do not rewrite the Memory Root.
 
+Contract 3 users with existing project pages should follow the [project-index migration](docs/operations.md#contract-3-project-index-migration) before the first Contract 4 project-memory write.
+
 ## Install
 
 Requirements: Python 3.12+ and [`uv`](https://docs.astral.sh/uv/).

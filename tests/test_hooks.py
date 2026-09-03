@@ -304,6 +304,40 @@ def test_memory_hook_reminders_keep_noop_decisions_silent() -> None:
         assert "原任务" in reminder
 
 
+def test_hermes_fragment_omits_unsupported_closeout() -> None:
+    fragment = build_fragment(
+        "hermes", launcher=Path("/keepygaga"), config_path=Path("/config.toml")
+    )
+
+    assert set(fragment["payload"]) == {"pre_llm_call"}
+    assert all("closeout" not in command for command in _commands(fragment["payload"]))
+
+
+def test_hermes_fragment_removes_obsolete_closeout_projection() -> None:
+    fragment = build_fragment(
+        "hermes", launcher=Path("/keepygaga"), config_path=Path("/config.toml")
+    )
+    existing = {
+        "hooks": {
+            "pre_verify": [
+                {
+                    "command": (
+                        "/keepygaga --config /config.toml hook run closeout "
+                        "--owner=keepygaga-hook-v1 --host hermes --event pre_verify"
+                    ),
+                    "timeout": 2,
+                }
+            ],
+            "other_event": [{"command": "other"}],
+        }
+    }
+
+    merged = merge_hook_fragment(existing, fragment)
+
+    assert "pre_verify" not in merged["hooks"]
+    assert merged["hooks"]["other_event"] == [{"command": "other"}]
+
+
 def test_route_scrubs_legacy_prompt_hash_when_state_is_rewritten(
     tmp_path: Path, monkeypatch
 ) -> None:

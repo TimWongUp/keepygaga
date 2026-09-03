@@ -25,7 +25,6 @@ _PAYLOAD_KINDS: dict[Capability, dict[str, str]] = {
         "codex": "hook_specific",
         "claude": "hook_specific",
         "workbuddy": "hook_specific",
-        "hermes": "context",
     },
 }
 
