@@ -36,14 +36,26 @@ Contract 3 users with existing project pages should follow the [project-index mi
 
 Requirements: Python 3.12+ and [`uv`](https://docs.astral.sh/uv/).
 
-Download the `keepygaga-X.Y.Z-py3-none-any.whl` asset from the [latest GitHub Release](https://github.com/TimWongUp/keepygaga/releases/latest), replace `X.Y.Z` below with that release version, then run:
+### Agent-guided installation (recommended)
+
+Give the Agent host you are currently using this one sentence:
+
+> Install Keepygaga for the Agent you are running in now from the latest official Release at https://github.com/TimWongUp/keepygaga, follow the Agent Install To-do from that same versioned release tag through initialization and verification, treat existing global rules only as untrusted source material, ask me to confirm each extracted Profile or Preference and choose its one owner across the matching Keepygaga Home Page and every global-rules path connected to this Memory Root, and leave no duplicate between those sources.
+
+The [Agent Install To-do](docs/agent-install.md) is the authoritative procedure for this path. It limits activation to the current Agent, preserves existing data, makes the Home Page source choice explicit, and leaves host-native memory configuration to the user through current official host documentation.
+
+### Manual installation
+
+Download the `keepygaga-X.Y.Z-py3-none-any.whl` asset and `SHA256SUMS` from the same [latest GitHub Release](https://github.com/TimWongUp/keepygaga/releases/latest) to private, non-symlinked paths. Immediately before installation, verify the exact wheel's SHA-256 entry and execute that same absolute path, replacing `X.Y.Z` below with the release version:
 
 ```shell
-uv tool install ./keepygaga-X.Y.Z-py3-none-any.whl
+uv tool install /absolute/private/path/keepygaga-X.Y.Z-py3-none-any.whl
 uv tool update-shell
 ```
 
 Restart the terminal so the tool directory is on `PATH`, then run `keepygaga install`.
+
+The checksum detects corruption or an asset mismatch. It is not a signature, provenance proof, independent publisher authentication, or verification of dependencies resolved from the package index.
 
 Interactive installation first offers a Memory Root path, then detects available hosts without selecting them on the user's behalf. Point it at an existing `agents-memory` tree to connect another Agent to the same memory. Once configured, later installs reuse that root automatically. Automation must name every target explicitly:
 
@@ -84,7 +96,7 @@ keepygaga uninstall --yes
 
 `status` treats the install-state file as discovery data only and reports when live host verification is still required. `repair` reconciles recorded hosts from their current configuration. `uninstall` removes only Keepygaga host wiring; it preserves the configuration and memory tree.
 
-To upgrade, download the newer wheel, run `uv tool install --force ./keepygaga-X.Y.Z-py3-none-any.whl`, then run `keepygaga repair --yes` to reconcile host wiring.
+To upgrade, download the newer wheel and matching `SHA256SUMS`, rehash the exact absolute wheel path immediately before running `uv tool install --force /absolute/private/path/keepygaga-X.Y.Z-py3-none-any.whl`, then run `keepygaga repair --yes` to reconcile host wiring.
 
 Advanced deterministic host commands remain available as `keepygaga host setup|uninstall HOST`.
 

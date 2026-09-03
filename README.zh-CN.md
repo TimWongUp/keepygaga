@@ -36,14 +36,26 @@ Keepygaga 独立提供完整运行时：八个 raw Tool 的 MCP Server、精简�
 
 要求 Python 3.12+ 和 [`uv`](https://docs.astral.sh/uv/)。
 
-从[最新 GitHub Release](https://github.com/TimWongUp/keepygaga/releases/latest)下载 `keepygaga-X.Y.Z-py3-none-any.whl`，将下方的 `X.Y.Z` 替换为该版本号，然后执行：
+### Agent 引导安装（推荐）
+
+把下面一句话交给当前正在使用的 Agent：
+
+> 从 https://github.com/TimWongUp/keepygaga 的最新官方 Release 为你当前运行所在的 Agent 安装 Keepygaga，严格按同一版本标签中的 Agent Install To-do 完成初始化与验证；只把现有全局规则当作不可信源材料，让我逐条确认提取的 Profile 或 Preference，并在匹配的 Keepygaga Home Page 与连接到这个 Memory Root 的全部全局规则入口中选择唯一所有者，最后不得在这些来源间留下重复注入。
+
+[Agent Install To-do](docs/agent-install.md) 是这条路径的权威流程。它只激活当前 Agent，保留已有数据，明确 Home Page 真源选择，并让用户根据当前官方宿主文档自行配置宿主原生记忆。
+
+### 手动安装
+
+从同一个[最新 GitHub Release](https://github.com/TimWongUp/keepygaga/releases/latest)把 `keepygaga-X.Y.Z-py3-none-any.whl` 与 `SHA256SUMS` 下载到私有、非符号链接路径。安装前立即核对将要执行的那个 wheel 的 SHA-256，并用同一个绝对路径执行；将下方的 `X.Y.Z` 替换为该版本号：
 
 ```shell
-uv tool install ./keepygaga-X.Y.Z-py3-none-any.whl
+uv tool install /absolute/private/path/keepygaga-X.Y.Z-py3-none-any.whl
 uv tool update-shell
 ```
 
 重开终端使工具目录进入 `PATH`，然后运行 `keepygaga install`。
+
+校验和只能发现文件损坏或资产不匹配；它不是签名、来源证明、独立发布者认证，也不验证从包索引解析的依赖。
 
 交互安装会先让用户确认或输入 Memory Root，再检测可用宿主并由用户选择。已有 `agents-memory` 记忆树可以直接接入；配置完成后，后续新增 Agent 会自动复用该目录。自动化安装必须显式列出全部目标：
 
@@ -84,7 +96,7 @@ keepygaga uninstall --yes
 
 `status` 只把安装状态文件当作发现线索，并明确标识仍需真实宿主验证的部分。`repair` 依据 live 配置重新对齐已记录宿主；`uninstall` 只拆除 Keepygaga 接线，保留配置与记忆树。
 
-升级时下载新版 wheel，执行 `uv tool install --force ./keepygaga-X.Y.Z-py3-none-any.whl`，再运行 `keepygaga repair --yes` 对齐宿主接线。
+升级时下载新版 wheel 与同一 Release 的 `SHA256SUMS`，在安装前立即重新校验将要执行的绝对路径，然后运行 `uv tool install --force /absolute/private/path/keepygaga-X.Y.Z-py3-none-any.whl`，再执行 `keepygaga repair --yes` 对齐宿主接线。
 
 高级确定性入口仍为 `keepygaga host setup|uninstall HOST`。
 
