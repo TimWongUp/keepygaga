@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640" role="img" aria-labelledby="title desc">
+  <title id="title">Keepygaga 中文宣传图</title>
+  <desc id="desc">给所有编码 Agent 一套少而准的共享核心记忆。</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#fffaf0"/>
+      <stop offset="1" stop-color="#fff2d8"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1280" height="640" rx="48" fill="url(#background)"/>
+  <circle cx="1128" cy="88" r="180" fill="#ffe27d" opacity="0.18"/>
+  <circle cx="1180" cy="590" r="240" fill="#50cbed" opacity="0.08"/>
+  <path d="M0 516C176 472 310 551 482 520s294-8 418 30 250 17 380-29v119H0Z" fill="#fff" opacity="0.55"/>
+
+  <g transform="rotate(-2 102 81)">
+    <rect x="68" y="56" width="76" height="58" rx="16" fill="#5a2a1f" opacity="0.13"/>
+    <rect x="64" y="52" width="76" height="58" rx="16" fill="#232820" stroke="#5a2a1f" stroke-width="1"/>
+    <image href="tim-wong-mark.png" x="72" y="57" width="60" height="48" preserveAspectRatio="xMidYMid meet"/>
+  </g>
+
+  <g fill="#6c2b1c">
+    <text x="96" y="292" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="48" font-weight="700" letter-spacing="-1">给所有编码 Agent 一套</text>
+    <text x="96" y="358" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="48" font-weight="700" letter-spacing="-1">少而准的共享核心记忆。</text>
+  </g>
+
+  <g transform="translate(96 416)">
+    <rect width="132" height="50" rx="25" fill="#50cbed" opacity="0.16"/>
+    <text x="66" y="33" text-anchor="middle" fill="#126b86" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="650">本地优先</text>
+    <rect x="144" width="178" height="50" rx="25" fill="#ffe27d" opacity="0.42"/>
+    <text x="233" y="33" text-anchor="middle" fill="#6c2b1c" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="650">Markdown 原生</text>
+    <rect x="334" width="158" height="50" rx="25" fill="#f58a32" opacity="0.17"/>
+    <text x="413" y="33" text-anchor="middle" fill="#6c2b1c" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="650">跨 Agent 共享</text>
+  </g>
+
+  <image href="keepygaga-logo.png" x="690" y="25" width="590" height="590" preserveAspectRatio="xMidYMid meet"/>
+</svg>
