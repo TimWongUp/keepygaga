@@ -52,14 +52,6 @@ _Avoid_: 临时要求、宿主协议、工具路由
 Agent 将候选与目标页 live Facts 比较并判为 covered、refines、new 或 conflict 的写入前分类；Store 不提供语义匹配。
 _Avoid_: 自动去重、候选池
 
-**Profile Onboarding**：
-首次创建空 `profile.md` 后，由安装 Agent 提供的可跳过画像初始化对话。
-_Avoid_: 强制问卷、CLI 交互
-
-**Preference Extraction**：
-首次安装时，把目标宿主原有全局规则中的共享软偏好分类并经用户确认后写入 `preferences.md` 的可选流程。
-_Avoid_: 全局规则迁移器、自动删除
-
 **配置级验证宿主（Config-tested Host）**：
 适配器的配置投影、保留行为、幂等与失败边界已由仓库测试验证，但尚不据此断言真实客户端会加载该配置。
 _Avoid_: 已支持、已验证

@@ -23,7 +23,7 @@ def resolve_launcher(name: str) -> Path:
             return path
     raise RuntimeError(
         f"installed Keepygaga launcher {name!r} could not be located; "
-        "reinstall the package with uv tool install keepygaga"
+        "reinstall the GitHub Release wheel with uv tool install --force PATH_TO_WHEEL"
     )
 
 

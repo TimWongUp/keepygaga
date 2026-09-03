@@ -30,16 +30,14 @@ Keepygaga 独立提供完整运行时：八个 raw Tool 的 MCP Server、精简�
 
 会话启动时只注入 `profile.md`、`preferences.md` 和三个动态分区的描述。Agent 需要页面元数据时，再对 `topics`、`areas` 或 `people` 中的一个分区调用 `list`。新建或语义更新的 Fact 会获得由 Store 生成的本地日期后缀；已有无日期 Fact 仍可读取，升级也不会改写 Memory Root。
 
-### 升级到 0.5
-
-0.5 将每个 `move` operation 的单个 `fact` 字段改为必填的 `facts` 数组。升级后，缓存过 MCP schema 的客户端需要重新连接或刷新 Tool schema，并把同一源页/目标页的全部精确 Fact 放进该数组。这只改变 MCP 请求结构，不改变 Markdown 记忆格式，也不需要迁移现有记忆文件。
-
 ## 安装
 
 要求 Python 3.12+ 和 [`uv`](https://docs.astral.sh/uv/)。
 
+从[最新 GitHub Release](https://github.com/TimWongUp/keepygaga/releases/latest)下载 `keepygaga-X.Y.Z-py3-none-any.whl`，将下方的 `X.Y.Z` 替换为该版本号，然后执行：
+
 ```shell
-uv tool install keepygaga
+uv tool install ./keepygaga-X.Y.Z-py3-none-any.whl
 keepygaga install
 ```
 
@@ -58,12 +56,13 @@ keepygaga install --yes --host codex --host claude-code
 ```shell
 keepygaga status
 keepygaga repair --yes
-keepygaga upgrade --yes
 keepygaga doctor --json
 keepygaga uninstall --yes
 ```
 
-`status` 只把安装状态文件当作发现线索，并明确标识仍需真实宿主验证的部分。`repair` 依据 live 配置重新对齐已记录宿主；`upgrade` 通过 `uv` 更新到最新已发布版本，再自动修复宿主接线；`uninstall` 只拆除 Keepygaga 接线，保留配置与记忆树。
+`status` 只把安装状态文件当作发现线索，并明确标识仍需真实宿主验证的部分。`repair` 依据 live 配置重新对齐已记录宿主；`uninstall` 只拆除 Keepygaga 接线，保留配置与记忆树。
+
+升级时下载新版 wheel，执行 `uv tool install --force ./keepygaga-X.Y.Z-py3-none-any.whl`，再运行 `keepygaga repair --yes` 对齐宿主接线。
 
 高级确定性入口仍为 `keepygaga host setup|uninstall HOST`。
 

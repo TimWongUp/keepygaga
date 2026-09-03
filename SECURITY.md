@@ -7,7 +7,7 @@ published release.
 
 | Release | Supported |
 | --- | --- |
-| Latest GitHub/PyPI release | Yes |
+| Latest GitHub Release | Yes |
 | Older releases, development snapshots, forks, or local modifications | No |
 
 ## Reporting a vulnerability
