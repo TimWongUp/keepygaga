@@ -57,7 +57,7 @@ Legacy external-Hook arguments remain private compatibility seams for determinis
 
 ## Installation and versioning
 
-The canonical distribution path is a tagged GitHub Release installed as a `uv` tool. Source checkouts remain a contributor workflow, not the user update channel. Tag workflows inspect wheel and sdist inventories, persist one immutable distribution bundle before exposing individual artifacts, and verify the published asset set before making the Release public. PyPI is not an active release channel; enabling it later requires trusted publishing and must consume the same verified GitHub assets rather than rebuilding them.
+The canonical distribution path is a tagged GitHub Release installed as a `uv` tool. Source checkouts remain a contributor workflow, not the user update channel. Tag workflows inspect wheel and sdist inventories, persist one workflow-canonical distribution bundle before exposing individual artifacts, and verify the published asset set before making the Release public. Reruns do not overwrite that bundle, but this is not GitHub immutable-release enforcement or cryptographic provenance. PyPI is not an active release channel; enabling it later requires trusted publishing and must consume the same verified GitHub assets rather than rebuilding them.
 
 Five version axes are intentionally independent: application release, Agent Contract, Hook protocol, installer-state schema, and memory schema. A product patch need not rewrite global rules; a Contract or Hook change can be repaired independently.
 

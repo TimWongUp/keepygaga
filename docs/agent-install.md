@@ -5,7 +5,7 @@ Use this procedure when a user gives an Agent the recommended one-sentence Keepy
 ## 1. Establish the current state
 
 - [ ] Identify the current operating system, architecture, shell, and Agent host. Ask the user to name the host only when live evidence is ambiguous.
-- [ ] Resolve the latest official Release tag from the exact `TimWongUp/keepygaga` repository, then read this To-do from that immutable tag. Treat a `main`-branch copy only as discovery and stop when the versioned document is unavailable.
+- [ ] Resolve the latest official Release tag from the exact `TimWongUp/keepygaga` repository, record its target commit, then read this To-do from that versioned tag. Treat a `main`-branch copy only as discovery and stop when the tagged document is unavailable.
 - [ ] Target only the Agent running this task for activation. Enumerate already connected hosts from live configuration and install-state hints because their global rules are part of the duplicate-source audit; do not activate a detected sibling.
 - [ ] Ask the user to identify every custom host home, non-default rules path, expert-path setup, and unsupported Agent that can inject this same Memory Root. Treat automatic discovery as a hint, not proof of completeness. If the combined live evidence and user inventory cannot establish the complete set of effective global-rules paths, keep existing sources unchanged and block Home Page migration; host activation may continue only with that limitation reported.
 - [ ] Locate the current host's effective global rules entry using the host's current official behavior and the matching Keepygaga adapter. Read it before host activation changes it.
@@ -48,6 +48,7 @@ This step is complete when every candidate has confirmed content, one selected o
 - [ ] Open the latest official GitHub Release and select its versioned `keepygaga-X.Y.Z-py3-none-any.whl` asset.
 - [ ] Download `SHA256SUMS` from the same Release and verify the wheel before executing it. Stop on a missing or mismatched checksum. State that this detects corruption or asset mismatch but is not a signature, provenance proof, or independent publisher authentication.
 - [ ] Confirm that the HTTPS Release, tag, wheel, and checksum belong to the exact `TimWongUp/keepygaga` repository and that the tag matches the package version. Show the user the selected version, asset names, digest, and install command before execution.
+- [ ] Resolve the tag target again immediately before executing the verified local wheel and stop if it moved. Report whether signed-tag, protected-tag, provenance, or GitHub immutable-release evidence is actually present; the current checks must not be described as providing any of those guarantees when it is absent.
 - [ ] State that the wheel checksum does not cover dependencies resolved from the package index. Do not claim a locked or fully attested installation when the Release does not provide that evidence.
 - [ ] For a clean installation, install the verified wheel with `uv tool install ./keepygaga-X.Y.Z-py3-none-any.whl`, then run `uv tool update-shell` when the launcher directory is not already active.
 - [ ] For an existing installation, respect its package-manager owner. A GitHub Release wheel installed through `uv tool` is replaced with `uv tool install --force ./keepygaga-X.Y.Z-py3-none-any.whl`; do not make a source checkout the runtime.
