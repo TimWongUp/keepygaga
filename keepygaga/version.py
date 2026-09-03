@@ -1,6 +1,6 @@
 """Independent version axes for the Keepygaga product and its contracts."""
 
-APPLICATION_VERSION = "0.7.0"
+APPLICATION_VERSION = "0.7.1"
 CONTRACT_VERSION = 4
 HOOK_PROTOCOL_VERSION = 3
 INSTALLER_SCHEMA_VERSION = 1
