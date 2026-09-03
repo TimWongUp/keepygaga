@@ -1,5 +1,9 @@
 # Keepygaga
 
+<p align="center">
+  <img src="docs/assets/keepygaga-banner.zh-CN.png" alt="Keepygaga——给所有编码 Agent 一套少而准的共享核心记忆" width="100%">
+</p>
+
 [English](README.md) | [简体中文](README.zh-CN.md)
 
 **给所有编码 Agent 一套少而准的共享核心记忆。**

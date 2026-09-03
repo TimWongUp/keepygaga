@@ -1,5 +1,9 @@
 # Keepygaga
 
+<p align="center">
+  <img src="docs/assets/keepygaga-banner.png" alt="Keepygaga — a small, deliberate core memory shared by every coding agent" width="100%">
+</p>
+
 [English](README.md) | [简体中文](README.zh-CN.md)
 
 **A small, deliberate core memory shared by every coding agent.**
