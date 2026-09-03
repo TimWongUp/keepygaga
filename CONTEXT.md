@@ -72,9 +72,13 @@ _Avoid_: 配置真源、宿主注册 Authority
 随已发布包安装、供宿主长期注册的 `keepygaga-mcp` 与 `keepygaga hook run` 入口。
 _Avoid_: checkout 专属 Python 路径、源码目录
 
+**项目真源（Project Authority）**：
+能够裁决项目当前事实的直接来源；Git 项目通常使用不带凭据的规范远端仓库 URL，没有持久远端或直接来源时才使用本机路径。
+_Avoid_: Memory 摘要、默认本机 checkout、机械采用名为 origin 的任意 fork
+
 **项目索引（Project Index）**：
-存于直属 `areas/` 页面、用于跨任务定位持续项目并了解重大进展的简短记录。它只包含项目存放位置与已完成的重大里程碑；项目详情、计划与当前状态仍由项目 Authority 或直接真源裁决。
-_Avoid_: 状态仪表板、项目日志、项目 Authority 副本
+`areas/projects.md` 中用于跨任务定位持续项目的单页索引；每个项目只有一条 Fact，包含简介、项目真源及可选的最新重大节点，变化时原位更新。
+_Avoid_: 多 Fact 项目档案、里程碑历史、状态仪表板、项目真源副本
 
 **Route Catalog**：
 由一个 Memory Scope 的 live allowlist 生成的 `path + description + aliases` 路由目录，不包含 Fact 或 version。

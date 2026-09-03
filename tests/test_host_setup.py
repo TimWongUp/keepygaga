@@ -70,6 +70,8 @@ def test_canonical_contract_is_short_and_delegates_full_protocol() -> None:
     assert "MCP server instructions" in contract
     assert "current Page Snapshot" in contract
     assert "explicit current-turn user request" in contract
+    assert "`areas/projects.md`" in contract
+    assert "exactly one Fact per maintained project" in contract
     assert len(contract.splitlines()) < 20
 
 
