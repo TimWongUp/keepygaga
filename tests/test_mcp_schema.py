@@ -19,7 +19,7 @@ EXPECTED_TOOLS = {
 
 OPERATION_FIELDS = {
     "create": {"path", "description", "aliases", "facts"},
-    "add": {"path", "if_version", "facts"},
+    "add": {"path", "if_version", "description", "facts"},
     "move": {
         "source_path",
         "source_version",
@@ -28,6 +28,7 @@ OPERATION_FIELDS = {
         "new_path",
         "description",
         "aliases",
+        "source_description",
         "facts",
     },
     "rename": {"path", "if_version", "new_path"},
@@ -101,6 +102,7 @@ def test_public_mcp_surface_and_exact_top_level_shapes() -> None:
         "target",
         "old_fact",
         "new_fact",
+        "description",
     }
     assert set(update_page["properties"]) == {
         "path",
@@ -125,6 +127,12 @@ def test_public_mcp_surface_and_exact_top_level_shapes() -> None:
     )
     assert update_description["maxLength"] == 80
     assert update_aliases["maxItems"] == 6
+    update_fact_description = next(
+        branch
+        for branch in update_fact["properties"]["description"]["anyOf"]
+        if branch.get("type") == "string"
+    )
+    assert update_fact_description["maxLength"] == 80
     assert set(update_fact["required"]) == {
         "path",
         "if_version",
@@ -150,6 +158,7 @@ def test_public_mcp_surface_and_exact_top_level_shapes() -> None:
         "if_version",
         "target",
         "fact",
+        "description",
         "authorization",
     }
     assert set(delete_page["properties"]) == {
@@ -193,6 +202,12 @@ def test_tool_protocol_is_discoverable_from_descriptions_and_schema() -> None:
     assert "latest Page Snapshot" in add["properties"]["if_version"]["description"]
     assert "exact duplicates only" in add["properties"]["facts"]["description"]
     assert add["properties"]["facts"]["maxItems"] == 30
+    add_description = next(
+        branch
+        for branch in add["properties"]["description"]["anyOf"]
+        if branch.get("type") == "string"
+    )
+    assert add_description["maxLength"] == 80
     assert (
         "each path must be unique"
         in (add_schema["properties"]["operations"]["description"])
@@ -206,6 +221,8 @@ def test_tool_protocol_is_discoverable_from_descriptions_and_schema() -> None:
         "destination_version",
     ]
     assert move["oneOf"][1]["required"] == ["new_path", "description", "aliases"]
+    assert "description" not in move["oneOf"][0]["properties"]
+    assert move["oneOf"][0]["properties"]["aliases"] == {"type": "null"}
     assert move["properties"]["facts"]["minItems"] == 1
     assert move["properties"]["facts"]["maxItems"] == 30
     move_description = next(
@@ -220,6 +237,12 @@ def test_tool_protocol_is_discoverable_from_descriptions_and_schema() -> None:
     )
     assert move_description["maxLength"] == 80
     assert move_aliases["maxItems"] == 6
+    source_description = next(
+        branch
+        for branch in move["properties"]["source_description"]["anyOf"]
+        if branch.get("type") == "string"
+    )
+    assert source_description["maxLength"] == 80
     selector_schema = move_schema["$defs"]["FactSelector"]
     assert set(selector_schema["properties"]) == {"basis", "content"}
     assert selector_schema["properties"]["content"]["maxLength"] == 4096
@@ -254,6 +277,12 @@ def test_tool_protocol_is_discoverable_from_descriptions_and_schema() -> None:
         "current-turn user authorization"
         in (delete_fact["properties"]["authorization"]["description"])
     )
+    delete_description = next(
+        branch
+        for branch in delete_fact["properties"]["description"]["anyOf"]
+        if branch.get("type") == "string"
+    )
+    assert delete_description["maxLength"] == 80
 
     for name in EXPECTED_TOOLS - {"list", "read"}:
         description = by_name[name].description or ""
@@ -285,11 +314,10 @@ def test_tool_annotations_match_read_and_destructive_behavior() -> None:
         assert annotations.read_only_hint is False
         assert annotations.idempotent_hint is False
         assert annotations.open_world_hint is False
-    for name in {"create", "add"}:
-        annotations = by_name[name].annotations
-        assert annotations is not None
-        assert annotations.destructive_hint is False
-    for name in {"update", "move", "rename", "delete"}:
+    create_annotations = by_name["create"].annotations
+    assert create_annotations is not None
+    assert create_annotations.destructive_hint is False
+    for name in {"add", "update", "move", "rename", "delete"}:
         annotations = by_name[name].annotations
         assert annotations is not None
         assert annotations.destructive_hint is True
@@ -335,6 +363,11 @@ def test_move_destination_modes_are_rejected_when_partial_or_mixed() -> None:
     }
     for destination in (
         {"destination_path": "topics/destination.md"},
+        {
+            "destination_path": "topics/destination.md",
+            "destination_version": "opaque",
+            "aliases": [],
+        },
         {
             "destination_path": "topics/destination.md",
             "destination_version": "opaque",

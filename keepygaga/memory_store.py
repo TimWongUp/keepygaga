@@ -100,6 +100,23 @@ def _validate_agent_page_metadata(document: MemoryDocument, path: str) -> None:
         )
 
 
+def _with_page_changes(
+    document: MemoryDocument,
+    path: str,
+    *,
+    description: str | None = None,
+    aliases: Sequence[str] | None = None,
+    facts: Sequence[StoredFact] | None = None,
+) -> MemoryDocument:
+    changed = MemoryDocument(
+        name=document.name,
+        description=description if description is not None else document.description,
+        aliases=tuple(aliases) if aliases is not None else document.aliases,
+        facts=tuple(facts) if facts is not None else document.facts,
+    )
+    if description is not None or aliases is not None:
+        _validate_agent_page_metadata(changed, path)
+    return changed
 
 
 class MemoryStore:
@@ -557,10 +574,10 @@ class MemoryStore:
         mutation_date = _local_date()
         for operation in operations:
             current = self._check_version(working, operation.path, operation.if_version)
-            document = MemoryDocument(
-                name=current.document.name,
-                description=current.document.description,
-                aliases=current.document.aliases,
+            document = _with_page_changes(
+                current.document,
+                current.path,
+                description=operation.description,
                 facts=(
                     *current.document.facts,
                     *(
@@ -602,17 +619,12 @@ class MemoryStore:
         for operation in operations:
             current = self._check_version(working, operation.path, operation.if_version)
             if isinstance(operation, UpdatePageOperation):
-                document = MemoryDocument(
-                    name=current.document.name,
-                    description=operation.description or current.document.description,
-                    aliases=(
-                        tuple(operation.aliases)
-                        if operation.aliases is not None
-                        else current.document.aliases
-                    ),
-                    facts=current.document.facts,
+                document = _with_page_changes(
+                    current.document,
+                    current.path,
+                    description=operation.description,
+                    aliases=operation.aliases,
                 )
-                _validate_agent_page_metadata(document, current.path)
                 contents = [
                     value
                     for value in (operation.description, *(operation.aliases or []))
@@ -642,10 +654,10 @@ class MemoryStore:
                         path=current.path,
                     ) from exc
                 facts[index] = stored_fact(operation.new_fact, date=mutation_date)
-                document = MemoryDocument(
-                    name=current.document.name,
-                    description=current.document.description,
-                    aliases=current.document.aliases,
+                document = _with_page_changes(
+                    current.document,
+                    current.path,
+                    description=operation.description,
                     facts=tuple(facts),
                 )
                 contents = [operation.new_fact.content]
@@ -760,7 +772,11 @@ class MemoryStore:
                         "invalid_entry", "source and destination must differ"
                     )
                 destination_path = destination.path
-                destination_document = destination.document
+                destination_document = _with_page_changes(
+                    destination.document,
+                    destination.path,
+                    description=operation.description,
+                )
             else:
                 assert operation.new_path is not None
                 assert operation.description is not None
@@ -815,19 +831,18 @@ class MemoryStore:
                 )
             working[source.path] = self._loaded(
                 source.path,
-                MemoryDocument(
-                    name=source.document.name,
-                    description=source.document.description,
-                    aliases=source.document.aliases,
+                _with_page_changes(
+                    source.document,
+                    source.path,
+                    description=operation.source_description,
                     facts=tuple(source_facts),
                 ),
             )
             working[destination_path] = self._loaded(
                 destination_path,
-                MemoryDocument(
-                    name=destination_document.name,
-                    description=destination_document.description,
-                    aliases=destination_document.aliases,
+                _with_page_changes(
+                    destination_document,
+                    destination_path,
                     facts=(*destination_document.facts, *moved_facts),
                 ),
             )
@@ -938,10 +953,10 @@ class MemoryStore:
                 facts.pop(index)
                 working[current.path] = self._loaded(
                     current.path,
-                    MemoryDocument(
-                        name=current.document.name,
-                        description=current.document.description,
-                        aliases=current.document.aliases,
+                    _with_page_changes(
+                        current.document,
+                        current.path,
+                        description=operation.description,
                         facts=tuple(facts),
                     ),
                 )

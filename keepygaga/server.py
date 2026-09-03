@@ -128,21 +128,21 @@ def create_pages(operations: CreateOperations) -> dict[str, object]:
     return _with_memory_store(lambda store: store.create(operations))
 
 
-@mcp.tool(name="add", annotations=ADDITIVE_ANNOTATIONS)
+@mcp.tool(name="add", annotations=MUTATING_ANNOTATIONS)
 def add_facts(operations: AddOperations) -> dict[str, object]:
-    """Add independent Facts using each page's latest Page Snapshot. Group Facts for one page in one operation. On applied, reuse returned Page Snapshots and receipts; do not verify with read or list."""
+    """Add independent Facts and optionally replace the page description using its latest Page Snapshot. Group Facts for one page in one operation. On applied, reuse returned Page Snapshots and receipts; do not verify with read or list."""
     return _with_memory_store(lambda store: store.add(operations))
 
 
 @mcp.tool(name="update", annotations=MUTATING_ANNOTATIONS)
 def update_memory(operations: UpdateOperations) -> dict[str, object]:
-    """Replace an exact Fact, update page metadata, or mechanically repair a repairable page using its latest version. On applied, reuse returned Page Snapshots and receipts; do not verify with read or list."""
+    """Replace an exact Fact with an optional page description, update page metadata alone, or mechanically repair a repairable page using its latest version. On applied, reuse returned Page Snapshots and receipts; do not verify with read or list."""
     return _with_memory_store(lambda store: store.update(operations))
 
 
 @mcp.tool(name="move", annotations=MUTATING_ANNOTATIONS)
 def move_fact(operations: MoveOperations) -> dict[str, object]:
-    """Move exact Facts to an existing page or atomically create a bounded new destination. Preserve Fact dates and leave at least one source Fact. On applied, reuse returned Page Snapshots and receipts; do not verify with read or list."""
+    """Move exact Facts and optionally replace source or existing-destination descriptions, or atomically create a bounded new destination. Preserve Fact dates and leave at least one source Fact. On applied, reuse returned Page Snapshots and receipts; do not verify with read or list."""
     return _with_memory_store(lambda store: store.move(operations))
 
 
@@ -154,7 +154,7 @@ def rename_page(operations: RenameOperations) -> dict[str, object]:
 
 @mcp.tool(name="delete", annotations=MUTATING_ANNOTATIONS)
 def delete_memory(operations: DeleteOperations) -> dict[str, object]:
-    """Delete exact Facts or dynamic pages only after explicit current-turn user authorization. On applied, reuse surviving Page Snapshots and receipts; do not verify with read or list."""
+    """Delete exact Facts with an optional page description, or delete dynamic pages, only after explicit current-turn user authorization. On applied, reuse surviving Page Snapshots and receipts; do not verify with read or list."""
     return _with_memory_store(lambda store: store.delete(operations))
 
 
