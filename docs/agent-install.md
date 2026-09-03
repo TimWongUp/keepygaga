@@ -68,7 +68,8 @@ For each approved candidate:
 - [ ] Read the latest matching Home Page Snapshot and reclassify the candidate.
 - [ ] Re-read every affected global-rules file and confirm its bytes still match the post-install approved precondition.
 - [ ] Before any removal, create an exclusive persistent backup beside each affected global-rules file, record its path and digest, and verify that it reproduces the exact pre-removal bytes.
-- [ ] For Keepygaga-owned meanings, stage every desired result, use atomic per-file replacement to remove only the exact approved global source statements from all connected hosts in scope, and then use `add` for an independent new Fact or `update` for a refinement.
+- [ ] For Keepygaga-owned meanings, stage every desired result, then remove only the exact approved global source statements from all connected hosts in scope. Each forward file write must be a format-aware atomic compare-and-swap whose expected original is the approved post-install bytes; a separate read followed by an unconditional replacement is insufficient. When no available file operation can enforce that precondition, ask the user to make the exact removal manually and verify it before writing the Home Page.
+- [ ] After every approved global source is absent, use `add` for an independent new Fact or `update` for a refinement.
 - [ ] For global-owned meanings, leave the global statement in place and remove any matching Home Page Fact only with explicit current-turn user authorization through exact, versioned `delete`.
 - [ ] Preserve all unrelated global-rules bytes and the complete Keepygaga managed block.
 
