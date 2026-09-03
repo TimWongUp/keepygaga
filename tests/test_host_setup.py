@@ -72,6 +72,7 @@ def test_canonical_contract_is_short_and_delegates_full_protocol() -> None:
     assert "explicit current-turn user request" in contract
     assert "`areas/projects.md`" in contract
     assert "exactly one Fact per maintained project" in contract
+    assert "<https://github.com/owner/repo>" in contract
     assert len(contract.splitlines()) < 20
 
 

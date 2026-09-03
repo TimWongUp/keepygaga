@@ -73,7 +73,7 @@ _Avoid_: 配置真源、宿主注册 Authority
 _Avoid_: checkout 专属 Python 路径、源码目录
 
 **项目真源（Project Authority）**：
-能够裁决项目当前事实的直接来源；Git 项目通常使用不带凭据的规范远端仓库 URL，没有持久远端或直接来源时才使用本机路径。
+能够裁决项目当前事实的直接来源；Git 项目通常使用以 Markdown 自动链接包裹的不带凭据规范远端仓库 URL，例如 `<https://github.com/owner/repo>`，没有持久远端或直接来源时才使用本机路径。
 _Avoid_: Memory 摘要、默认本机 checkout、机械采用名为 origin 的任意 fork
 
 **项目索引（Project Index）**：

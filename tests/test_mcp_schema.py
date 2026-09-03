@@ -172,6 +172,7 @@ def test_tool_protocol_is_discoverable_from_descriptions_and_schema() -> None:
 
     assert "`areas/projects.md`" in instructions
     assert "exactly one Fact per maintained project" in instructions
+    assert "<https://github.com/owner/repo>" in instructions
     assert "must use `update`" in instructions
 
     assert "Route Catalog" in (by_name["list"].description or "")
