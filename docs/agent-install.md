@@ -29,6 +29,8 @@ Exclude generic safety rules, host protocols, tool routing, project instructions
 
 Compare each candidate with the live Home Page and semantically equivalent statements in every connected host's effective global rules. Classify the Home Page relationship as covered, refines, new, or conflict; exact-text inequality does not make a paraphrase independent. Show the user a concise before/after table containing:
 
+Identify every source occurrence by host, absolute path, and an exact byte range or unique surrounding anchors within the captured file digest. Reject ambiguous repeated text, Unicode-confusable variants, or normalization-sensitive matches unless the user selects one uniquely addressable occurrence after seeing its context; never turn a semantic match alone into a deletion target.
+
 | Proposed meaning | Current sources | User confirms content? | Selected owner | Exact changes |
 | --- | --- | --- | --- | --- |
 | Quoted candidate treated as data | Home Page and every inventoried host/path that contains it | Yes or no | Keepygaga Home Page or one exact host/rules path | Per-path add, update, exact removal, or unchanged |
@@ -66,13 +68,13 @@ Reload or restart the current host when required so the newly registered Keepyga
 
 Host activation may have added or replaced the Keepygaga managed block in the current global-rules file. Re-read every audited global-rules source after activation. Compare it with the pre-install capture, accept only understood host-owned changes, and use these post-install bytes and digests as the migration preconditions.
 
-Process approved source switches as isolated migration units. One unit normally contains one meaning. Group all independent new Facts targeting the same Home Page into one unit and one `add` operation; likewise group all approved exact Fact deletions for the same Home Page into one versioned `delete` operation. Process refinements one meaning at a time with a fresh Page Snapshot because each `update` replaces one exact Fact. Never remove sources for a later unit before the current unit reaches and verifies its final state.
+Process approved source switches as isolated migration units. One unit normally contains one meaning. Independent new Facts targeting the same Home Page may share one unit and one `add` operation only up to the Tool's current 30-Fact request limit; split larger sets into later units. Process each exact Fact deletion and each refinement as its own unit with a fresh Page Snapshot because `delete` and `update` each address one exact Fact per page operation. Never remove sources for a later unit before the current unit reaches and verifies its final state.
 
 For each migration unit:
 
 - [ ] Read the latest matching Home Page Snapshot and reclassify the candidate.
 - [ ] Re-read every affected global-rules file and confirm its bytes still match the post-install approved precondition.
-- [ ] Before any removal, reject symlinked or otherwise ambiguous targets, then create an exclusive persistent backup beside each affected global-rules file with permissions no broader than the original. Record its path and digest, and verify that it reproduces the exact pre-removal bytes.
+- [ ] Before any removal, reject symlinks, junctions or reparse points, non-regular files, and otherwise ambiguous targets, including for a user-performed fallback. Then create an exclusive persistent backup beside each affected global-rules file with permissions no broader than the original. Record its path and digest, and verify that it reproduces the exact pre-removal bytes.
 - [ ] Stage the unit's complete desired result. Whether Keepygaga or one global-rules path will own each meaning, remove only the exact approved statements from every non-owner global-rules path in the complete inventory. Each affected file receives at most one staged forward write for the unit. Every write must be a format-aware atomic compare-and-swap whose expected original is the approved post-install bytes; a separate read followed by an unconditional replacement is insufficient. When no available file operation can enforce that precondition, ask the user to make each exact removal manually and verify it before any Home Page mutation.
 - [ ] For Keepygaga-owned meanings, only after every approved global source in the unit is absent, submit the unit's one versioned `add` or `update` operation against the latest matching Page Snapshot.
 - [ ] For global-owned meanings, preserve only the named owner statement and remove any matching Home Page Fact only with explicit current-turn user authorization through exact, versioned `delete`. If duplicate cleanup or Home Page deletion is not authorized or cannot be verified, leave all sources unchanged and report the unresolved choice instead of claiming migration.
