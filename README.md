@@ -36,6 +36,16 @@ Contract 3 users with existing project pages should follow the [project-index mi
 
 Requirements: Python 3.12+ and [`uv`](https://docs.astral.sh/uv/).
 
+### Agent-guided installation (recommended)
+
+Give the Agent host you are currently using this one sentence:
+
+> Install Keepygaga for the Agent you are running in now from the latest official Release at https://github.com/TimWongUp/keepygaga, follow its Agent Install To-do through initialization and verification, ask me whether each existing global Profile or Preference should move to Keepygaga or remain in its effective rules file, and leave no duplicate injection.
+
+The [Agent Install To-do](docs/agent-install.md) is the authoritative procedure for this path. It limits activation to the current Agent, preserves existing data, makes the Home Page source choice explicit, and leaves host-native memory configuration to the user through current official host documentation.
+
+### Manual installation
+
 Download the `keepygaga-X.Y.Z-py3-none-any.whl` asset from the [latest GitHub Release](https://github.com/TimWongUp/keepygaga/releases/latest), replace `X.Y.Z` below with that release version, then run:
 
 ```shell

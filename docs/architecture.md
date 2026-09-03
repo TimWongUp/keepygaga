@@ -10,6 +10,8 @@ The sibling `keepygaga-knowledge` repository may consume the same Markdown ecosy
 
 Host-native memory remains free to own host-specific conversation recall and project learning. Keepygaga owns only the stable user facts that should cross host boundaries; project authority remains in project-owned sources.
 
+Agent-guided onboarding makes a Home Page Source Choice for every durable Profile or Preference meaning found in the current host's effective global rules. The user chooses whether that meaning moves to the matching Keepygaga Home Page or remains in the global rules; a connected host must not inject it from both. This semantic migration is separate from host activation because the installer cannot safely classify natural-language rules. It requires an exact before/after plan, current user confirmation, concurrency checks, and rollback or explicit `partial_commit` evidence. Host-native memory remains outside this migration and is configured by the user from current official host documentation.
+
 ## Runtime layers
 
 1. `memory.py` is the stable public entry; `memory_contract.py`, `memory_files.py`, `memory_store.py`, and `memory_init.py` separate Tool input models, low-level file primitives, live Store behavior, and tree initialization. `MemoryStore` owns canonical Markdown validation, versioned mutations, locking, and atomic replacement.

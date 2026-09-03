@@ -44,6 +44,10 @@ _Avoid_: 项目档案、项目状态
 任务开始时必须加载的固定页面，即 `profile.md` 与 `preferences.md`；兼容宿主可直接注入，否则由 Agent 主动读取。
 _Avoid_: 动态页摘要、路由目录
 
+**Home Page Source Choice**：
+为每条长期 Profile 或 Preference 含义指定唯一注入真源的初始化选择：Keepygaga Home Page 或当前宿主的有效全局规则入口。
+_Avoid_: 复制后可选清理、重复注入、宿主原生记忆迁移
+
 **Preference Fact**：
 会改变 Agent 回应、工作方式，或表达用户希望在特定任务中考虑哪类长期记忆的稳定 Fact；遗漏它会使跨任务行为持续偏离用户预期。
 _Avoid_: 临时要求、宿主协议、工具路由
