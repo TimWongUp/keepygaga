@@ -438,6 +438,28 @@ def test_status_plan_sends_contract_conflict_to_manual_review(
     assert result["lifecycle"]["action"] == "manual_review"  # type: ignore[index]
 
 
+def test_status_plan_checks_contract_conflict_before_unrecorded_activation(
+    tmp_path: Path, monkeypatch
+) -> None:
+    config_path = tmp_path / "config.toml"
+    memory_root = tmp_path / "memory"
+    monkeypatch.setattr(installer, "_channel", lambda: "uv-tool")
+    monkeypatch.setattr(installer, "_call_host", lambda *_args: {"status": "no_op"})
+    installer.install(config_path, memory_root, ["codex"])
+    state = installer._load_state(config_path)
+    state["hosts"] = {}
+    installer.state_path(config_path).write_text(json.dumps(state), encoding="utf-8")
+    monkeypatch.setattr(installer, "_contract_status", lambda _host: "conflict")
+
+    result = installer.status(
+        config_path,
+        latest_version=installer.__version__,
+        host="codex",
+    )
+
+    assert result["lifecycle"]["action"] == "manual_review"  # type: ignore[index]
+
+
 def test_status_plan_rejects_invalid_or_incomplete_request(tmp_path: Path) -> None:
     with pytest.raises(HostSetupError, match="requires --latest-version and --host"):
         installer.status(tmp_path / "config.toml", latest_version="0.7.3")
@@ -658,6 +680,34 @@ def test_upgrade_repair_failure_reports_partial_evidence(
         assert exc.components["repair"]["status"] == "failed"  # type: ignore[index]
     else:
         raise AssertionError("expected partial upgrade evidence")
+
+
+def test_upgrade_missing_active_launcher_preserves_partial_evidence(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setattr(installer, "_channel", lambda: "uv-tool")
+    monkeypatch.setattr(
+        installer,
+        "_load_state",
+        lambda _path: {"install_channel": "uv-tool", "hosts": {"codex": {}}},
+    )
+    monkeypatch.setattr(installer.shutil, "which", lambda name: f"/bin/{name}")
+    monkeypatch.setattr(
+        installer,
+        "resolve_active_launcher",
+        lambda _name: (_ for _ in ()).throw(RuntimeError("launcher missing")),
+    )
+    monkeypatch.setattr(
+        installer,
+        "run_captured",
+        lambda command, **_kwargs: subprocess.CompletedProcess(command, 0, "", ""),
+    )
+
+    with pytest.raises(HostSetupPartialError) as caught:
+        installer.upgrade(tmp_path / "config.toml", apply=True)
+
+    assert caught.value.components["upgrade"]["status"] == "applied"  # type: ignore[index]
+    assert caught.value.components["repair"]["status"] == "failed"  # type: ignore[index]
 
 
 def test_upgrade_failure_with_missing_streams_stays_structured(

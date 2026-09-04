@@ -570,6 +570,13 @@ def _configured_lifecycle(
             "manual_review",
             "Doctor found an error that must be resolved before changing the installation",
         )
+    contract = _contract_status(host)
+    if contract == "conflict":
+        return _lifecycle_result(
+            base,
+            "manual_review",
+            "the current host Agent Contract has conflicting ownership markers",
+        )
     if host not in hosts:
         return _lifecycle_result(
             base, "activate", "the current host is not recorded as active"
@@ -578,13 +585,6 @@ def _configured_lifecycle(
     if not isinstance(host_state, Mapping):
         return _lifecycle_result(
             base, "manual_review", "the current host install state is invalid"
-        )
-    contract = _contract_status(host)
-    if contract == "conflict":
-        return _lifecycle_result(
-            base,
-            "manual_review",
-            "the current host Agent Contract has conflicting ownership markers",
         )
     if contract != "current":
         return _lifecycle_result(
@@ -720,7 +720,7 @@ def upgrade(config_path: Path, *, apply: bool) -> dict[str, object]:
         }
     try:
         completed = run_captured(command, timeout=300)
-    except (OSError, subprocess.SubprocessError) as exc:
+    except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
         raise HostSetupError(f"Keepygaga upgrade could not be started: {exc}") from exc
     if completed.returncode != 0:
         detail = captured_output(completed) or "unknown uv error"
@@ -744,7 +744,7 @@ def upgrade(config_path: Path, *, apply: bool) -> dict[str, object]:
             "--yes",
         ]
         repaired = run_captured(repair_command, timeout=300)
-    except (OSError, subprocess.SubprocessError) as exc:
+    except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
         raise HostSetupPartialError(
             f"Keepygaga upgraded but repair could not be started: {exc}",
             {
