@@ -216,7 +216,7 @@ def _read_state_snapshot(config_path: Path) -> tuple[dict[str, Any], bytes | Non
     ):
         raise HostSetupError(f"Keepygaga install state has invalid hosts: {path}")
     generation = value.get("upgrade_generation")
-    if generation is not None and (
+    if "upgrade_generation" in value and (
         not isinstance(generation, str)
         or not generation
         or not isinstance(value.get("installed_version"), str)
@@ -231,7 +231,7 @@ def _load_state(config_path: Path) -> dict[str, Any]:
 
 def _read_install_snapshot(config_path: Path) -> tuple[dict[str, Any], bytes | None]:
     state, snapshot = _read_state_snapshot(config_path)
-    if state.get("upgrade_generation"):
+    if "upgrade_generation" in state:
         _, recorded_parts = _release_version(
             state["installed_version"], label="recorded application version"
         )

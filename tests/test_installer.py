@@ -179,7 +179,10 @@ def test_load_state_rejects_malformed_hosts(tmp_path: Path, hosts: object) -> No
         installer._load_state(config_path)
 
 
-def test_load_state_rejects_empty_upgrade_generation(tmp_path: Path) -> None:
+@pytest.mark.parametrize("generation", [None, ""])
+def test_load_state_rejects_invalid_upgrade_generation(
+    tmp_path: Path, generation: object
+) -> None:
     config_path = tmp_path / "config.toml"
     installer.state_path(config_path).write_text(
         json.dumps(
@@ -187,7 +190,7 @@ def test_load_state_rejects_empty_upgrade_generation(tmp_path: Path) -> None:
                 "schema_version": installer.INSTALLER_SCHEMA_VERSION,
                 "installed_version": "0.8.0",
                 "hosts": {},
-                "upgrade_generation": "",
+                "upgrade_generation": generation,
             }
         ),
         encoding="utf-8",
