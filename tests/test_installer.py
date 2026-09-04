@@ -179,6 +179,24 @@ def test_load_state_rejects_malformed_hosts(tmp_path: Path, hosts: object) -> No
         installer._load_state(config_path)
 
 
+def test_load_state_rejects_empty_upgrade_generation(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.toml"
+    installer.state_path(config_path).write_text(
+        json.dumps(
+            {
+                "schema_version": installer.INSTALLER_SCHEMA_VERSION,
+                "installed_version": "0.8.0",
+                "hosts": {},
+                "upgrade_generation": "",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(HostSetupError, match="install state is invalid"):
+        installer._load_state(config_path)
+
+
 def test_install_does_not_overwrite_a_concurrent_sibling_record(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

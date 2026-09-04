@@ -218,6 +218,7 @@ def _read_state_snapshot(config_path: Path) -> tuple[dict[str, Any], bytes | Non
     generation = value.get("upgrade_generation")
     if generation is not None and (
         not isinstance(generation, str)
+        or not generation
         or not isinstance(value.get("installed_version"), str)
     ):
         raise HostSetupError(f"Keepygaga install state is invalid: {path}")
