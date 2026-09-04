@@ -28,7 +28,7 @@ Host-native memories can continue to own host-specific conversation recall and p
 
 The public MCP surface is exactly `list`, `read`, `create`, `add`, `update`, `move`, `rename`, and `delete`.
 
-Session bootstrap injects only `profile.md`, `preferences.md`, and descriptions of the three dynamic scopes. Agents call `list` for one of `topics`, `areas`, or `people` when they need page metadata. New or semantically updated Facts receive a Store-owned local date suffix; existing undated Facts remain readable and upgrades do not rewrite the Memory Root.
+Session bootstrap injects only `profile.md`, `preferences.md`, a shared routing rule, and descriptions of the three dynamic scopes. Agents treat those descriptions as first-stage semantic routes: when a task depends on covered information that the current request or a live direct source does not already provide, they call `list` for that scope and select pages from the returned path, description, and aliases before reading them. New or semantically updated Facts receive a Store-owned local date suffix; existing undated Facts remain readable and upgrades do not rewrite the Memory Root.
 
 Contract 3 users with existing project pages should follow the [project-index migration](docs/operations.md#contract-3-project-index-migration) before their next project-memory write under the current Agent Contract.
 

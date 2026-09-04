@@ -212,7 +212,18 @@ def test_tool_protocol_is_discoverable_from_descriptions_and_schema() -> None:
     by_name = {tool.name: tool for tool in tools}
     instructions = mcp_server._server_instructions()
 
+    assert "Memory Scopes are `topics`" in instructions
+    assert "`areas` for ongoing activities, durable environments" in instructions
+    assert "Treat these descriptions as first-stage semantic routes" in instructions
+    assert (
+        "not already supplied by the current user or a live direct source"
+        in instructions
+    )
+    assert "returned path, description, and aliases" in instructions
+    assert "If no scope or page matches" in instructions
     assert "`areas/projects.md`" in instructions
+    assert "optional dynamic page" in instructions
+    assert "may be absent before its first Fact" in instructions
     assert "exactly one Fact per maintained project" in instructions
     assert "<https://github.com/owner/repo>" in instructions
     assert "use `create` with the initial project Fact" in instructions

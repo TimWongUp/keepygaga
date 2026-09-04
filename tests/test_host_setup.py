@@ -70,12 +70,22 @@ def test_canonical_contract_is_short_and_delegates_full_protocol() -> None:
     assert "MCP server instructions" in contract
     assert "current Page Snapshot" in contract
     assert "explicit current-turn user request" in contract
+    assert "Memory Scopes are `topics`" in contract
+    assert "`areas` for ongoing activities, durable environments" in contract
+    assert "Treat these descriptions as first-stage semantic routes" in contract
+    assert (
+        "not already supplied by the current user or a live direct source" in contract
+    )
+    assert "returned path, description, and aliases" in contract
+    assert "If no scope or page matches" in contract
     assert "`areas/projects.md`" in contract
+    assert "optional dynamic page" in contract
+    assert "may be absent before its first Fact" in contract
+    assert "Before the first write, list `areas`" in contract
+    assert "create the canonical page only when none exists" in contract
+    assert "rather than duplicate conflicting legacy state" in contract
     assert "exactly one Fact per maintained project" in contract
-    assert "<https://github.com/owner/repo>" in contract
-    assert "credential-free" in contract
-    assert "create it with the first project Fact" in contract
-    assert "legacy" in contract
+    assert "full mutation and Authority-rendering protocol" in contract
     assert "cross-Agent user preferences belong only in `preferences.md`" in contract
     assert "Prose style and code style do not decide between them" in contract
     assert "ask before changing either source" in contract
@@ -87,6 +97,8 @@ def test_repository_rules_match_preference_scope_contract() -> None:
     rules = (Path(__file__).parents[1] / "AGENTS.md").read_text(encoding="utf-8")
 
     assert "`preferences.md` 只保存用户希望所有接入 Agent" in rules
+    assert "Memory Scope 的固定 description 是一级语义路由条件" in rules
+    assert "首条项目 Fact 写入前可以不存在" in rules
     assert "先询问是跨 Agent 用户偏好还是特定 Agent 规则" in rules
     assert "同一含义不得写入两处" in rules
 

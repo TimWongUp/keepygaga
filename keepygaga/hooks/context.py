@@ -11,10 +11,16 @@ from keepygaga.hooks.protocol import additional_context_payload
 from keepygaga.memory import MemoryStore
 
 HOME_PAGES = ("profile.md", "preferences.md")
+SCOPE_ROUTING = (
+    "将 description 作为一级语义路由条件。完成当前任务所需的信息属于某个 scope，"
+    "且当前用户输入或 live direct source 尚未提供时，调用该 scope 的 `list`；"
+    "再按返回的 path、description 和 aliases 选择并 `read` 相关页面。"
+    "没有匹配页面时不要猜测路径。"
+)
 SCOPE_DESCRIPTIONS = {
-    "topics": "长期主题、偏好对象与个人生活信息；需要相关记忆时调用 list(scope=topics)。",
-    "areas": "持续活动、环境与项目索引；需要相关记忆时调用 list(scope=areas)。",
-    "people": "已知人物及与用户的关系上下文；涉及具体人物时调用 list(scope=people)。",
+    "topics": "长期主题、偏好对象与个人生活信息。",
+    "areas": "持续活动、长期环境与项目索引。",
+    "people": "已知人物及与用户的关系上下文。",
 }
 CODEX_SUBAGENT_CONTEXT = (
     "仅在任务需要长期上下文时，按全局规则中的记忆路由读取对应页；不要预加载无关记忆。"
@@ -66,6 +72,8 @@ def load_bootstrap(config_path: Path) -> str:
         f'<profile version="{profile["version"]}">\n{_facts(profile)}\n</profile>\n\n'
         f'<preferences version="{preferences["version"]}">\n{_facts(preferences)}\n</preferences>\n\n'
         "<memory_scopes>\n"
+        + SCOPE_ROUTING
+        + "\n"
         + "\n".join(scope_lines)
         + "\n</memory_scopes>\n</keepygaga-bootstrap>"
     )

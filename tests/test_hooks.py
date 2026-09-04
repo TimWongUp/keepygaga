@@ -232,7 +232,13 @@ def test_context_bootstrap_contains_home_pages_and_scope_descriptions(
                     description="Must stay out of bootstrap.",
                     aliases=[],
                     facts=[Fact(basis="stated", content="Known person.")],
-                )
+                ),
+                CreateOperation(
+                    path="areas/projects.md",
+                    description="Must stay an on-demand project index.",
+                    aliases=["project index"],
+                    facts=[Fact(basis="observed", content="Project locator.")],
+                ),
             ]
         )["status"]
         == "applied"
@@ -269,11 +275,22 @@ def test_context_bootstrap_contains_home_pages_and_scope_descriptions(
     assert "`topics`" in rendered
     assert "`areas`" in rendered
     assert "`people`" in rendered
+    assert context.SCOPE_ROUTING in rendered
+    assert "description 作为一级语义路由条件" in rendered
+    assert "path、description 和 aliases" in rendered
+    assert context.SCOPE_DESCRIPTIONS["areas"] == "持续活动、长期环境与项目索引。"
+    assert all(
+        "list(" not in description
+        for description in context.SCOPE_DESCRIPTIONS.values()
+    )
     assert "- [stated] Dated home fact. [2026-09-02]" in rendered
     assert "- [observed] Legacy home fact." in rendered
     assert "people/not-in-bootstrap.md" not in rendered
     assert "Must stay out of bootstrap." not in rendered
     assert "Known person." not in rendered
+    assert "areas/projects.md" not in rendered
+    assert "Must stay an on-demand project index." not in rendered
+    assert "Project locator." not in rendered
     assert "malformed dynamic page" not in rendered
     for description in context.SCOPE_DESCRIPTIONS.values():
         assert rendered.count(description) == 1
