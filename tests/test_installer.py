@@ -158,13 +158,16 @@ def test_explicit_configs_have_independent_state_paths(tmp_path: Path) -> None:
     assert installer.state_path(first) != installer.state_path(second)
 
 
-def test_load_state_rejects_malformed_hosts(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "hosts", [["codex"], {"unknown": {}}, {"codex": []}]
+)
+def test_load_state_rejects_malformed_hosts(tmp_path: Path, hosts: object) -> None:
     config_path = tmp_path / "config.toml"
     installer.state_path(config_path).write_text(
         json.dumps(
             {
                 "schema_version": installer.INSTALLER_SCHEMA_VERSION,
-                "hosts": ["codex"],
+                "hosts": hosts,
             }
         ),
         encoding="utf-8",
@@ -172,6 +175,34 @@ def test_load_state_rejects_malformed_hosts(tmp_path: Path) -> None:
 
     with pytest.raises(HostSetupError, match="invalid hosts"):
         installer._load_state(config_path)
+
+
+def test_install_does_not_overwrite_a_concurrent_sibling_record(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_path = tmp_path / "config.toml"
+    memory_root = tmp_path / "memory"
+    state = installer.state_path(config_path)
+    initial = {
+        "schema_version": installer.INSTALLER_SCHEMA_VERSION,
+        "install_channel": "python-package",
+        "hosts": {},
+    }
+    state.write_text(json.dumps(initial), encoding="utf-8")
+
+    def record_sibling(*_args):
+        concurrent = {**initial, "hosts": {"claude-code": {}}}
+        state.write_text(json.dumps(concurrent), encoding="utf-8")
+        return {"status": "no_op"}
+
+    monkeypatch.setattr(installer, "_call_host", record_sibling)
+
+    with pytest.raises(HostSetupPartialError, match="state could not be updated"):
+        installer.install(config_path, memory_root, ["codex"])
+
+    assert json.loads(state.read_text(encoding="utf-8"))["hosts"] == {
+        "claude-code": {}
+    }
 
 
 def test_install_records_grok_rules_fallback(tmp_path: Path, monkeypatch) -> None:
@@ -537,12 +568,43 @@ def test_upgrade_without_recorded_hosts_skips_repair(
     assert len(calls) == 1
 
 
+def test_upgrade_reports_concurrent_state_change(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, uv_tool_root: Path
+) -> None:
+    config_path = tmp_path / "config.toml"
+    state = installer.state_path(config_path)
+    initial = {
+        "schema_version": installer.INSTALLER_SCHEMA_VERSION,
+        "install_channel": "uv-tool",
+        "hosts": {},
+    }
+    state.write_text(json.dumps(initial), encoding="utf-8")
+    monkeypatch.setattr(installer, "_channel", lambda: "uv-tool")
+    monkeypatch.setattr(installer.shutil, "which", lambda name: f"/bin/{name}")
+
+    def change_state(command, **_kwargs):
+        concurrent = {**initial, "hosts": {"codex": {}}}
+        state.write_text(json.dumps(concurrent), encoding="utf-8")
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(installer, "run_captured", change_state)
+
+    with pytest.raises(HostSetupPartialError, match="changed concurrently") as caught:
+        installer.upgrade(config_path, apply=True)
+
+    assert caught.value.components["upgrade"]["status"] == "applied"  # type: ignore[index]
+    assert json.loads(state.read_text(encoding="utf-8"))["hosts"] == {"codex": {}}
+
+
 def test_upgrade_repairs_recorded_grok_host(tmp_path: Path, monkeypatch) -> None:
     config_path = tmp_path / "config.toml"
     monkeypatch.setattr(
         installer,
-        "_load_state",
-        lambda _path: {"install_channel": "uv-tool", "hosts": {"grok": {}}},
+        "_read_state_snapshot",
+        lambda _path: (
+            {"install_channel": "uv-tool", "hosts": {"grok": {}}},
+            b"state",
+        ),
     )
     monkeypatch.setattr(installer.shutil, "which", lambda name: f"/bin/{name}")
     monkeypatch.setattr(
@@ -614,8 +676,8 @@ def test_upgrade_refuses_unknown_or_mismatched_install_owner(
     monkeypatch.setattr(installer, "_channel", lambda: "python-package")
     monkeypatch.setattr(
         installer,
-        "_load_state",
-        lambda _path: {"install_channel": "pipx"},
+        "_read_state_snapshot",
+        lambda _path: ({"install_channel": "pipx"}, b"state"),
     )
     with pytest.raises(HostSetupError, match="differs from or is not supported"):
         installer.upgrade(tmp_path / "config.toml", apply=True)
@@ -628,8 +690,8 @@ def test_upgrade_refuses_invalid_recorded_owner(
     monkeypatch.setattr(installer, "_channel", lambda: "uv-tool")
     monkeypatch.setattr(
         installer,
-        "_load_state",
-        lambda _path: {"install_channel": recorded},
+        "_read_state_snapshot",
+        lambda _path: ({"install_channel": recorded}, b"state"),
     )
 
     with pytest.raises(HostSetupError, match="differs from or is not supported"):
@@ -708,8 +770,11 @@ def test_upgrade_repair_failure_reports_partial_evidence(
     monkeypatch.setattr(installer, "_channel", lambda: "uv-tool")
     monkeypatch.setattr(
         installer,
-        "_load_state",
-        lambda _path: {"install_channel": "uv-tool", "hosts": {"codex": {}}},
+        "_read_state_snapshot",
+        lambda _path: (
+            {"install_channel": "uv-tool", "hosts": {"codex": {}}},
+            b"state",
+        ),
     )
     monkeypatch.setattr(
         installer,
@@ -743,8 +808,11 @@ def test_upgrade_missing_active_launcher_preserves_partial_evidence(
     monkeypatch.setattr(installer, "_channel", lambda: "uv-tool")
     monkeypatch.setattr(
         installer,
-        "_load_state",
-        lambda _path: {"install_channel": "uv-tool", "hosts": {"codex": {}}},
+        "_read_state_snapshot",
+        lambda _path: (
+            {"install_channel": "uv-tool", "hosts": {"codex": {}}},
+            b"state",
+        ),
     )
     monkeypatch.setattr(installer.shutil, "which", lambda name: f"/bin/{name}")
     monkeypatch.setattr(

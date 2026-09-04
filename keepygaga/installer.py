@@ -171,13 +171,17 @@ def ensure_config(config_path: Path, memory_root: Path) -> dict[str, object]:
     return {"status": status, "path": str(config_path), "backup": backup}
 
 
-def _load_state(config_path: Path) -> dict[str, Any]:
+def _read_state_snapshot(config_path: Path) -> tuple[dict[str, Any], bytes | None]:
     path = state_path(config_path)
-    if not path.exists():
-        return {}
     try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        original = path.read_bytes()
+    except FileNotFoundError:
+        return {}, None
+    except OSError as exc:
+        raise HostSetupError(f"Keepygaga install state is invalid: {path}") from exc
+    try:
+        value = json.loads(original)
+    except (UnicodeError, json.JSONDecodeError) as exc:
         raise HostSetupError(f"Keepygaga install state is invalid: {path}") from exc
     if (
         not isinstance(value, dict)
@@ -192,7 +196,11 @@ def _load_state(config_path: Path) -> dict[str, Any]:
         for host, host_state in hosts.items()
     ):
         raise HostSetupError(f"Keepygaga install state has invalid hosts: {path}")
-    return value
+    return value, original
+
+
+def _load_state(config_path: Path) -> dict[str, Any]:
+    return _read_state_snapshot(config_path)[0]
 
 
 def _uv_tool_root() -> Path | None:
@@ -240,8 +248,12 @@ def _release_version(
 
 
 def _write_state(
-    config_path: Path, memory_root: Path, hosts: Mapping[str, object]
-) -> None:
+    config_path: Path,
+    memory_root: Path,
+    hosts: Mapping[str, object],
+    *,
+    expected_original: bytes | None,
+) -> bytes:
     payload = {
         "schema_version": INSTALLER_SCHEMA_VERSION,
         "installed_version": __version__,
@@ -253,14 +265,14 @@ def _write_state(
     encoded = (json.dumps(payload, ensure_ascii=False, indent=2) + "\n").encode()
     path = state_path(config_path)
     try:
-        original = path.read_bytes() if path.exists() else None
-        atomic_write(path, encoded, expected_original=original)
+        atomic_write(path, encoded, expected_original=expected_original)
     except HostSetupError:
         raise
     except OSError as exc:
         raise HostSetupError(
             f"Keepygaga install state could not be written: {path}"
         ) from exc
+    return encoded
 
 
 def _call_host(
@@ -294,7 +306,7 @@ def install(
     unknown = sorted(set(hosts) - set(SUPPORTED_HOSTS))
     if unknown:
         raise HostSetupError(f"unsupported hosts: {', '.join(unknown)}")
-    existing_state = _load_state(config_path)
+    existing_state, state_snapshot = _read_state_snapshot(config_path)
     config_result = ensure_config(config_path, memory_root)
     config = load_config(config_path)
     initialized = initialize_memory_tree(memory_root, config.memory)
@@ -342,7 +354,12 @@ def install(
             raise
         state_hosts[host] = _host_state(host)
         try:
-            _write_state(config_path, memory_root, state_hosts)
+            state_snapshot = _write_state(
+                config_path,
+                memory_root,
+                state_hosts,
+                expected_original=state_snapshot,
+            )
         except HostSetupError as exc:
             raise HostSetupPartialError(
                 f"{host} was installed but install state could not be updated: {exc}",
@@ -370,7 +387,7 @@ def install(
 
 
 def uninstall(config_path: Path, hosts: Sequence[str]) -> dict[str, object]:
-    state = _load_state(config_path)
+    state, state_snapshot = _read_state_snapshot(config_path)
     raw_hosts = state.get("hosts", {})
     state_hosts = dict(raw_hosts) if isinstance(raw_hosts, Mapping) else {}
     selected_hosts = list(dict.fromkeys(hosts or tuple(state_hosts)))
@@ -410,7 +427,12 @@ def uninstall(config_path: Path, hosts: Sequence[str]) -> dict[str, object]:
             else default_memory_root()
         )
         try:
-            _write_state(config_path, memory_root, state_hosts)
+            state_snapshot = _write_state(
+                config_path,
+                memory_root,
+                state_hosts,
+                expected_original=state_snapshot,
+            )
         except HostSetupError as exc:
             raise HostSetupPartialError(
                 f"{host} was uninstalled but install state could not be updated: {exc}",
@@ -739,7 +761,7 @@ def _upgrade_command(
 
 
 def upgrade(config_path: Path, *, apply: bool) -> dict[str, object]:
-    state = _load_state(config_path)
+    state, state_snapshot = _read_state_snapshot(config_path)
     channel, command, environment = _upgrade_command(state)
     if not command:
         raise HostSetupError(
@@ -759,6 +781,28 @@ def upgrade(config_path: Path, *, apply: bool) -> dict[str, object]:
     if completed.returncode != 0:
         detail = captured_output(completed) or "unknown uv error"
         raise HostSetupError(f"Keepygaga upgrade failed: {detail}")
+    upgrade_component = {"status": "applied", "command": command}
+    try:
+        state, live_snapshot = _read_state_snapshot(config_path)
+    except HostSetupError as exc:
+        raise HostSetupPartialError(
+            f"Keepygaga upgraded but install state became invalid: {exc}",
+            {
+                "upgrade": upgrade_component,
+                "repair": {"status": "failed", "message": str(exc)},
+            },
+        ) from exc
+    if live_snapshot != state_snapshot:
+        raise HostSetupPartialError(
+            "Keepygaga upgraded but install state changed concurrently",
+            {
+                "upgrade": upgrade_component,
+                "repair": {
+                    "status": "failed",
+                    "message": "install state changed concurrently; rerun repair",
+                },
+            },
+        )
     raw_hosts = state.get("hosts", {})
     if not isinstance(raw_hosts, Mapping) or not raw_hosts:
         return {
@@ -767,7 +811,6 @@ def upgrade(config_path: Path, *, apply: bool) -> dict[str, object]:
             "repair": "skipped",
             "message": "runtime upgraded; no recorded hosts required repair",
         }
-    upgrade_component = {"status": "applied", "command": command}
     try:
         launcher = resolve_active_launcher("keepygaga")
         repair_command = [
