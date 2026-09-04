@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import subprocess
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import Barrier
 
 import pytest
 
@@ -203,6 +205,29 @@ def test_install_does_not_overwrite_a_concurrent_sibling_record(
     assert json.loads(state.read_text(encoding="utf-8"))["hosts"] == {
         "claude-code": {}
     }
+
+
+def test_state_writers_serialize_the_final_replace(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.toml"
+    ready = Barrier(2)
+
+    def write(host: str) -> str:
+        ready.wait()
+        try:
+            installer._write_state(
+                config_path,
+                tmp_path / "memory",
+                {host: {}},
+                expected_original=None,
+            )
+        except HostSetupError:
+            return "conflict"
+        return "applied"
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(write, ("codex", "claude-code")))
+
+    assert sorted(results) == ["applied", "conflict"]
 
 
 def test_install_records_grok_rules_fallback(tmp_path: Path, monkeypatch) -> None:

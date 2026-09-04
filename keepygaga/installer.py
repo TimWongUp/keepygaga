@@ -10,9 +10,12 @@ import shutil
 import subprocess
 import sys
 import tomllib
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
+
+from filelock import Timeout
 
 from keepygaga import __version__
 from keepygaga.config import (
@@ -33,6 +36,7 @@ from keepygaga.host_common import (
 )
 from keepygaga.launchers import resolve_active_launcher
 from keepygaga.memory import initialize_memory_tree
+from keepygaga.memory_files import _memory_lock
 from keepygaga.version import (
     CONTRACT_VERSION,
     HOOK_PROTOCOL_VERSION,
@@ -114,6 +118,18 @@ def state_path(config_path: Path | None = None) -> Path:
         if config_path is not None
         else config_directory()
     ) / "install-state.json"
+
+
+@contextmanager
+def _state_guard(config_path: Path) -> Iterator[None]:
+    lock_path = state_path(config_path).with_suffix(".lock")
+    try:
+        with _memory_lock(lock_path):
+            yield
+    except Timeout as exc:
+        raise HostSetupError(
+            f"timed out waiting for Keepygaga install state: {lock_path}"
+        ) from exc
 
 
 def _config_bytes(memory_root: Path) -> bytes:
@@ -265,7 +281,11 @@ def _write_state(
     encoded = (json.dumps(payload, ensure_ascii=False, indent=2) + "\n").encode()
     path = state_path(config_path)
     try:
-        atomic_write(path, encoded, expected_original=expected_original)
+        with _state_guard(config_path):
+            _, live_snapshot = _read_state_snapshot(config_path)
+            if live_snapshot != expected_original:
+                raise HostSetupError(f"write conflict while updating {path}")
+            atomic_write(path, encoded, expected_original=live_snapshot)
     except HostSetupError:
         raise
     except OSError as exc:
@@ -783,34 +803,26 @@ def upgrade(config_path: Path, *, apply: bool) -> dict[str, object]:
         raise HostSetupError(f"Keepygaga upgrade failed: {detail}")
     upgrade_component = {"status": "applied", "command": command}
     try:
-        state, live_snapshot = _read_state_snapshot(config_path)
+        with _state_guard(config_path):
+            state, live_snapshot = _read_state_snapshot(config_path)
+            if live_snapshot != state_snapshot:
+                raise HostSetupError("install state changed concurrently")
+            raw_hosts = state.get("hosts", {})
+            if not isinstance(raw_hosts, Mapping) or not raw_hosts:
+                return {
+                    "status": "applied",
+                    "command": command,
+                    "repair": "skipped",
+                    "message": "runtime upgraded; no recorded hosts required repair",
+                }
     except HostSetupError as exc:
         raise HostSetupPartialError(
-            f"Keepygaga upgraded but install state became invalid: {exc}",
+            f"Keepygaga upgraded but install state could not be verified: {exc}",
             {
                 "upgrade": upgrade_component,
                 "repair": {"status": "failed", "message": str(exc)},
             },
         ) from exc
-    if live_snapshot != state_snapshot:
-        raise HostSetupPartialError(
-            "Keepygaga upgraded but install state changed concurrently",
-            {
-                "upgrade": upgrade_component,
-                "repair": {
-                    "status": "failed",
-                    "message": "install state changed concurrently; rerun repair",
-                },
-            },
-        )
-    raw_hosts = state.get("hosts", {})
-    if not isinstance(raw_hosts, Mapping) or not raw_hosts:
-        return {
-            "status": "applied",
-            "command": command,
-            "repair": "skipped",
-            "message": "runtime upgraded; no recorded hosts required repair",
-        }
     try:
         launcher = resolve_active_launcher("keepygaga")
         repair_command = [
