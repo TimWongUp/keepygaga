@@ -77,9 +77,18 @@ def test_canonical_contract_is_short_and_delegates_full_protocol() -> None:
     assert "create it with the first project Fact" in contract
     assert "legacy" in contract
     assert "cross-Agent user preferences belong only in `preferences.md`" in contract
-    assert "Prose style and code style do not decide scope" in contract
-    assert "ask before changing any source" in contract
+    assert "Prose style and code style do not decide between them" in contract
+    assert "ask before changing either source" in contract
+    assert "outside this source choice" in contract
     assert len(contract.splitlines()) < 20
+
+
+def test_repository_rules_match_preference_scope_contract() -> None:
+    rules = (Path(__file__).parents[1] / "AGENTS.md").read_text(encoding="utf-8")
+
+    assert "`preferences.md` 只保存用户希望所有接入 Agent" in rules
+    assert "先询问是跨 Agent 用户偏好还是特定 Agent 规则" in rules
+    assert "同一含义不得写入两处" in rules
 
 
 def test_merge_appends_first_block_without_changing_existing_bytes() -> None:
