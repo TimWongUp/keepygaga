@@ -24,7 +24,7 @@ Keepygaga 独立提供完整运行时：八个 raw Tool 的 MCP Server、精简�
 
 核心记忆由 `profile.md`、`preferences.md` 以及 `topics/`、`areas/`、`people/` 的直属页面组成。持续项目统一登记在 `areas/projects.md`：每个项目只用一条 Fact 保存简介、规范项目真源和可选的最新重大节点，后续变化直接替换原 Fact。完整历史、术语、架构、操作说明、重要决定与当前状态仍由项目仓库或其他直接真源负责。
 
-宿主原生记忆可以继续负责该宿主的会话召回与项目内学习；Keepygaga 只负责应当随用户跨宿主流动的少量稳定事实。
+宿主原生记忆可以继续负责该宿主的会话召回与项目内学习；Keepygaga 只负责应当随用户跨宿主流动的少量稳定事实。`preferences.md` 只保存希望所有接入 Agent 都遵循的长期用户偏好；只约束某一 Agent 的规则留在该宿主的有效全局规则入口，只约束某一项目的规则留在项目真源。文风和代码风格本身不能决定归属；用户没有说明适用范围时，Agent 必须先询问，并且同一含义只能由一个来源负责。
 
 公开 MCP Tool 固定为 `list`、`read`、`create`、`add`、`update`、`move`、`rename`、`delete`。
 

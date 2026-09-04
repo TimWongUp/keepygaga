@@ -28,7 +28,7 @@ NEW_FILE_MODE = 0o600
 
 DEFAULT_DESCRIPTIONS = {
     "profile.md": "用户明确陈述的稳定身份、背景与长期角色。",
-    "preferences.md": "用户希望 Agent 长期遵循的回应方式、工作偏好与条件检索偏好。",
+    "preferences.md": "用户希望所有接入 Agent 跨任务长期遵循的回应、工作与条件检索偏好。",
 }
 
 MemoryScope = Literal["topics", "areas", "people"]

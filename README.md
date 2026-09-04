@@ -24,7 +24,7 @@ Keepygaga ships the complete runtime: an eight-tool MCP server, a concise global
 
 Core memory contains `profile.md`, `preferences.md`, and direct pages below `topics/`, `areas/`, and `people/`. Ongoing projects share one canonical index at `areas/projects.md`: one Fact per project holds a brief, its canonical Authority, and optionally its latest completed major milestone, with later changes replacing that Fact. Complete history, terminology, architecture, operating guides, decisions, and current state remain in the repository or another direct project source.
 
-Host-native memories can continue to own host-specific conversation recall and project learning. Keepygaga owns the small set of stable user facts that should follow the user across hosts.
+Host-native memories can continue to own host-specific conversation recall and project learning. Keepygaga owns the small set of stable user facts that should follow the user across hosts. `preferences.md` contains only durable user preferences meant for every connected Agent; rules for one Agent stay in that host's effective global-rules entry, and project rules stay in the project Authority. Prose style and code style do not determine ownership by themselves. When the user has not specified the intended scope, the Agent must ask first, and one meaning may have only one source.
 
 The public MCP surface is exactly `list`, `read`, `create`, `add`, `update`, `move`, `rename`, and `delete`.
 

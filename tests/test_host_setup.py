@@ -76,6 +76,9 @@ def test_canonical_contract_is_short_and_delegates_full_protocol() -> None:
     assert "credential-free" in contract
     assert "create it with the first project Fact" in contract
     assert "legacy" in contract
+    assert "cross-Agent user preferences belong only in `preferences.md`" in contract
+    assert "Prose style and code style do not decide scope" in contract
+    assert "ask before changing any source" in contract
     assert len(contract.splitlines()) < 20
 
 
