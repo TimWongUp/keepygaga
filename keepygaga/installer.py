@@ -720,7 +720,7 @@ def upgrade(config_path: Path, *, apply: bool) -> dict[str, object]:
         }
     try:
         completed = run_captured(command, timeout=300)
-    except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
+    except (OSError, subprocess.SubprocessError) as exc:
         raise HostSetupError(f"Keepygaga upgrade could not be started: {exc}") from exc
     if completed.returncode != 0:
         detail = captured_output(completed) or "unknown uv error"
