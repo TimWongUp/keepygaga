@@ -253,6 +253,31 @@ def test_status_plan_keeps_unreconciled_sibling_stale(
     assert state["hosts"]["claude-code"]["reconciled_version"] == "0.7.3"
 
 
+def test_planned_status_reads_only_the_current_host_contract(
+    tmp_path: Path, monkeypatch
+) -> None:
+    config_path = tmp_path / "config.toml"
+    memory_root = tmp_path / "memory"
+    monkeypatch.setattr(installer, "_channel", lambda: "uv-tool")
+    monkeypatch.setattr(installer, "_call_host", lambda *_args: {"status": "no_op"})
+    installer.install(config_path, memory_root, ["codex", "claude-code"])
+    checked: list[str] = []
+    monkeypatch.setattr(
+        installer,
+        "_contract_status",
+        lambda selected: checked.append(selected) or "current",
+    )
+
+    result = installer.status(
+        config_path,
+        latest_version=installer.__version__,
+        host="codex",
+    )
+
+    assert set(result["hosts"]) == {"codex"}  # type: ignore[arg-type]
+    assert set(checked) == {"codex"}
+
+
 def test_status_plan_refuses_unknown_update_owner(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(installer, "_channel", lambda: "python-package")
 

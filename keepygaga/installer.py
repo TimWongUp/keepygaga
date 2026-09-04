@@ -650,6 +650,7 @@ def status(
     config = load_config(config_path)
     raw_hosts = state.get("hosts", {})
     hosts = list(raw_hosts) if isinstance(raw_hosts, Mapping) else []
+    reported_hosts = hosts if host is None else ([host] if host in hosts else [])
     doctor = run_doctor(config_path, project_root=PROJECT_ROOT)
     payload: dict[str, object] = {
         "status": "ok" if doctor.get("status") != "error" else "error",
@@ -663,13 +664,13 @@ def status(
         "limits_source": config.limits_source,
         "doctor": doctor.get("status"),
         "hosts": {
-            host: {
+            recorded_host: {
                 "recorded": True,
-                "contract": _contract_status(host),
+                "contract": _contract_status(recorded_host),
                 "live_verified": False,
             }
-            for host in hosts
-            if host in SUPPORTED_HOSTS
+            for recorded_host in reported_hosts
+            if recorded_host in SUPPORTED_HOSTS
         },
         "note": "状态文件仅用于发现；宿主 live 配置与官方诊断仍是最终证据。",
     }
