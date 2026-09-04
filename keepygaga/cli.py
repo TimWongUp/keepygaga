@@ -116,7 +116,9 @@ def _parser() -> argparse.ArgumentParser:
     install.add_argument("--memory-root", type=Path)
     install.add_argument("--yes", action="store_true")
 
-    commands.add_parser("status")
+    status = commands.add_parser("status")
+    status.add_argument("--latest-version")
+    status.add_argument("--host", choices=_HOSTS)
 
     repair = commands.add_parser("repair")
     repair.add_argument("--yes", action="store_true")
@@ -247,7 +249,11 @@ def _installer_payload(
     if args.command == "install":
         return _install_payload(args, parser, config_path)
     if args.command == "status":
-        return installer.status(config_path)
+        return installer.status(
+            config_path,
+            latest_version=args.latest_version,
+            host=args.host,
+        )
     if args.command == "repair":
         if not args.yes:
             parser.error("repair requires --yes")

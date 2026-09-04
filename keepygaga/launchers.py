@@ -12,10 +12,26 @@ def _script_name(name: str) -> str:
     return f"{name}.exe" if os.name == "nt" else name
 
 
+def resolve_active_launcher(name: str) -> Path:
+    script_name = _script_name(name)
+    script_directory = "Scripts" if os.name == "nt" else "bin"
+    candidates = (
+        Path(sys.prefix) / script_directory / script_name,
+        Path(sys.executable).parent / script_name,
+    )
+    for candidate in dict.fromkeys(candidates):
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return candidate.resolve()
+    raise RuntimeError(
+        f"active Keepygaga launcher {name!r} could not be located in {sys.prefix}"
+    )
+
+
 def resolve_launcher(name: str) -> Path:
-    sibling = Path(sys.executable).resolve().parent / _script_name(name)
-    if sibling.is_file() and os.access(sibling, os.X_OK):
-        return sibling
+    try:
+        return resolve_active_launcher(name)
+    except RuntimeError:
+        pass
     discovered = shutil.which(name)
     if discovered:
         path = Path(discovered).resolve()

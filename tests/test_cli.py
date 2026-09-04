@@ -237,6 +237,40 @@ def test_install_reuses_configured_memory_root_for_a_new_host(
     }
 
 
+def test_status_forwards_release_and_current_host(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    config_path = tmp_path / "keepygaga.toml"
+    received: dict[str, object] = {}
+
+    def fake_status(config, **options) -> dict[str, object]:
+        received.update(config=config, **options)
+        return {"status": "ok"}
+
+    monkeypatch.setattr(installer, "status", fake_status)
+
+    assert (
+        cli.main(
+            [
+                "--config",
+                str(config_path),
+                "status",
+                "--latest-version",
+                "v0.7.3",
+                "--host",
+                "codex",
+            ]
+        )
+        == 0
+    )
+    assert received == {
+        "config": config_path.resolve(),
+        "latest_version": "v0.7.3",
+        "host": "codex",
+    }
+    assert json.loads(capsys.readouterr().out) == {"status": "ok"}
+
+
 def test_noninteractive_install_validates_yes_before_reading_config(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

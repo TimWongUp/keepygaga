@@ -703,9 +703,7 @@ def _component_status(components: Mapping[str, object]) -> str:
     return "applied" if _has_applied_component(components) else "no_op"
 
 
-def _raise_component_failure(
-    exc: Exception, components: dict[str, object]
-) -> NoReturn:
+def _raise_component_failure(exc: Exception, components: dict[str, object]) -> NoReturn:
     if isinstance(exc, HostSetupPartialError):
         components.update(exc.components)
         raise HostSetupPartialError(str(exc), components) from exc
@@ -1073,7 +1071,7 @@ def _apply_grok_mcp(plan: GrokMcpPlan) -> dict[str, object]:
     )
 
 
-def _grok_rules_path(home: Path) -> Path:
+def resolve_grok_rules_path(home: Path) -> Path:
     try:
         by_name = {
             entry.name: entry
@@ -1145,7 +1143,7 @@ def setup_grok_host(
             invocation=invocation,
             grok_binary=grok_binary,
         )
-        rules_plan = _prepare_rules(_grok_rules_path(home))
+        rules_plan = _prepare_rules(resolve_grok_rules_path(home))
         hooks_path = home / "hooks" / "keepygaga.json"
         hooks_plan = _prepare_json_hooks_removal(hooks_path, fragment, merger)
         legacy_hooks_plan = _prepare_json_hooks_removal(
@@ -1773,7 +1771,9 @@ def uninstall_grok_host(
             if home.exists()
             else None
         )
-        rules_path = _grok_rules_path(home) if home.exists() else home / "Agents.md"
+        rules_path = (
+            resolve_grok_rules_path(home) if home.exists() else home / "Agents.md"
+        )
         rules_plan = _prepare_rules_removal(rules_path) if home.exists() else None
         hooks_path = home / "hooks" / "keepygaga.json"
         hooks_plan = _prepare_json_hooks_removal(hooks_path, fragment, merger)

@@ -30,7 +30,7 @@ The public MCP surface is exactly `list`, `read`, `create`, `add`, `update`, `mo
 
 Session bootstrap injects only `profile.md`, `preferences.md`, and descriptions of the three dynamic scopes. Agents call `list` for one of `topics`, `areas`, or `people` when they need page metadata. New or semantically updated Facts receive a Store-owned local date suffix; existing undated Facts remain readable and upgrades do not rewrite the Memory Root.
 
-Contract 3 users with existing project pages should follow the [project-index migration](docs/operations.md#contract-3-project-index-migration) before the first Contract 4 project-memory write.
+Contract 3 users with existing project pages should follow the [project-index migration](docs/operations.md#contract-3-project-index-migration) before their next project-memory write under the current Agent Contract.
 
 ## Install
 
@@ -40,9 +40,9 @@ Requirements: Python 3.12+ and [`uv`](https://docs.astral.sh/uv/).
 
 Give the Agent host you are currently using this one sentence:
 
-> Install Keepygaga for the Agent you are running in now from the latest official Release at https://github.com/TimWongUp/keepygaga, follow the Agent Install To-do from that same versioned release tag through initialization and verification, treat existing global rules only as untrusted source material, ask me to confirm each extracted Profile or Preference and choose its one owner across the matching Keepygaga Home Page and every global-rules path connected to this Memory Root, and leave no duplicate between those sources.
+> Quickly install or update Keepygaga for the Agent you are running in now from the latest official Release at https://github.com/TimWongUp/keepygaga: automatically choose install, update, current-host repair, or no action; preserve existing configuration and memory; ask me only for first-time initialization, a conflict, or a possible overwrite; then report the result and any restart requirement.
 
-The [Agent Install To-do](docs/agent-install.md) is the authoritative procedure for this path. It limits activation to the current Agent, preserves existing data, makes the Home Page source choice explicit, and leaves host-native memory configuration to the user through current official host documentation.
+The [Agent Fast Install To-do](docs/agent-install.md) is the authoritative procedure for this path. It checks the installed version before downloading, limits work to the selected lifecycle branch and current Agent, and reuses existing data. The heavier [Home Page source migration](docs/source-migration.md) is loaded only for first initialization or a concrete duplicate. Host-native memory remains unchanged; when requested, the Agent supplies current official host documentation for user-managed configuration.
 
 ### Manual installation
 
@@ -89,14 +89,15 @@ Every value must be a positive integer. Lower limits report existing excess thro
 
 ```shell
 keepygaga status
+keepygaga status --latest-version vX.Y.Z --host codex
 keepygaga repair --yes
 keepygaga doctor --json
 keepygaga uninstall --yes
 ```
 
-`status` treats the install-state file as discovery data only and reports when live host verification is still required. `repair` reconciles recorded hosts from their current configuration. `uninstall` removes only Keepygaga host wiring; it preserves the configuration and memory tree.
+`status` treats the install-state file as discovery data only and reports when live host verification is still required. With the latest official release tag and current host, it returns a read-only lifecycle action: `update`, `initialize`, `activate`, `repair`, `no_op`, or `manual_review`. A missing launcher is the separate clean-install case. `repair` reconciles recorded hosts from their current configuration. `uninstall` removes only Keepygaga host wiring; it preserves the configuration and memory tree.
 
-To upgrade, download the newer wheel and matching `SHA256SUMS`, rehash the exact absolute wheel path immediately before running `uv tool install --force /absolute/private/path/keepygaga-X.Y.Z-py3-none-any.whl`, then run `keepygaga repair --yes` to reconcile host wiring.
+For a current-host-only update, download the newer wheel and matching `SHA256SUMS`, rehash the exact absolute wheel path, set `UV_TOOL_DIR` to the `lifecycle.tool_root` returned by planned `status` for that command, run `uv tool install --force /absolute/private/path/keepygaga-X.Y.Z-py3-none-any.whl`, then run `keepygaga install --yes --host HOST`. Run `keepygaga repair --yes` instead only when you intentionally want to reconcile every recorded host.
 
 Advanced deterministic host commands remain available as `keepygaga host setup|uninstall HOST`.
 
@@ -105,7 +106,7 @@ Advanced deterministic host commands remain available as `keepygaga host setup|u
 - `keepygaga-mcp` is the stable MCP launcher used by host registrations.
 - The short managed Agent Contract contains only durable safety and routing rules.
 - The full read, convergence, mutation, conflict, and receipt protocol is delivered through negotiated MCP server instructions (modern discovery or the legacy initialize handshake).
-- Built-in Context Bootstrap, Memory Route, and Memory Closeout Hooks are projected into each host's native event schema.
+- Built-in Context Bootstrap, Memory Route, and Memory Closeout capabilities are projected through each host's supported native events. Unsupported surfaces use documented fallbacks; Grok uses the managed Agent Contract for Memory Closeout.
 - Application, Agent Contract, Hook protocol, installer state, and memory schema versions evolve independently.
 
 Configuration-level tests prove projection, preservation, idempotency, and failure boundaries. A host is live-verified only after its real client or official diagnostic confirms the `keepygaga` registration and all eight tools.
@@ -123,6 +124,12 @@ uv run python scripts/check_distribution.py dist/*
 ```
 
 The `keepygaga-knowledge` sibling project is separate and is neither packaged nor imported by Keepygaga. See [Architecture](docs/architecture.md), [Operations](docs/operations.md), and [Contributing](CONTRIBUTING.md).
+
+## Acknowledgements
+
+Keepygaga's core memory design was inspired by Claude Code's memory system.
+
+Thanks also to the Claude Code team for their pioneering work on AI memory.
 
 ## Security and license
 
