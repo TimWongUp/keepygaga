@@ -207,6 +207,28 @@ def test_install_does_not_overwrite_a_concurrent_sibling_record(
     }
 
 
+def test_install_restarts_when_upgrade_generation_is_newer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_path = tmp_path / "config.toml"
+    installer.state_path(config_path).write_text(
+        json.dumps(
+            {
+                "schema_version": installer.INSTALLER_SCHEMA_VERSION,
+                "installed_version": "0.8.0",
+                "install_channel": "uv-tool",
+                "hosts": {},
+                "upgrade_generation": "generation",
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(installer, "__version__", "0.7.3")
+
+    with pytest.raises(HostSetupError, match="runtime changed"):
+        installer.install(config_path, tmp_path / "memory", ["codex"])
+
+
 def test_state_writers_serialize_the_final_replace(tmp_path: Path) -> None:
     config_path = tmp_path / "config.toml"
     ready = Barrier(2)
@@ -591,6 +613,9 @@ def test_upgrade_without_recorded_hosts_skips_repair(
     assert result["status"] == "applied"
     assert result["repair"] == "skipped"
     assert len(calls) == 1
+    state = installer._load_state(tmp_path / "config.toml")
+    assert state["installed_version"] == installer.package_version("keepygaga")
+    assert isinstance(state["upgrade_generation"], str)
 
 
 def test_upgrade_reports_concurrent_state_change(
@@ -614,7 +639,7 @@ def test_upgrade_reports_concurrent_state_change(
 
     monkeypatch.setattr(installer, "run_captured", change_state)
 
-    with pytest.raises(HostSetupPartialError, match="changed concurrently") as caught:
+    with pytest.raises(HostSetupPartialError, match="could not be verified") as caught:
         installer.upgrade(config_path, apply=True)
 
     assert caught.value.components["upgrade"]["status"] == "applied"  # type: ignore[index]
@@ -628,7 +653,7 @@ def test_upgrade_repairs_recorded_grok_host(tmp_path: Path, monkeypatch) -> None
         "_read_state_snapshot",
         lambda _path: (
             {"install_channel": "uv-tool", "hosts": {"grok": {}}},
-            b"state",
+            None,
         ),
     )
     monkeypatch.setattr(installer.shutil, "which", lambda name: f"/bin/{name}")
@@ -702,7 +727,7 @@ def test_upgrade_refuses_unknown_or_mismatched_install_owner(
     monkeypatch.setattr(
         installer,
         "_read_state_snapshot",
-        lambda _path: ({"install_channel": "pipx"}, b"state"),
+        lambda _path: ({"install_channel": "pipx"}, None),
     )
     with pytest.raises(HostSetupError, match="differs from or is not supported"):
         installer.upgrade(tmp_path / "config.toml", apply=True)
@@ -716,7 +741,7 @@ def test_upgrade_refuses_invalid_recorded_owner(
     monkeypatch.setattr(
         installer,
         "_read_state_snapshot",
-        lambda _path: ({"install_channel": recorded}, b"state"),
+        lambda _path: ({"install_channel": recorded}, None),
     )
 
     with pytest.raises(HostSetupError, match="differs from or is not supported"):
@@ -798,7 +823,7 @@ def test_upgrade_repair_failure_reports_partial_evidence(
         "_read_state_snapshot",
         lambda _path: (
             {"install_channel": "uv-tool", "hosts": {"codex": {}}},
-            b"state",
+            None,
         ),
     )
     monkeypatch.setattr(
@@ -836,7 +861,7 @@ def test_upgrade_missing_active_launcher_preserves_partial_evidence(
         "_read_state_snapshot",
         lambda _path: (
             {"install_channel": "uv-tool", "hosts": {"codex": {}}},
-            b"state",
+            None,
         ),
     )
     monkeypatch.setattr(installer.shutil, "which", lambda name: f"/bin/{name}")
