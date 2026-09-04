@@ -82,7 +82,7 @@ def test_core_memory_v1_contract_matches_current_page_format() -> None:
         ),
         "preferences.md": MemoryDocument(
             name="preferences",
-            description="用户希望 Agent 长期遵循的回应方式、工作偏好与条件检索偏好。",
+            description="用户希望所有接入 Agent 跨任务长期遵循的回应、工作与条件检索偏好。",
             aliases=("working-style",),
             facts=(
                 StoredFact(
@@ -215,7 +215,7 @@ def test_initialize_creates_minimal_tree(
     assert profile.description == "用户明确陈述的稳定身份、背景与长期角色。"
     assert (
         preferences.description
-        == "用户希望 Agent 长期遵循的回应方式、工作偏好与条件检索偏好。"
+        == "用户希望所有接入 Agent 跨任务长期遵循的回应、工作与条件检索偏好。"
     )
 
 

@@ -1,6 +1,6 @@
 ---
 name: "preferences"
-description: "用户希望 Agent 长期遵循的回应方式、工作偏好与条件检索偏好。"
+description: "用户希望所有接入 Agent 跨任务长期遵循的回应、工作与条件检索偏好。"
 aliases: ["working-style"]
 ---
 

@@ -218,6 +218,11 @@ def test_tool_protocol_is_discoverable_from_descriptions_and_schema() -> None:
     assert "use `create` with the initial project Fact" in instructions
     assert "do not create a duplicate canonical page" in instructions
     assert "must use `update`" in instructions
+    assert "Classify durable instructions by intended scope" in instructions
+    assert "choose exactly one owner" in instructions
+    assert "ask before writing or moving it" in instructions
+    assert "Never retain the same meaning in both sources" in instructions
+    assert "Project-specific instructions are not Preference candidates" in instructions
 
     assert "Route Catalog" in (by_name["list"].description or "")
     assert "opaque write versions" in (by_name["read"].description or "")
