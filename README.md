@@ -97,7 +97,7 @@ keepygaga uninstall --yes
 
 `status` treats the install-state file as discovery data only and reports when live host verification is still required. With the latest official release tag and current host, it returns a read-only lifecycle action: `update`, `initialize`, `activate`, `repair`, `no_op`, or `manual_review`. A missing launcher is the separate clean-install case. `repair` reconciles recorded hosts from their current configuration. `uninstall` removes only Keepygaga host wiring; it preserves the configuration and memory tree.
 
-For a current-host-only update, download the newer wheel and matching `SHA256SUMS`, rehash the exact absolute wheel path immediately before running `uv tool install --force /absolute/private/path/keepygaga-X.Y.Z-py3-none-any.whl`, then run `keepygaga install --yes --host HOST`. Run `keepygaga repair --yes` instead only when you intentionally want to reconcile every recorded host.
+For a current-host-only update, download the newer wheel and matching `SHA256SUMS`, rehash the exact absolute wheel path, set `UV_TOOL_DIR` to the `lifecycle.tool_root` returned by planned `status` for that command, run `uv tool install --force /absolute/private/path/keepygaga-X.Y.Z-py3-none-any.whl`, then run `keepygaga install --yes --host HOST`. Run `keepygaga repair --yes` instead only when you intentionally want to reconcile every recorded host.
 
 Advanced deterministic host commands remain available as `keepygaga host setup|uninstall HOST`.
 

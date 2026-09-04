@@ -10,21 +10,45 @@ from keepygaga import host_adapters, installer, launchers
 from keepygaga.host_common import HostSetupError, HostSetupPartialError
 
 
-@pytest.mark.parametrize(
-    ("prefix", "expected"),
-    [
-        ("/Users/example/.local/share/uv/tools/keepygaga", "uv-tool"),
-        ("/Users/example/.local/pipx/venvs/keepygaga", "pipx"),
-        ("/Users/example/project/.venv", "python-package"),
-    ],
-)
+@pytest.fixture
+def uv_tool_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    root = tmp_path / "uv" / "tools"
+    monkeypatch.setattr(installer, "_uv_tool_root", lambda: root)
+    return root
+
+
 def test_install_channel_uses_the_active_environment(
-    prefix: str, expected: str, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    prefix = tmp_path / "uv" / "tools" / "keepygaga"
+    prefix.mkdir(parents=True)
+    prefix.joinpath("uv-receipt.toml").write_text(
+        '[tool]\nrequirements = [{ name = "keepygaga" }]\n', encoding="utf-8"
+    )
+    monkeypatch.setattr(installer.sys, "prefix", str(prefix))
+    monkeypatch.setattr(installer.sys, "executable", str(prefix / "bin" / "python"))
+
+    assert installer._channel() == "uv-tool"
+
+
+def test_install_channel_does_not_trust_a_uv_shaped_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    prefix = tmp_path / "uv" / "tools" / "keepygaga"
+    monkeypatch.setattr(installer.sys, "prefix", str(prefix))
+    monkeypatch.setattr(installer.sys, "executable", str(prefix / "bin" / "python"))
+
+    assert installer._channel() == "python-package"
+
+
+def test_install_channel_recognizes_pipx_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    prefix = "/Users/example/.local/pipx/venvs/keepygaga"
     monkeypatch.setattr(installer.sys, "prefix", prefix)
     monkeypatch.setattr(installer.sys, "executable", f"{prefix}/bin/python")
 
-    assert installer._channel() == expected
+    assert installer._channel() == "pipx"
 
 
 def test_active_launcher_stays_with_the_running_environment(
@@ -134,6 +158,22 @@ def test_explicit_configs_have_independent_state_paths(tmp_path: Path) -> None:
     assert installer.state_path(first) != installer.state_path(second)
 
 
+def test_load_state_rejects_malformed_hosts(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.toml"
+    installer.state_path(config_path).write_text(
+        json.dumps(
+            {
+                "schema_version": installer.INSTALLER_SCHEMA_VERSION,
+                "hosts": ["codex"],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(HostSetupError, match="invalid hosts"):
+        installer._load_state(config_path)
+
+
 def test_install_records_grok_rules_fallback(tmp_path: Path, monkeypatch) -> None:
     config_path = tmp_path / "config.toml"
     memory_root = tmp_path / "memory"
@@ -152,7 +192,7 @@ def test_install_records_grok_rules_fallback(tmp_path: Path, monkeypatch) -> Non
 
 
 def test_status_plan_distinguishes_update_from_initialization(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch, uv_tool_root: Path
 ) -> None:
     monkeypatch.setattr(installer, "_channel", lambda: "uv-tool")
     config_path = tmp_path / "config.toml"
@@ -169,6 +209,7 @@ def test_status_plan_distinguishes_update_from_initialization(
     )
 
     assert update["lifecycle"]["action"] == "update"  # type: ignore[index]
+    assert update["lifecycle"]["tool_root"] == str(uv_tool_root)  # type: ignore[index]
     assert current["lifecycle"]["action"] == "initialize"  # type: ignore[index]
 
 
@@ -278,8 +319,11 @@ def test_planned_status_reads_only_the_current_host_contract(
     assert set(checked) == {"codex"}
 
 
-def test_status_plan_refuses_unknown_update_owner(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.setattr(installer, "_channel", lambda: "python-package")
+@pytest.mark.parametrize("channel", ["python-package", "pipx"])
+def test_status_plan_refuses_unknown_update_owner(
+    tmp_path: Path, monkeypatch, channel: str
+) -> None:
+    monkeypatch.setattr(installer, "_channel", lambda: channel)
 
     result = installer.status(
         tmp_path / "config.toml",
@@ -472,7 +516,7 @@ def test_status_plan_rejects_invalid_or_incomplete_request(tmp_path: Path) -> No
 
 
 def test_upgrade_without_recorded_hosts_skips_repair(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch, uv_tool_root: Path
 ) -> None:
     monkeypatch.setattr(installer, "_channel", lambda: "uv-tool")
     monkeypatch.setattr(installer.shutil, "which", lambda name: f"/bin/{name}")
@@ -507,19 +551,22 @@ def test_upgrade_repairs_recorded_grok_host(tmp_path: Path, monkeypatch) -> None
         lambda _name: Path("/active/bin/keepygaga"),
     )
     monkeypatch.setattr(installer, "_channel", lambda: "uv-tool")
-    calls: list[list[str]] = []
+    tool_root = tmp_path / "uv" / "tools"
+    monkeypatch.setattr(installer, "_uv_tool_root", lambda: tool_root)
+    calls: list[tuple[list[str], dict[str, object]]] = []
     monkeypatch.setattr(
         installer,
         "run_captured",
-        lambda command, **_kwargs: (
-            calls.append(command) or subprocess.CompletedProcess(command, 0, "", "")
+        lambda command, **kwargs: (
+            calls.append((command, kwargs))
+            or subprocess.CompletedProcess(command, 0, "", "")
         ),
     )
 
     result = installer.upgrade(config_path, apply=True)
 
     assert result["status"] == "applied"
-    assert calls == [
+    assert [command for command, _kwargs in calls] == [
         ["/bin/uv", "tool", "upgrade", "keepygaga"],
         [
             str(Path("/active/bin/keepygaga")),
@@ -529,9 +576,12 @@ def test_upgrade_repairs_recorded_grok_host(tmp_path: Path, monkeypatch) -> None
             "--yes",
         ],
     ]
+    assert calls[0][1]["env"]["UV_TOOL_DIR"] == str(tool_root)  # type: ignore[index]
 
 
-def test_upgrade_timeout_becomes_host_setup_error(tmp_path: Path, monkeypatch) -> None:
+def test_upgrade_timeout_becomes_host_setup_error(
+    tmp_path: Path, monkeypatch, uv_tool_root: Path
+) -> None:
     monkeypatch.setattr(installer, "_channel", lambda: "uv-tool")
     monkeypatch.setattr(installer.shutil, "which", lambda name: f"/bin/{name}")
     monkeypatch.setattr(
@@ -557,6 +607,11 @@ def test_upgrade_refuses_unknown_or_mismatched_install_owner(
     with pytest.raises(HostSetupError, match="automatic upgrade"):
         installer.upgrade(tmp_path / "config.toml", apply=True)
 
+    monkeypatch.setattr(installer, "_channel", lambda: "pipx")
+    with pytest.raises(HostSetupError, match="automatic upgrade"):
+        installer.upgrade(tmp_path / "config.toml", apply=True)
+
+    monkeypatch.setattr(installer, "_channel", lambda: "python-package")
     monkeypatch.setattr(
         installer,
         "_load_state",
@@ -568,7 +623,7 @@ def test_upgrade_refuses_unknown_or_mismatched_install_owner(
 
 @pytest.mark.parametrize("recorded", ["mystery", [], {}, "python-package"])
 def test_upgrade_refuses_invalid_recorded_owner(
-    tmp_path: Path, monkeypatch, recorded: object
+    tmp_path: Path, monkeypatch, uv_tool_root: Path, recorded: object
 ) -> None:
     monkeypatch.setattr(installer, "_channel", lambda: "uv-tool")
     monkeypatch.setattr(
@@ -648,7 +703,7 @@ def test_first_host_partial_failure_reports_created_config_and_memory(
 
 
 def test_upgrade_repair_failure_reports_partial_evidence(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch, uv_tool_root: Path
 ) -> None:
     monkeypatch.setattr(installer, "_channel", lambda: "uv-tool")
     monkeypatch.setattr(
@@ -683,7 +738,7 @@ def test_upgrade_repair_failure_reports_partial_evidence(
 
 
 def test_upgrade_missing_active_launcher_preserves_partial_evidence(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch, uv_tool_root: Path
 ) -> None:
     monkeypatch.setattr(installer, "_channel", lambda: "uv-tool")
     monkeypatch.setattr(
@@ -711,7 +766,7 @@ def test_upgrade_missing_active_launcher_preserves_partial_evidence(
 
 
 def test_upgrade_failure_with_missing_streams_stays_structured(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch, uv_tool_root: Path
 ) -> None:
     monkeypatch.setattr(installer, "_channel", lambda: "uv-tool")
     monkeypatch.setattr(installer.shutil, "which", lambda name: f"/bin/{name}")

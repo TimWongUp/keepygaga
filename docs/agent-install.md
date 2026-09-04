@@ -32,8 +32,8 @@ Skip this section for `initialize`, `activate`, `repair`, and `no_op`.
 For `install` or `update`, download the versioned `keepygaga-X.Y.Z-py3-none-any.whl` and `SHA256SUMS` from the selected official Release to private, non-symlinked absolute paths. Verify that the tag and wheel version agree, parse one unambiguous checksum entry, and rehash the exact wheel immediately before executing it. A checksum detects corruption or asset mismatch; it is not a signature, provenance proof, publisher authentication, or verification of dependencies resolved from the package index.
 
 - `install`: run `uv tool install /absolute/private/path/keepygaga-X.Y.Z-py3-none-any.whl`, followed by `uv tool update-shell` only when the launcher directory is not already active.
-- `update` from the canonical GitHub Release `uv-tool` channel: run `uv tool install --force /absolute/private/path/keepygaga-X.Y.Z-py3-none-any.whl`.
-- `update` from `pipx`: use the recorded package-manager owner only when it can resolve the selected exact release. Otherwise stop with `manual_review` and provide the owner-correct replacement command.
+- `update` from the canonical GitHub Release `uv-tool` channel: set `UV_TOOL_DIR` to the exact `lifecycle.tool_root` returned by `status` for this command, then run `uv tool install --force /absolute/private/path/keepygaga-X.Y.Z-py3-none-any.whl`.
+- `pipx` and other non-`uv-tool` owners: stop with `manual_review` and provide an owner-correct replacement command; the fast path does not guess their package-manager root.
 - Any unknown, source-checkout, or conflicting channel: stop with `manual_review`; never silently switch channels or downgrade.
 
 The user already authorized the selected ordinary install or update by invoking this procedure. Report verification failures and unexpected commands instead of requesting ceremonial confirmation for the known wheel, checksum, or owner-correct command.

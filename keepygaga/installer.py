@@ -9,6 +9,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tomllib
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -185,7 +186,31 @@ def _load_state(config_path: Path) -> dict[str, Any]:
         raise HostSetupError(
             f"Keepygaga install state has an unsupported schema: {path}"
         )
+    hosts = value.get("hosts")
+    if not isinstance(hosts, dict) or any(
+        host not in SUPPORTED_HOSTS or not isinstance(host_state, dict)
+        for host, host_state in hosts.items()
+    ):
+        raise HostSetupError(f"Keepygaga install state has invalid hosts: {path}")
     return value
+
+
+def _uv_tool_root() -> Path | None:
+    prefix = Path(sys.prefix)
+    receipt = prefix / "uv-receipt.toml"
+    try:
+        value = tomllib.loads(receipt.read_text(encoding="utf-8"))
+        requirements = value["tool"]["requirements"]
+    except (OSError, UnicodeError, tomllib.TOMLDecodeError, KeyError, TypeError):
+        return None
+    if prefix.name != "keepygaga" or not isinstance(requirements, list):
+        return None
+    if not any(
+        isinstance(requirement, dict) and requirement.get("name") == "keepygaga"
+        for requirement in requirements
+    ):
+        return None
+    return prefix.parent.resolve()
 
 
 def _channel() -> str:
@@ -193,7 +218,7 @@ def _channel() -> str:
         str(Path(sys.executable)).replace("\\", "/").rstrip("/") + "/",
         str(Path(sys.prefix)).replace("\\", "/").rstrip("/") + "/",
     )
-    if any("/uv/tools/keepygaga/" in location for location in locations):
+    if _uv_tool_root() is not None:
         return "uv-tool"
     if any("/pipx/venvs/keepygaga/" in location for location in locations):
         return "pipx"
@@ -501,6 +526,9 @@ def _runtime_lifecycle(
         "install_channel": live_channel,
         "host": host,
     }
+    tool_root = _uv_tool_root()
+    if live_channel == "uv-tool" and tool_root is not None:
+        base["tool_root"] = str(tool_root)
     if _recorded_channel_conflicts(state, live_channel):
         return base, _lifecycle_result(
             base,
@@ -508,7 +536,7 @@ def _runtime_lifecycle(
             "the live installation owner differs from or is not supported by the recorded owner",
         )
     if current_parts < latest_parts:
-        if live_channel not in {"uv-tool", "pipx"}:
+        if live_channel != "uv-tool":
             return base, _lifecycle_result(
                 base,
                 "manual_review",
@@ -686,27 +714,33 @@ def status(
     return payload
 
 
-def _upgrade_command(state: Mapping[str, Any]) -> tuple[str, list[str]]:
+def _upgrade_command(
+    state: Mapping[str, Any],
+) -> tuple[str, list[str], dict[str, str] | None]:
     channel = _channel()
     if _recorded_channel_conflicts(state, channel):
         raise HostSetupError(
             "the live installation owner differs from or is not supported by the recorded "
             "owner; resolve it before upgrading"
         )
-    if channel == "pipx":
-        executable = shutil.which("pipx")
-        command = [executable, "upgrade", "keepygaga"] if executable else []
-    elif channel == "uv-tool":
+    environment = None
+    if channel == "uv-tool":
+        tool_root = _uv_tool_root()
         executable = shutil.which("uv")
-        command = [executable, "tool", "upgrade", "keepygaga"] if executable else []
+        if executable and tool_root is not None:
+            command = [executable, "tool", "upgrade", "keepygaga"]
+            environment = dict(os.environ)
+            environment["UV_TOOL_DIR"] = str(tool_root)
+        else:
+            command = []
     else:
         command = []
-    return channel, command
+    return channel, command, environment
 
 
 def upgrade(config_path: Path, *, apply: bool) -> dict[str, object]:
     state = _load_state(config_path)
-    channel, command = _upgrade_command(state)
+    channel, command, environment = _upgrade_command(state)
     if not command:
         raise HostSetupError(
             f"automatic upgrade for {channel} could not locate its package manager; "
@@ -719,7 +753,7 @@ def upgrade(config_path: Path, *, apply: bool) -> dict[str, object]:
             "message": "rerun with --yes to upgrade the installed release and repair recorded hosts",
         }
     try:
-        completed = run_captured(command, timeout=300)
+        completed = run_captured(command, timeout=300, env=environment)
     except (OSError, subprocess.SubprocessError) as exc:
         raise HostSetupError(f"Keepygaga upgrade could not be started: {exc}") from exc
     if completed.returncode != 0:

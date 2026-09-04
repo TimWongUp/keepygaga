@@ -97,7 +97,7 @@ keepygaga uninstall --yes
 
 `status` 只把安装状态文件当作发现线索，并明确标识仍需真实宿主验证的部分。传入最新官方版本标签和当前宿主后，它会只读返回 `update`、`initialize`、`activate`、`repair`、`no_op` 或 `manual_review`；找不到 launcher 则属于独立的首次安装分支。`repair` 依据 live 配置重新对齐已记录宿主；`uninstall` 只拆除 Keepygaga 接线，保留配置与记忆树。
 
-只更新当前宿主时，下载新版 wheel 与同一 Release 的 `SHA256SUMS`，在安装前立即重新校验将要执行的绝对路径，然后运行 `uv tool install --force /absolute/private/path/keepygaga-X.Y.Z-py3-none-any.whl`，再执行 `keepygaga install --yes --host HOST`。只有明确要对齐所有已记录宿主时，才改用 `keepygaga repair --yes`。
+只更新当前宿主时，下载新版 wheel 与同一 Release 的 `SHA256SUMS`，在安装前立即重新校验将要执行的绝对路径，把该命令的 `UV_TOOL_DIR` 设为规划版 `status` 返回的 `lifecycle.tool_root`，再运行 `uv tool install --force /absolute/private/path/keepygaga-X.Y.Z-py3-none-any.whl`，最后执行 `keepygaga install --yes --host HOST`。只有明确要对齐所有已记录宿主时，才改用 `keepygaga repair --yes`。
 
 高级确定性入口仍为 `keepygaga host setup|uninstall HOST`。
 
