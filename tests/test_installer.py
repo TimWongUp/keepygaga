@@ -223,10 +223,20 @@ def test_install_restarts_when_upgrade_generation_is_newer(
         ),
         encoding="utf-8",
     )
-    monkeypatch.setattr(installer, "__version__", "0.7.3")
+    monkeypatch.setattr(installer, "_call_host", lambda *_args: {"status": "no_op"})
+    installer.install(config_path, tmp_path / "memory", ["codex"])
+    state = installer._load_state(config_path)
+    assert state["upgrade_generation"] == "generation"
 
+    monkeypatch.setattr(installer, "__version__", "0.9.0")
+    installer.install(config_path, tmp_path / "memory", ["claude-code"])
+    state = installer._load_state(config_path)
+    assert state["installed_version"] == "0.9.0"
+    assert state["upgrade_generation"] == "generation"
+
+    monkeypatch.setattr(installer, "__version__", "0.7.3")
     with pytest.raises(HostSetupError, match="runtime changed"):
-        installer.install(config_path, tmp_path / "memory", ["codex"])
+        installer.install(config_path, tmp_path / "memory", ["grok"])
 
 
 def test_state_writers_serialize_the_final_replace(tmp_path: Path) -> None:

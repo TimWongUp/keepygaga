@@ -216,7 +216,10 @@ def _read_state_snapshot(config_path: Path) -> tuple[dict[str, Any], bytes | Non
     ):
         raise HostSetupError(f"Keepygaga install state has invalid hosts: {path}")
     generation = value.get("upgrade_generation")
-    if generation is not None and not isinstance(generation, str):
+    if generation is not None and (
+        not isinstance(generation, str)
+        or not isinstance(value.get("installed_version"), str)
+    ):
         raise HostSetupError(f"Keepygaga install state is invalid: {path}")
     return value, original
 
@@ -227,13 +230,16 @@ def _load_state(config_path: Path) -> dict[str, Any]:
 
 def _read_install_snapshot(config_path: Path) -> tuple[dict[str, Any], bytes | None]:
     state, snapshot = _read_state_snapshot(config_path)
-    if state.get("upgrade_generation") and state.get(
-        "installed_version"
-    ) != __version__:
-        raise HostSetupError(
-            "the Keepygaga runtime changed after this process started; restart the "
-            "command before installing a host"
+    if state.get("upgrade_generation"):
+        _, recorded_parts = _release_version(
+            state["installed_version"], label="recorded application version"
         )
+        _, current_parts = _release_version(__version__, label="application version")
+        if current_parts < recorded_parts:
+            raise HostSetupError(
+                "the Keepygaga runtime changed after this process started; restart the "
+                "command before installing a host"
+            )
     return state, snapshot
 
 
@@ -290,23 +296,26 @@ def _write_state(
     installed_version: str | None = None,
     upgrade_generation: str | None = None,
 ) -> bytes:
-    payload = {
-        "schema_version": INSTALLER_SCHEMA_VERSION,
-        "installed_version": installed_version or __version__,
-        "install_channel": _channel(),
-        "config_path": str(config_path.resolve()),
-        "memory_root": str(memory_root.resolve()),
-        "hosts": dict(hosts),
-    }
-    if upgrade_generation is not None:
-        payload["upgrade_generation"] = upgrade_generation
-    encoded = (json.dumps(payload, ensure_ascii=False, indent=2) + "\n").encode()
     path = state_path(config_path)
     try:
         with _state_guard(config_path):
-            _, live_snapshot = _read_state_snapshot(config_path)
+            live_state, live_snapshot = _read_state_snapshot(config_path)
             if live_snapshot != expected_original:
                 raise HostSetupError(f"write conflict while updating {path}")
+            generation = upgrade_generation or live_state.get("upgrade_generation")
+            payload = {
+                "schema_version": INSTALLER_SCHEMA_VERSION,
+                "installed_version": installed_version or __version__,
+                "install_channel": _channel(),
+                "config_path": str(config_path.resolve()),
+                "memory_root": str(memory_root.resolve()),
+                "hosts": dict(hosts),
+            }
+            if isinstance(generation, str):
+                payload["upgrade_generation"] = generation
+            encoded = (
+                json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
+            ).encode()
             atomic_write(path, encoded, expected_original=live_snapshot)
     except HostSetupError:
         raise
@@ -429,7 +438,7 @@ def install(
 
 
 def uninstall(config_path: Path, hosts: Sequence[str]) -> dict[str, object]:
-    state, state_snapshot = _read_state_snapshot(config_path)
+    state, state_snapshot = _read_install_snapshot(config_path)
     raw_hosts = state.get("hosts", {})
     state_hosts = dict(raw_hosts) if isinstance(raw_hosts, Mapping) else {}
     selected_hosts = list(dict.fromkeys(hosts or tuple(state_hosts)))
