@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -42,6 +43,12 @@ SUPPORTED_HOSTS = (
     "grok",
     "hermes",
     "antigravity",
+)
+
+_RELEASE_VERSION_RE = re.compile(
+    r"v?(?P<major>0|[1-9][0-9]*)\."
+    r"(?P<minor>0|[1-9][0-9]*)\."
+    r"(?P<patch>0|[1-9][0-9]*)"
 )
 
 _HOST_CALLS = {
@@ -173,12 +180,31 @@ def _load_state(config_path: Path) -> dict[str, Any]:
 
 
 def _channel() -> str:
-    executable = str(Path(sys.executable).resolve()).replace("\\", "/")
-    if "/uv/tools/keepygaga/" in executable:
+    locations = (
+        str(Path(sys.executable)).replace("\\", "/").rstrip("/") + "/",
+        str(Path(sys.prefix)).replace("\\", "/").rstrip("/") + "/",
+    )
+    if any("/uv/tools/keepygaga/" in location for location in locations):
         return "uv-tool"
-    if "/pipx/venvs/keepygaga/" in executable:
+    if any("/pipx/venvs/keepygaga/" in location for location in locations):
         return "pipx"
     return "python-package"
+
+
+def _release_version(
+    value: str, *, label: str = "latest version"
+) -> tuple[str, tuple[int, int, int]]:
+    match = _RELEASE_VERSION_RE.fullmatch(value.strip())
+    if match is None:
+        raise HostSetupError(
+            f"{label} must be a stable release tag such as v0.7.3"
+        )
+    parts = (
+        int(match.group("major")),
+        int(match.group("minor")),
+        int(match.group("patch")),
+    )
+    return ".".join(str(part) for part in parts), parts
 
 
 def _write_state(config_path: Path, memory_root: Path, hosts: Mapping[str, object]) -> None:
@@ -418,16 +444,168 @@ def _contract_status(host: str) -> str:
     return "current" if f"KEEPYGAGA:CONTRACT:{CONTRACT_VERSION}" in block.text else "drift"
 
 
-def status(config_path: Path) -> dict[str, object]:
+def _lifecycle_result(
+    base: Mapping[str, object], action: str, reason: str
+) -> dict[str, object]:
+    return {**base, "action": action, "reason": reason}
+
+
+def _runtime_lifecycle(
+    state: Mapping[str, Any], *, latest_version: str, host: str
+) -> tuple[dict[str, object], dict[str, object] | None]:
+    latest, latest_parts = _release_version(latest_version)
+    current, current_parts = _release_version(__version__, label="application version")
+    live_channel = _channel()
+    recorded_channel = state.get("install_channel")
+    base: dict[str, object] = {
+        "action": "no_op",
+        "current_version": current,
+        "latest_version": latest,
+        "install_channel": live_channel,
+        "host": host,
+    }
+    if recorded_channel in {"uv-tool", "pipx"} and recorded_channel != live_channel:
+        return base, _lifecycle_result(
+            base,
+            "manual_review",
+            (
+                f"live install channel {live_channel} differs from recorded channel "
+                f"{recorded_channel}"
+            ),
+        )
+    if current_parts < latest_parts:
+        if live_channel not in {"uv-tool", "pipx"}:
+            return base, _lifecycle_result(
+                base,
+                "manual_review",
+                f"automatic update is unsupported for {live_channel}",
+            )
+        return base, _lifecycle_result(
+            base, "update", "a newer official release is available"
+        )
+    if current_parts > latest_parts:
+        return base, _lifecycle_result(
+            base,
+            "manual_review",
+            "the running version is newer than the selected official release",
+        )
+    return base, None
+
+
+def _memory_source_status(doctor: Mapping[str, object]) -> object:
+    checks = doctor.get("checks")
+    if not isinstance(checks, list):
+        return None
+    memory_check = next(
+        (
+            check
+            for check in checks
+            if isinstance(check, Mapping) and check.get("id") == "memory_tree"
+        ),
+        None,
+    )
+    if not isinstance(memory_check, Mapping):
+        return None
+    details = memory_check.get("details")
+    return details.get("source_status") if isinstance(details, Mapping) else None
+
+
+def _configured_lifecycle(
+    config_path: Path,
+    config: KeepygagaConfig,
+    state: Mapping[str, Any],
+    doctor: Mapping[str, object],
+    *,
+    host: str,
+    base: Mapping[str, object],
+) -> dict[str, object]:
+    if not config_path.exists() or not config.memory.root.strip():
+        return _lifecycle_result(
+            base, "initialize", "Keepygaga user data has not been configured"
+        )
+    raw_hosts = state.get("hosts", {})
+    hosts = raw_hosts if isinstance(raw_hosts, Mapping) else {}
+    if _memory_source_status(doctor) == "not_initialized":
+        action = "repair" if hosts else "initialize"
+        return _lifecycle_result(
+            base, action, "the configured Memory Root is not initialized"
+        )
+    if doctor.get("status") == "error":
+        return _lifecycle_result(
+            base,
+            "manual_review",
+            "Doctor found an error that must be resolved before changing the installation",
+        )
+    if host not in hosts:
+        return _lifecycle_result(
+            base, "activate", "the current host is not recorded as active"
+        )
+    contract = _contract_status(host)
+    if contract != "current":
+        return _lifecycle_result(
+            base, "repair", f"the current host Agent Contract is {contract}"
+        )
+    if (
+        state.get("installed_version") != __version__
+        or state.get("install_channel") != base.get("install_channel")
+    ):
+        return _lifecycle_result(
+            base,
+            "repair",
+            "the observational install version or channel is stale",
+        )
+    return _lifecycle_result(
+        base, "no_op", "runtime and current host are already current"
+    )
+
+
+def _lifecycle_plan(
+    config_path: Path,
+    config: KeepygagaConfig,
+    state: Mapping[str, Any],
+    doctor: Mapping[str, object],
+    *,
+    latest_version: str,
+    host: str,
+) -> dict[str, object]:
+    base, runtime_result = _runtime_lifecycle(
+        state,
+        latest_version=latest_version,
+        host=host,
+    )
+    if runtime_result is not None:
+        return runtime_result
+    return _configured_lifecycle(
+        config_path,
+        config,
+        state,
+        doctor,
+        host=host,
+        base=base,
+    )
+
+
+def status(
+    config_path: Path,
+    *,
+    latest_version: str | None = None,
+    host: str | None = None,
+) -> dict[str, object]:
+    if (latest_version is None) != (host is None):
+        raise HostSetupError(
+            "status planning requires --latest-version and --host together"
+        )
     state = _load_state(config_path)
     config = load_config(config_path)
     raw_hosts = state.get("hosts", {})
     hosts = list(raw_hosts) if isinstance(raw_hosts, Mapping) else []
     doctor = run_doctor(config_path, project_root=PROJECT_ROOT)
-    return {
+    payload: dict[str, object] = {
         "status": "ok" if doctor.get("status") != "error" else "error",
         "application_version": __version__,
-        "install_channel": state.get("install_channel", "unknown"),
+        "install_channel": _channel(),
+        "recorded_application_version": state.get("installed_version"),
+        "recorded_install_channel": state.get("install_channel"),
         "config_path": str(config_path.resolve()),
         "memory_root": config.memory.root or None,
         "memory_limits": config.memory.limits.as_dict(),
@@ -444,17 +622,40 @@ def status(config_path: Path) -> dict[str, object]:
         },
         "note": "状态文件仅用于发现；宿主 live 配置与官方诊断仍是最终证据。",
     }
+    if latest_version is not None and host is not None:
+        payload["lifecycle"] = _lifecycle_plan(
+            config_path,
+            config,
+            state,
+            doctor,
+            latest_version=latest_version,
+            host=host,
+        )
+    return payload
+
+
+def _upgrade_command(state: Mapping[str, Any]) -> tuple[str, list[str]]:
+    channel = _channel()
+    recorded_channel = state.get("install_channel")
+    if recorded_channel in {"uv-tool", "pipx"} and recorded_channel != channel:
+        raise HostSetupError(
+            f"live install channel {channel} differs from recorded channel {recorded_channel}; "
+            "resolve the installation owner before upgrading"
+        )
+    if channel == "pipx":
+        executable = shutil.which("pipx")
+        command = [executable, "upgrade", "keepygaga"] if executable else []
+    elif channel == "uv-tool":
+        executable = shutil.which("uv")
+        command = [executable, "tool", "upgrade", "keepygaga"] if executable else []
+    else:
+        command = []
+    return channel, command
 
 
 def upgrade(config_path: Path, *, apply: bool) -> dict[str, object]:
     state = _load_state(config_path)
-    channel = str(state.get("install_channel") or _channel())
-    if channel == "pipx":
-        executable = shutil.which("pipx")
-        command = [executable, "upgrade", "keepygaga"] if executable else []
-    else:
-        executable = shutil.which("uv")
-        command = [executable, "tool", "upgrade", "keepygaga"] if executable else []
+    channel, command = _upgrade_command(state)
     if not command:
         raise HostSetupError(
             f"automatic upgrade for {channel} could not locate its package manager; "

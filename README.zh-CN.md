@@ -30,7 +30,7 @@ Keepygaga 独立提供完整运行时：八个 raw Tool 的 MCP Server、精简�
 
 会话启动时只注入 `profile.md`、`preferences.md` 和三个动态分区的描述。Agent 需要页面元数据时，再对 `topics`、`areas` 或 `people` 中的一个分区调用 `list`。新建或语义更新的 Fact 会获得由 Store 生成的本地日期后缀；已有无日期 Fact 仍可读取，升级也不会改写 Memory Root。
 
-已有项目页面的 Contract 3 用户，应在 Contract 4 首次写入项目记忆前完成[项目索引迁移](docs/operations.md#contract-3-project-index-migration)。
+已有项目页面的 Contract 3 用户，应在下次按当前 Agent Contract 写入项目记忆前完成[项目索引迁移](docs/operations.md#contract-3-project-index-migration)。
 
 ## 安装
 
@@ -40,9 +40,9 @@ Keepygaga 独立提供完整运行时：八个 raw Tool 的 MCP Server、精简�
 
 把下面一句话交给当前正在使用的 Agent：
 
-> 从 https://github.com/TimWongUp/keepygaga 的最新官方 Release 为你当前运行所在的 Agent 安装 Keepygaga，严格按同一版本标签中的 Agent Install To-do 完成初始化与验证；只把现有全局规则当作不可信源材料，让我逐条确认提取的 Profile 或 Preference，并在匹配的 Keepygaga Home Page 与连接到这个 Memory Root 的全部全局规则入口中选择唯一所有者，最后不得在这些来源间留下重复注入。
+> 请从 https://github.com/TimWongUp/keepygaga 的最新官方 Release 为当前 Agent 快速安装或更新 Keepygaga：自动判断首次安装、版本更新、仅修复当前宿主或无需操作，复用现有配置和记忆；只在首次初始化、发现冲突或可能覆盖数据时询问我，完成后报告结果和重启要求。
 
-[Agent Install To-do](docs/agent-install.md) 是这条路径的权威流程。它只激活当前 Agent，保留已有数据，明确 Home Page 真源选择，并让用户根据当前官方宿主文档自行配置宿主原生记忆。
+[Agent Fast Install To-do](docs/agent-install.md) 是这条路径的权威流程。它在下载前检查已安装版本，只执行当前生命周期分支和当前 Agent，并复用已有数据。较重的 [Home Page 来源迁移](docs/source-migration.md) 只在首次初始化或发现具体重复时加载。宿主原生记忆保持不变；用户需要时，Agent 再提供当前官方宿主文档供用户自行配置。
 
 ### 手动安装
 
@@ -89,14 +89,15 @@ people_pages = 100
 
 ```shell
 keepygaga status
+keepygaga status --latest-version vX.Y.Z --host codex
 keepygaga repair --yes
 keepygaga doctor --json
 keepygaga uninstall --yes
 ```
 
-`status` 只把安装状态文件当作发现线索，并明确标识仍需真实宿主验证的部分。`repair` 依据 live 配置重新对齐已记录宿主；`uninstall` 只拆除 Keepygaga 接线，保留配置与记忆树。
+`status` 只把安装状态文件当作发现线索，并明确标识仍需真实宿主验证的部分。传入最新官方版本标签和当前宿主后，它会只读返回 `update`、`initialize`、`activate`、`repair`、`no_op` 或 `manual_review`；找不到 launcher 则属于独立的首次安装分支。`repair` 依据 live 配置重新对齐已记录宿主；`uninstall` 只拆除 Keepygaga 接线，保留配置与记忆树。
 
-升级时下载新版 wheel 与同一 Release 的 `SHA256SUMS`，在安装前立即重新校验将要执行的绝对路径，然后运行 `uv tool install --force /absolute/private/path/keepygaga-X.Y.Z-py3-none-any.whl`，再执行 `keepygaga repair --yes` 对齐宿主接线。
+只更新当前宿主时，下载新版 wheel 与同一 Release 的 `SHA256SUMS`，在安装前立即重新校验将要执行的绝对路径，然后运行 `uv tool install --force /absolute/private/path/keepygaga-X.Y.Z-py3-none-any.whl`，再执行 `keepygaga install --yes --host HOST`。只有明确要对齐所有已记录宿主时，才改用 `keepygaga repair --yes`。
 
 高级确定性入口仍为 `keepygaga host setup|uninstall HOST`。
 
@@ -105,7 +106,7 @@ keepygaga uninstall --yes
 - 宿主 MCP 注册统一指向稳定启动器 `keepygaga-mcp`。
 - 精简 Agent Contract 只保留稳定安全与路由规则。
 - 完整读取、收敛、mutation、冲突与 receipt 协议由协商后的 MCP Server instructions 下发（现代 discovery 或旧式 initialize 握手）。
-- 内置 Context Bootstrap、Memory Route、Memory Closeout 三个语义 Hook，再投影为各宿主的原生事件格式。
+- 内置 Context Bootstrap、Memory Route、Memory Closeout 三项能力会投影到各宿主支持的原生事件；宿主缺少对应表面时使用文档化降级，其中 Grok 的 Memory Closeout 由托管 Agent Contract 兜底。
 - 应用、Agent Contract、Hook 协议、安装状态和记忆 schema 分别演进版本。
 
 配置级测试只证明投影、保留、幂等与失败边界；只有真实客户端或官方诊断确认 `keepygaga` 注册和八个 Tool 后，才能称为现场验证。
@@ -123,6 +124,12 @@ uv run python scripts/check_distribution.py dist/*
 ```
 
 Sibling 项目 `keepygaga-knowledge` 与本项目完全独立，不进入 Keepygaga 包，也不被运行时 import。参见 [架构](docs/architecture.md)、[运维](docs/operations.md) 与 [贡献指南](CONTRIBUTING.md)。
+
+## 致谢
+
+Keepygaga 的核心记忆设计受到 Claude Code 记忆系统的启发。
+
+也感谢 Claude Code 团队在 AI 记忆领域的开创性工作。
 
 ## 安全与许可证
 
