@@ -475,7 +475,7 @@ def test_upgrade_repairs_recorded_grok_host(tmp_path: Path, monkeypatch) -> None
     assert calls == [
         ["/bin/uv", "tool", "upgrade", "keepygaga"],
         [
-            "/active/bin/keepygaga",
+            str(Path("/active/bin/keepygaga")),
             "--config",
             str(config_path.resolve()),
             "repair",
