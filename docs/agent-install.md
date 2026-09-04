@@ -9,6 +9,7 @@ Use this procedure when a user asks an Agent to install or update Keepygaga. Opt
 3. Check whether a `keepygaga` launcher exists.
    - No launcher: classify the runtime action as `install`.
    - Launcher present: run `keepygaga status --latest-version TAG --host HOST` and follow its `lifecycle.action`.
+   - If an older launcher does not support those planning options, run its plain `keepygaga status`, compare its stable application version with the selected tag, and independently identify the existing installation owner. Select `update` only when the running version is older and that owner is unambiguous; otherwise stop with `manual_review`.
 
 | Action | Fast-path behavior |
 | --- | --- |

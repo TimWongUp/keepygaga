@@ -26,9 +26,11 @@ from keepygaga.host_common import (
     HostSetupPartialError,
     atomic_write,
     captured_output,
+    load_canonical_contract,
     parse_managed_block,
     run_captured,
 )
+from keepygaga.launchers import resolve_active_launcher
 from keepygaga.memory import initialize_memory_tree
 from keepygaga.version import (
     CONTRACT_VERSION,
@@ -136,7 +138,9 @@ def ensure_config(config_path: Path, memory_root: Path) -> dict[str, object]:
     try:
         existing = config_path.read_bytes() if config_path.exists() else None
     except OSError as exc:
-        raise HostSetupError(f"Keepygaga config could not be read: {config_path}") from exc
+        raise HostSetupError(
+            f"Keepygaga config could not be read: {config_path}"
+        ) from exc
     if existing is not None:
         configured = load_config(config_path)
         if configured.memory.root.strip():
@@ -174,8 +178,13 @@ def _load_state(config_path: Path) -> dict[str, Any]:
         value = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise HostSetupError(f"Keepygaga install state is invalid: {path}") from exc
-    if not isinstance(value, dict) or value.get("schema_version") != INSTALLER_SCHEMA_VERSION:
-        raise HostSetupError(f"Keepygaga install state has an unsupported schema: {path}")
+    if (
+        not isinstance(value, dict)
+        or value.get("schema_version") != INSTALLER_SCHEMA_VERSION
+    ):
+        raise HostSetupError(
+            f"Keepygaga install state has an unsupported schema: {path}"
+        )
     return value
 
 
@@ -196,9 +205,7 @@ def _release_version(
 ) -> tuple[str, tuple[int, int, int]]:
     match = _RELEASE_VERSION_RE.fullmatch(value.strip())
     if match is None:
-        raise HostSetupError(
-            f"{label} must be a stable release tag such as v0.7.3"
-        )
+        raise HostSetupError(f"{label} must be a stable release tag such as v0.7.3")
     parts = (
         int(match.group("major")),
         int(match.group("minor")),
@@ -207,7 +214,9 @@ def _release_version(
     return ".".join(str(part) for part in parts), parts
 
 
-def _write_state(config_path: Path, memory_root: Path, hosts: Mapping[str, object]) -> None:
+def _write_state(
+    config_path: Path, memory_root: Path, hosts: Mapping[str, object]
+) -> None:
     payload = {
         "schema_version": INSTALLER_SCHEMA_VERSION,
         "installed_version": __version__,
@@ -224,10 +233,14 @@ def _write_state(config_path: Path, memory_root: Path, hosts: Mapping[str, objec
     except HostSetupError:
         raise
     except OSError as exc:
-        raise HostSetupError(f"Keepygaga install state could not be written: {path}") from exc
+        raise HostSetupError(
+            f"Keepygaga install state could not be written: {path}"
+        ) from exc
 
 
-def _call_host(host: str, action: str, config_path: Path, config: KeepygagaConfig) -> dict[str, object]:
+def _call_host(
+    host: str, action: str, config_path: Path, config: KeepygagaConfig
+) -> dict[str, object]:
     module_name, setup_name, uninstall_name = _HOST_CALLS[host]
     selected = getattr(
         importlib.import_module(module_name),
@@ -239,6 +252,7 @@ def _call_host(host: str, action: str, config_path: Path, config: KeepygagaConfi
 def _host_state(host: str) -> dict[str, object]:
     hooks = host != "grok"
     return {
+        "reconciled_version": __version__,
         "contract_version": CONTRACT_VERSION,
         "hook_protocol_version": HOOK_PROTOCOL_VERSION if hooks else None,
         "hooks_enabled": hooks,
@@ -297,7 +311,7 @@ def install(
                         "hosts": {
                             **results,
                             host: {"status": "failed", "message": str(exc)},
-                        }
+                        },
                     },
                 ) from exc
             raise
@@ -312,9 +326,13 @@ def install(
                     "state": {"status": "failed", "message": str(exc)},
                 },
             ) from exc
-    changed = config_result.get("status") == "applied" or initialized.get("status") == "applied" or any(
-        isinstance(value, Mapping) and value.get("status") == "applied"
-        for value in results.values()
+    changed = (
+        config_result.get("status") == "applied"
+        or initialized.get("status") == "applied"
+        or any(
+            isinstance(value, Mapping) and value.get("status") == "applied"
+            for value in results.values()
+        )
     )
     return {
         "status": "applied" if changed else "no_op",
@@ -332,7 +350,9 @@ def uninstall(config_path: Path, hosts: Sequence[str]) -> dict[str, object]:
     state_hosts = dict(raw_hosts) if isinstance(raw_hosts, Mapping) else {}
     selected_hosts = list(dict.fromkeys(hosts or tuple(state_hosts)))
     if not selected_hosts:
-        raise HostSetupError("no installed hosts were recorded; select a host explicitly")
+        raise HostSetupError(
+            "no installed hosts were recorded; select a host explicitly"
+        )
     unknown = sorted(set(selected_hosts) - set(SUPPORTED_HOSTS))
     if unknown:
         raise HostSetupError(f"unsupported hosts: {', '.join(unknown)}")
@@ -413,15 +433,23 @@ def repair(config_path: Path) -> dict[str, object]:
 def _rules_path(host: str) -> Path:
     home = Path.home()
     if host == "codex":
-        codex_home = Path(os.environ.get("CODEX_HOME", "")).expanduser() if os.environ.get("CODEX_HOME") else home / ".codex"
-        override = codex_home / "AGENTS.override.md"
-        return override if override.exists() and override.stat().st_size else codex_home / "AGENTS.md"
+        codex_home = (
+            Path(os.environ.get("CODEX_HOME", "")).expanduser()
+            if os.environ.get("CODEX_HOME")
+            else home / ".codex"
+        )
+        resolver = importlib.import_module(
+            "keepygaga.host_setup"
+        ).resolve_codex_agents_path
+        return resolver(codex_home)
     if host == "grok":
-        upper = home / ".grok" / "AGENTS.md"
-        title = home / ".grok" / "Agents.md"
-        if upper.exists() and title.exists():
-            return upper if upper.samefile(title) else upper
-        return upper if upper.exists() else title
+        grok_home = home / ".grok"
+        if not grok_home.exists():
+            return grok_home / "Agents.md"
+        resolver = importlib.import_module(
+            "keepygaga.host_adapters"
+        ).resolve_grok_rules_path
+        return resolver(grok_home)
     return {
         "claude-code": home / ".claude" / "CLAUDE.md",
         "workbuddy": home / ".workbuddy" / "CODEBUDDY.md",
@@ -431,17 +459,18 @@ def _rules_path(host: str) -> Path:
 
 
 def _contract_status(host: str) -> str:
-    path = _rules_path(host)
-    if not path.exists():
-        return "missing"
     try:
+        path = _rules_path(host)
+        if not path.exists():
+            return "missing"
         text = path.read_text(encoding="utf-8")
         block = parse_managed_block(text, source=str(path))
-    except Exception:
+        canonical = load_canonical_contract()
+    except (HostSetupError, OSError, UnicodeError):
         return "conflict"
     if block is None:
         return "missing"
-    return "current" if f"KEEPYGAGA:CONTRACT:{CONTRACT_VERSION}" in block.text else "drift"
+    return "current" if block.text == canonical else "drift"
 
 
 def _lifecycle_result(
@@ -450,13 +479,21 @@ def _lifecycle_result(
     return {**base, "action": action, "reason": reason}
 
 
+def _recorded_channel_conflicts(state: Mapping[str, Any], live_channel: str) -> bool:
+    recorded = state.get("install_channel")
+    return recorded is not None and (
+        not isinstance(recorded, str)
+        or recorded not in {"uv-tool", "pipx", "python-package"}
+        or recorded != live_channel
+    )
+
+
 def _runtime_lifecycle(
     state: Mapping[str, Any], *, latest_version: str, host: str
 ) -> tuple[dict[str, object], dict[str, object] | None]:
     latest, latest_parts = _release_version(latest_version)
     current, current_parts = _release_version(__version__, label="application version")
     live_channel = _channel()
-    recorded_channel = state.get("install_channel")
     base: dict[str, object] = {
         "action": "no_op",
         "current_version": current,
@@ -464,14 +501,11 @@ def _runtime_lifecycle(
         "install_channel": live_channel,
         "host": host,
     }
-    if recorded_channel in {"uv-tool", "pipx"} and recorded_channel != live_channel:
+    if _recorded_channel_conflicts(state, live_channel):
         return base, _lifecycle_result(
             base,
             "manual_review",
-            (
-                f"live install channel {live_channel} differs from recorded channel "
-                f"{recorded_channel}"
-            ),
+            "the live installation owner differs from or is not supported by the recorded owner",
         )
     if current_parts < latest_parts:
         if live_channel not in {"uv-tool", "pipx"}:
@@ -540,15 +574,32 @@ def _configured_lifecycle(
         return _lifecycle_result(
             base, "activate", "the current host is not recorded as active"
         )
+    host_state = hosts[host]
+    if not isinstance(host_state, Mapping):
+        return _lifecycle_result(
+            base, "manual_review", "the current host install state is invalid"
+        )
     contract = _contract_status(host)
+    if contract == "conflict":
+        return _lifecycle_result(
+            base,
+            "manual_review",
+            "the current host Agent Contract has conflicting ownership markers",
+        )
     if contract != "current":
         return _lifecycle_result(
             base, "repair", f"the current host Agent Contract is {contract}"
         )
-    if (
-        state.get("installed_version") != __version__
-        or state.get("install_channel") != base.get("install_channel")
-    ):
+    expected_host_state = _host_state(host)
+    if any(host_state.get(key) != value for key, value in expected_host_state.items()):
+        return _lifecycle_result(
+            base,
+            "repair",
+            "the current host reconciliation state is stale",
+        )
+    if state.get("installed_version") != __version__ or state.get(
+        "install_channel"
+    ) != base.get("install_channel"):
         return _lifecycle_result(
             base,
             "repair",
@@ -636,11 +687,10 @@ def status(
 
 def _upgrade_command(state: Mapping[str, Any]) -> tuple[str, list[str]]:
     channel = _channel()
-    recorded_channel = state.get("install_channel")
-    if recorded_channel in {"uv-tool", "pipx"} and recorded_channel != channel:
+    if _recorded_channel_conflicts(state, channel):
         raise HostSetupError(
-            f"live install channel {channel} differs from recorded channel {recorded_channel}; "
-            "resolve the installation owner before upgrading"
+            "the live installation owner differs from or is not supported by the recorded "
+            "owner; resolve it before upgrading"
         )
     if channel == "pipx":
         executable = shutil.which("pipx")
@@ -684,11 +734,9 @@ def upgrade(config_path: Path, *, apply: bool) -> dict[str, object]:
         }
     upgrade_component = {"status": "applied", "command": command}
     try:
-        launcher = shutil.which("keepygaga")
-        if launcher is None:
-            raise OSError("Keepygaga launcher could not be located after upgrade")
+        launcher = resolve_active_launcher("keepygaga")
         repair_command = [
-            launcher,
+            str(launcher),
             "--config",
             str(config_path.resolve()),
             "repair",
