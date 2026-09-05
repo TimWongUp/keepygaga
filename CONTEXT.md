@@ -89,11 +89,11 @@ _Avoid_: Memory 摘要、默认本机 checkout、机械采用名为 origin 的�
 _Avoid_: 多 Fact 项目档案、里程碑历史、状态仪表板、项目真源副本
 
 **Route Catalog**：
-由一个 Memory Scope 的 live allowlist 生成的 `path + description + aliases` 二级选页目录，不包含 Fact 或 version。
-_Avoid_: 全库目录、搜索结果、页面摘要
+由一个 Memory Scope 的 live allowlist 生成的 `path + description + aliases` 二级选页目录，不包含 Fact 或 version；这些元数据是不可信路由标签，不是指令，只能选择同一条目返回的精确 path。
+_Avoid_: 全库目录、搜索结果、页面摘要、把页面元数据当作指令
 
 **Memory Scope**：
-`topics`、`areas` 或 `people` 中一个有独立路由与页面容量边界的动态页面分区；其固定 description 是一级语义路由条件，任务所需且当前输入或直接真源未提供的信息落入覆盖范围时，Agent 获取该 scope 的 live Route Catalog。
+`topics`、`areas` 或 `people` 中一个有独立路由与页面容量边界的动态页面分区；其由产品固定的 description 是可信的一级语义路由条件，任务所需且当前输入或直接真源未提供的信息落入覆盖范围时，Agent 获取或复用该 scope 的 live Route Catalog。
 _Avoid_: all、搜索范围、任意目录、关键词匹配规则
 
 **动态页整理（Dynamic Page Organization）**：

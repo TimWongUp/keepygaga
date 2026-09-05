@@ -22,7 +22,7 @@ Keepygaga 只保存少量、能跨任务长期发挥作用的信息：用户是�
 
 Keepygaga 独立提供完整运行时：八个 raw Tool 的 MCP Server、精简全局 Agent Contract、内置跨宿主 Hook，以及 CLI 控制面。它不依赖数据库、向量索引、源码 checkout 或外部 Hook Runtime；Obsidian 是推荐的人类界面，不是运行依赖。
 
-核心记忆由 `profile.md`、`preferences.md` 以及 `topics/`、`areas/`、`people/` 的直属页面组成。持续项目统一登记在 `areas/projects.md`：每个项目只用一条 Fact 保存简介、规范项目真源和可选的最新重大节点，后续变化直接替换原 Fact。完整历史、术语、架构、操作说明、重要决定与当前状态仍由项目仓库或其他直接真源负责。
+核心记忆由 `profile.md`、`preferences.md` 以及 `topics/`、`areas/`、`people/` 的直属页面组成。持续项目共用可选的规范索引 `areas/projects.md`，它随首条项目 Fact 创建：每个项目只用一条 Fact 保存简介、规范项目真源和可选的最新重大节点，后续变化直接替换原 Fact。完整历史、术语、架构、操作说明、重要决定与当前状态仍由项目仓库或其他直接真源负责。
 
 宿主原生记忆可以继续负责该宿主的会话召回与项目内学习；Keepygaga 只负责应当随用户跨宿主流动的少量稳定事实。进入来源选择的长期要求只能二选一：希望所有接入 Agent 都遵循的用户偏好进入 `preferences.md`，只约束某一 Agent 的规则留在该宿主的有效全局规则入口。文风和代码风格本身不能决定归属；用户没有说明适用范围时，Agent 必须先询问，并且同一含义只能由一个来源负责。项目规则留在项目真源，不进入这次选择。
 
