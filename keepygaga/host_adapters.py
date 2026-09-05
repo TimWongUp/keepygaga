@@ -1027,14 +1027,24 @@ def _prepare_hermes_config(
         servers = raw_servers
     else:
         raise HostSetupError(f"mcp_servers must be a mapping: {path}")
-    previous_mcp = deepcopy(servers.get("keepygaga"))
+    matching_keys = [
+        key for key in servers if isinstance(key, str) and key.casefold() == "keepygaga"
+    ]
+    if len(matching_keys) > 1:
+        raise HostSetupError(
+            f"multiple case-insensitive Keepygaga MCP registrations: {path}"
+        )
+    current_key = matching_keys[0] if matching_keys else "keepygaga"
+    previous_mcp = deepcopy(servers.get(current_key))
     servers["keepygaga"] = _updated_mcp_entry(
-        servers.get("keepygaga"),
+        servers.get(current_key),
         invocation=invocation,
         config_path=config_path,
         fixed_fields={},
     )
-    mcp_changed = previous_mcp != servers["keepygaga"]
+    if current_key != "keepygaga":
+        servers.pop(current_key)
+    mcp_changed = current_key != "keepygaga" or previous_mcp != servers["keepygaga"]
     before_hooks = deepcopy(merged.get("hooks"))
     try:
         hook_merged = merge_hook_fragment(_plain_data(merged), hook_selection)

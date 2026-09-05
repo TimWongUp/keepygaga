@@ -967,7 +967,10 @@ def test_grok_rejects_managed_blocks_in_both_rules_candidates(
     assert calls == [["mcp", "list", "--json"]]
 
 
-def test_hermes_setup_merges_yaml_and_manages_global_soul(tmp_path: Path) -> None:
+@pytest.mark.parametrize("registration_key", ["keepygaga", "Keepygaga"])
+def test_hermes_setup_merges_yaml_and_manages_global_soul(
+    tmp_path: Path, registration_key: str
+) -> None:
     config_path, config = setup_source(tmp_path)
     home = tmp_path / ".hermes"
     home.mkdir()
@@ -977,7 +980,7 @@ def test_hermes_setup_merges_yaml_and_manages_global_soul(tmp_path: Path) -> Non
         "mcp_servers:\n"
         "  other:\n"
         "    command: other\n"
-        "  keepygaga:\n"
+        f"  {registration_key}:\n"
         "    type: http\n"
         "    url: https://old.invalid/mcp\n",
         encoding="utf-8",
@@ -1001,6 +1004,7 @@ def test_hermes_setup_merges_yaml_and_manages_global_soul(tmp_path: Path) -> Non
     assert first["status"] == "applied"
     assert loaded["model"] == "existing"
     assert loaded["mcp_servers"]["other"] == {"command": "other"}
+    assert set(loaded["mcp_servers"]) == {"other", "keepygaga"}
     assert loaded["mcp_servers"]["keepygaga"]["args"] == [
         "-m",
         "keepygaga.server",
@@ -1103,15 +1107,29 @@ def test_yaml_round_trip_runtime_is_thread_safe(tmp_path: Path) -> None:
     assert host_adapters._yaml_runtime() is not host_adapters._yaml_runtime()
 
 
-def test_hermes_rejects_malformed_yaml_before_writing_rules(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("original", "message"),
+    [
+        ("mcp_servers: [unterminated\n", "invalid YAML"),
+        (
+            "mcp_servers:\n  keepygaga: {}\n  Keepygaga: {}\n",
+            "multiple case-insensitive",
+        ),
+    ],
+)
+def test_hermes_rejects_invalid_config_before_writing_rules(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, original: str, message: str
+) -> None:
+    monkeypatch.setattr(Path, "home", classmethod(lambda _cls: tmp_path))
     config_path, config = setup_source(tmp_path)
     home = tmp_path / ".hermes"
     home.mkdir()
     config_file = home / "config.yaml"
-    original = "mcp_servers: [unterminated\n"
     config_file.write_text(original, encoding="utf-8")
 
-    with pytest.raises(HostSetupError, match="invalid YAML"):
+    with pytest.raises(HostSetupError, match=message):
+        host_adapters.host_wiring_current("hermes", config_path)
+    with pytest.raises(HostSetupError, match=message):
         setup_hermes_host(
             config_path,
             config,
