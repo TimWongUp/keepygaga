@@ -57,6 +57,9 @@ def test_canonical_contract_is_short_and_delegates_full_protocol() -> None:
     assert "create the canonical page only when none exists" in contract
     assert "rather than duplicate conflicting legacy state" in contract
     assert "exactly one Fact per maintained project" in contract
+    assert "latest verified integrated outcome" in contract
+    assert "normally `origin/main`" in contract
+    assert "otherwise mark it unreleased" in contract
     assert "credential-free canonical remote URLs" in contract
     assert "rendered as Markdown autolinks" in contract
     assert "cross-Agent user preferences belong only in `preferences.md`" in contract

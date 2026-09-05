@@ -984,7 +984,7 @@ def setup_grok_host(
                 else _json_result(
                     "no_op",
                     path=str(hooks_path),
-                    reason="Grok closeout uses the managed Agent Contract",
+                    reason="Grok memory guidance uses the managed Agent Contract",
                 )
             )
             components["hooks"] = {**hooks_result, "mode": "rules_fallback"}

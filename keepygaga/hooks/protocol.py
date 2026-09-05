@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Literal
+from typing import Any
 
 
 def loads_stdin(raw: str) -> dict[str, Any]:
@@ -14,34 +14,12 @@ def loads_stdin(raw: str) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
-Capability = Literal["bootstrap", "route", "closeout"]
-
-_PAYLOAD_KINDS: dict[Capability, dict[str, str]] = {
-    "bootstrap": {
-        "codex": "hook_specific",
-        "claude": "hook_specific",
-        "workbuddy": "hook_specific",
-        "agy_cli": "inject_steps",
-        "hermes": "context",
-    },
-    "route": {
-        "codex": "hook_specific",
-        "claude": "hook_specific",
-        "workbuddy": "hook_specific",
-        "agy_cli": "inject_steps",
-        "hermes": "context",
-    },
-    "closeout": {
-        "codex": "hook_specific",
-        "claude": "hook_specific",
-        "workbuddy": "hook_specific",
-    },
-}
-
-_CLOSEOUT_EVENTS = {
-    "codex": "PostToolUse",
-    "claude": "PostToolUse",
-    "workbuddy": "PostToolUse",
+_PAYLOAD_KINDS = {
+    "codex": "hook_specific",
+    "claude": "hook_specific",
+    "workbuddy": "hook_specific",
+    "agy_cli": "inject_steps",
+    "hermes": "context",
 }
 
 
@@ -49,10 +27,8 @@ def additional_context_payload(
     platform: str,
     event: str,
     context: str,
-    *,
-    capability: Capability,
 ) -> dict[str, object]:
-    kind = _PAYLOAD_KINDS[capability].get(platform)
+    kind = _PAYLOAD_KINDS.get(platform)
     if kind == "hook_specific":
         return {
             "hookSpecificOutput": {
@@ -65,12 +41,3 @@ def additional_context_payload(
     if kind == "context":
         return {"context": context}
     return {}
-
-
-def closeout_payload(platform: str, context: str) -> dict[str, object]:
-    return additional_context_payload(
-        platform,
-        _CLOSEOUT_EVENTS.get(platform, ""),
-        context,
-        capability="closeout",
-    )

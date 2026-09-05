@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from keepygaga.hooks.protocol import additional_context_payload
+from keepygaga.hooks.route import REMINDER
 
 HOME_PAGES = ("profile.md", "preferences.md")
 SCOPE_ROUTING = (
@@ -22,9 +23,6 @@ SCOPE_DESCRIPTIONS = {
     "areas": "持续活动、长期环境与项目索引。",
     "people": "已知人物及与用户的关系上下文。",
 }
-CODEX_SUBAGENT_CONTEXT = (
-    "仅在任务需要长期上下文时，按全局规则中的记忆路由读取对应页；不要预加载无关记忆。"
-)
 
 
 def _facts(item: dict[str, Any]) -> str:
@@ -93,17 +91,14 @@ def run(
         ),
         event,
     )
-    if host == "codex" and actual_event == "SubagentStart":
-        context = CODEX_SUBAGENT_CONTEXT
-    else:
-        try:
-            context = load_bootstrap(config_path)
-        except Exception as exc:
-            context = (
-                "<keepygaga-bootstrap-error>\n"
-                f"动态注入失败：{exc}。不要用猜测或其他检索替代；向用户报告该错误。\n"
-                "</keepygaga-bootstrap-error>"
-            )
-    return additional_context_payload(
-        host, actual_event, context, capability="bootstrap"
-    )
+    try:
+        context = load_bootstrap(config_path)
+    except Exception as exc:
+        context = (
+            "<keepygaga-bootstrap-error>\n"
+            f"动态注入失败：{exc}。不要用猜测或其他检索替代；向用户报告该错误。\n"
+            "</keepygaga-bootstrap-error>"
+        )
+    if host in {"hermes", "agy_cli"}:
+        context += "\n\n" + REMINDER
+    return additional_context_payload(host, actual_event, context)

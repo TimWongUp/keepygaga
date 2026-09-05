@@ -136,7 +136,7 @@ def _parser() -> argparse.ArgumentParser:
     hook = commands.add_parser("hook")
     hook_commands = hook.add_subparsers(dest="hook_command", required=True)
     hook_run = hook_commands.add_parser("run")
-    hook_run.add_argument("hook", choices=("context", "route", "closeout"))
+    hook_run.add_argument("hook", choices=("context", "route"))
     hook_run.add_argument("--owner", choices=("keepygaga-hook-v1",))
     hook_run.add_argument(
         "--host",
@@ -298,14 +298,10 @@ def _run_hook_command(args: argparse.Namespace, config_path: Path) -> int:
         from keepygaga.hooks import context as context_hook
 
         result = context_hook.run(config_path, args.host, args.event, payload)
-    elif args.hook == "route":
+    else:
         from keepygaga.hooks import route as route_hook
 
-        result = route_hook.run(args.host, args.event, payload, compact=args.compact)
-    else:
-        from keepygaga.hooks import closeout as closeout_hook
-
-        result = closeout_hook.run(args.host, args.event, payload)
+        result = route_hook.run(args.host, args.event, compact=args.compact)
     _print(result)
     return 0
 

@@ -5,13 +5,13 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
 from keepygaga.config import MemoryFilesConfig
 from keepygaga.hooks import (
-    closeout,
     context,
     fragments,
     route,
@@ -68,7 +68,15 @@ def test_builtin_fragment_is_idempotent_and_preserves_unrelated(tmp_path: Path) 
     normalized = [command.replace('"', "") for command in commands]
     assert any("hook run context" in command for command in normalized)
     assert any("hook run route" in command for command in normalized)
-    assert any("hook run closeout" in command for command in normalized)
+    assert not any("hook run closeout" in command for command in normalized)
+    assert (
+        fragment["payload"]["SessionStart"][0]["hooks"][0]["additionalContextLimit"]
+        == 0
+    )
+    assert (
+        fragment["payload"]["SubagentStart"][0]["hooks"][0]["additionalContextLimit"]
+        == 0
+    )
 
 
 def test_builtin_fragment_replaces_entries_after_launcher_and_config_move(
@@ -90,7 +98,7 @@ def test_builtin_fragment_replaces_entries_after_launcher_and_config_move(
     commands = _commands(migrated)
 
     assert all(str(tmp_path / "old") not in command for command in commands)
-    assert sum(command.count("--owner=keepygaga-hook-v1") for command in commands) == 5
+    assert sum(command.count("--owner=keepygaga-hook-v1") for command in commands) == 4
     assert any(str(tmp_path / "new" / "keepygaga") in command for command in commands)
 
 
@@ -309,6 +317,22 @@ def test_context_bootstrap_contains_home_pages_and_scope_descriptions(
     for description in expected_scope_descriptions.values():
         assert rendered.count(description) == 1
     assert "<memory_listing>" not in rendered
+    for host in ("codex", "claude"):
+        for event in ("SessionStart", "SubagentStart"):
+            assert context.run(config, host, event, {}) == {
+                "hookSpecificOutput": {
+                    "hookEventName": event,
+                    "additionalContext": rendered,
+                }
+            }
+
+    for host, event in (("hermes", "pre_llm_call"), ("agy_cli", "PreInvocation")):
+        result = context.run(config, host, event, {})
+        expected = rendered + "\n\n" + route.REMINDER
+        if host == "hermes":
+            assert result == {"context": expected}
+        else:
+            assert result == {"injectSteps": [{"ephemeralMessage": expected}]}
 
 
 def test_context_bootstrap_escapes_home_fact_control_delimiters(
@@ -355,36 +379,94 @@ def test_context_bootstrap_escapes_home_fact_control_delimiters(
     assert rendered.count("</memory_scopes>") == 1
 
 
-def test_route_state_stores_no_raw_prompt_and_closeout_deduplicates(
-    tmp_path: Path, monkeypatch
-) -> None:
-    monkeypatch.setenv("KEEPYGAGA_HOOK_STATE_ROOT", str(tmp_path))
-    payload = {"session_id": "s1", "prompt": "请修改这个项目的代码"}
-
-    route.record("codex", payload)
-    state = route.state_path("codex", payload).read_text(encoding="utf-8")
-
-    assert payload["prompt"] not in state
-    assert "prompt_hash" not in state
-    assert closeout.run("codex", "PostToolUse", payload)
-    assert closeout.run("codex", "PostToolUse", payload) == {}
-
-    route.record("codex", payload)
-    assert closeout.run("codex", "PostToolUse", payload)
-
-
 def test_memory_hook_reminders_keep_noop_decisions_silent() -> None:
-    for reminder in (route.REMINDER, route.COMPACT_REMINDER, closeout.REMINDER):
+    for reminder in (route.REMINDER, route.COMPACT_REMINDER):
         assert "静默" in reminder
         assert "原任务" in reminder
 
 
-def test_hermes_fragment_omits_unsupported_closeout() -> None:
+@pytest.mark.parametrize("compact", [False, True])
+def test_route_cli_needs_no_memory_config_or_session_state(
+    tmp_path: Path, compact: bool
+) -> None:
+    event = "SessionStart" if compact else "UserPromptSubmit"
+    command = [
+        sys.executable,
+        "-m",
+        "keepygaga.cli",
+        "--config",
+        str(tmp_path / "absent.toml"),
+        "hook",
+        "run",
+        "route",
+        "--host",
+        "codex",
+        "--event",
+        event,
+    ]
+    if compact:
+        command.append("--compact")
+    completed = subprocess.run(
+        command,
+        input="{}",
+        capture_output=True,
+        encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+        check=True,
+    )
+    assert json.loads(completed.stdout) == {
+        "hookSpecificOutput": {
+            "hookEventName": event,
+            "additionalContext": route.COMPACT_REMINDER if compact else route.REMINDER,
+        }
+    }
+
+
+@pytest.mark.parametrize("host", ["codex", "claude", "workbuddy"])
+def test_fragment_removes_owned_post_tool_use_and_preserves_other_hooks(
+    tmp_path: Path, host: str
+) -> None:
+    launcher = tmp_path / "keepygaga"
+    config = tmp_path / "config.toml"
+    fragment = build_fragment(host, launcher=launcher, config_path=config)
+    existing = {
+        "hooks": {
+            "PostToolUse": [
+                {
+                    "matcher": "Write|Edit",
+                    "hooks": [
+                        {
+                            "type": "command",
+                            "command": fragments._command(
+                                launcher, config, "closeout", host, "PostToolUse"
+                            ),
+                        },
+                        {"type": "command", "command": "other-hook"},
+                    ],
+                }
+            ]
+        }
+    }
+
+    merged = merge_hook_fragment(existing, fragment)
+
+    assert "PostToolUse" not in fragment["payload"]
+    assert merged["hooks"]["PostToolUse"] == [
+        {
+            "matcher": "Write|Edit",
+            "hooks": [{"type": "command", "command": "other-hook"}],
+        }
+    ]
+    assert merge_hook_fragment(merged, fragment) == merged
+
+
+def test_hermes_fragment_uses_one_context_command() -> None:
     fragment = build_fragment(
         "hermes", launcher=Path("/keepygaga"), config_path=Path("/config.toml")
     )
 
     assert set(fragment["payload"]) == {"pre_llm_call"}
+    assert len(_commands(fragment["payload"])) == 1
     assert all("closeout" not in command for command in _commands(fragment["payload"]))
 
 
@@ -403,6 +485,16 @@ def test_hermes_fragment_removes_obsolete_closeout_projection() -> None:
                     "timeout": 2,
                 }
             ],
+            "pre_llm_call": [
+                {
+                    "command": (
+                        "/keepygaga --config /config.toml hook run route "
+                        "--owner=keepygaga-hook-v1 --host hermes --event pre_llm_call"
+                    ),
+                    "timeout": 2,
+                },
+                *fragment["payload"]["pre_llm_call"],
+            ],
             "other_event": [{"command": "other"}],
         }
     }
@@ -410,124 +502,9 @@ def test_hermes_fragment_removes_obsolete_closeout_projection() -> None:
     merged = merge_hook_fragment(existing, fragment)
 
     assert "pre_verify" not in merged["hooks"]
+    assert merged["hooks"]["pre_llm_call"] == fragment["payload"]["pre_llm_call"]
     assert merged["hooks"]["other_event"] == [{"command": "other"}]
-
-
-def test_route_scrubs_legacy_prompt_hash_when_state_is_rewritten(
-    tmp_path: Path, monkeypatch
-) -> None:
-    monkeypatch.setenv("KEEPYGAGA_HOOK_STATE_ROOT", str(tmp_path))
-    payload = {"session_id": "legacy-s1"}
-    state_path = route.state_path("codex", payload)
-    legacy = {
-        "version": 1,
-        "updated_at": 9_999_999_999,
-        "prompt_hash": "legacy-hash",
-        "project_signal": True,
-        "memory_signal": False,
-        "reminded": False,
-    }
-    state_path.write_text(json.dumps(legacy), encoding="utf-8")
-
-    route.record("codex", payload)
-
-    state = json.loads(state_path.read_text(encoding="utf-8"))
-    assert "prompt_hash" not in state
-    state_path.write_text(json.dumps(legacy), encoding="utf-8")
-    assert route.consume_closeout("codex", payload)
-    state = json.loads(state_path.read_text(encoding="utf-8"))
-    assert "prompt_hash" not in state
-
-
-def test_route_accepts_windows_surrogate_prompt_without_hashing(
-    tmp_path: Path, monkeypatch
-) -> None:
-    monkeypatch.setenv("KEEPYGAGA_HOOK_STATE_ROOT", str(tmp_path))
-    payload = {"session_id": "s1", "prompt": "修复 Windows \ud800"}
-
-    result = route.run("codex", "UserPromptSubmit", payload)
-
-    hook_output = result["hookSpecificOutput"]
-    assert isinstance(hook_output, dict)
-    assert hook_output["hookEventName"] == "UserPromptSubmit"
-    state = json.loads(route.state_path("codex", payload).read_text(encoding="utf-8"))
-    assert "prompt_hash" not in state
-    assert state["project_signal"] is True
-
-
-def test_route_accepts_windows_surrogate_session_identity(
-    tmp_path: Path, monkeypatch
-) -> None:
-    monkeypatch.setenv("KEEPYGAGA_HOOK_STATE_ROOT", str(tmp_path))
-    payload = {"session_id": "windows-\ud800", "prompt": "修改代码"}
-
-    result = route.run("codex", "UserPromptSubmit", payload)
-
-    hook_output = result["hookSpecificOutput"]
-    assert isinstance(hook_output, dict)
-    assert hook_output["hookEventName"] == "UserPromptSubmit"
-    assert route.state_path("codex", payload).is_file()
-
-
-def test_compact_route_without_prompt_preserves_closeout_signal(
-    tmp_path: Path, monkeypatch
-) -> None:
-    monkeypatch.setenv("KEEPYGAGA_HOOK_STATE_ROOT", str(tmp_path))
-    prompt = {"session_id": "s1", "prompt": "请修改这个项目的代码"}
-    compact = {"session_id": "s1"}
-
-    route.record("codex", prompt)
-    route.run("codex", "SessionStart", compact, compact=True)
-
-    assert closeout.run("codex", "PostToolUse", compact)
-
-
-def test_route_without_session_identity_does_not_share_cwd_state(
-    tmp_path: Path, monkeypatch
-) -> None:
-    monkeypatch.setenv("KEEPYGAGA_HOOK_STATE_ROOT", str(tmp_path))
-
-    result = route.run(
-        "codex", "UserPromptSubmit", {"cwd": "/shared", "prompt": "修改代码"}
-    )
-
-    assert result
-    assert list(tmp_path.glob("*.json")) == []
-
-
-def test_route_rejects_symlinked_state_root_ancestor(
-    tmp_path: Path, monkeypatch
-) -> None:
-    outside = tmp_path / "outside"
-    outside.mkdir()
-    linked = tmp_path / "linked"
-    try:
-        linked.symlink_to(outside, target_is_directory=True)
-    except OSError:
-        pytest.skip("directory symlinks are unavailable")
-    monkeypatch.setenv("KEEPYGAGA_HOOK_STATE_ROOT", str(linked / "nested"))
-
-    with pytest.raises(OSError, match="linked Hook state directory"):
-        route.record("codex", {"session_id": "s1", "prompt": "修改代码"})
-
-    assert not (outside / "nested").exists()
-
-
-def test_route_uses_resolved_system_temp_directory(tmp_path: Path, monkeypatch) -> None:
-    actual = tmp_path / "actual-temp"
-    actual.mkdir()
-    linked = tmp_path / "system-temp"
-    try:
-        linked.symlink_to(actual, target_is_directory=True)
-    except OSError:
-        pytest.skip("directory symlinks are unavailable")
-    monkeypatch.delenv("KEEPYGAGA_HOOK_STATE_ROOT", raising=False)
-    monkeypatch.setattr(route.tempfile, "gettempdir", lambda: str(linked))
-    payload = {"session_id": "s1", "prompt": "修改代码"}
-
-    assert route.run("codex", "UserPromptSubmit", payload)
-    assert closeout.run("codex", "PostToolUse", payload)
-    assert closeout.run("codex", "PostToolUse", payload) == {}
+    assert merge_hook_fragment(merged, fragment) == merged
 
 
 def test_grok_closeout_is_not_projected() -> None:
@@ -536,10 +513,11 @@ def test_grok_closeout_is_not_projected() -> None:
     )
 
     assert fragment["payload"] == {}
-    assert closeout.run("grok", "Stop", {"reason": "end_turn"}) == {}
 
 
-def test_antigravity_uninstall_fragment_targets_installed_group(tmp_path: Path) -> None:
+def test_antigravity_migration_and_uninstall_target_installed_group(
+    tmp_path: Path,
+) -> None:
     install = build_fragment(
         "antigravity", launcher=tmp_path / "keepygaga", config_path=tmp_path / "config"
     )
@@ -550,7 +528,28 @@ def test_antigravity_uninstall_fragment_targets_installed_group(tmp_path: Path) 
         enabled=False,
     )
 
-    installed = merge_hook_fragment({}, install)
+    existing = {
+        "shared-context-bootstrap": {
+            "PreInvocation": [
+                {
+                    "type": "command",
+                    "command": fragments._command(
+                        tmp_path / "keepygaga",
+                        tmp_path / "config",
+                        "route",
+                        "agy_cli",
+                        "PreInvocation",
+                    ),
+                    "timeout": 2,
+                },
+                *install["payload"]["PreInvocation"],
+            ]
+        }
+    }
+    installed = merge_hook_fragment(existing, install)
+    assert installed["shared-context-bootstrap"] == install["payload"]
+    assert len(_commands(installed)) == 1
+    assert merge_hook_fragment(installed, install) == installed
     removed = merge_hook_fragment(installed, uninstall)
 
     assert removed["shared-context-bootstrap"] == {}

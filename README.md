@@ -106,7 +106,7 @@ Advanced deterministic host commands remain available as `keepygaga host setup|u
 - `keepygaga-mcp` is the stable MCP launcher used by host registrations.
 - The short managed Agent Contract contains only durable safety and routing rules.
 - The full read, convergence, mutation, conflict, and receipt protocol is delivered through negotiated MCP server instructions (modern discovery or the legacy initialize handshake).
-- Built-in Context Bootstrap, Memory Route, and Memory Closeout capabilities are projected through each host's supported native events. Unsupported surfaces use documented fallbacks; Grok uses the managed Agent Contract for Memory Closeout.
+- Built-in Context Bootstrap and stateless Memory Route reminders are projected through each host's supported native events. Routing reminders include completion checks; there is no PostToolUse closeout Hook. Unsupported surfaces use documented fallbacks; Grok uses the managed Agent Contract for memory guidance.
 - Application, Agent Contract, Hook protocol, installer state, and memory schema versions evolve independently.
 
 Configuration-level tests prove projection, preservation, idempotency, and failure boundaries. A host is live-verified only after its real client or official diagnostic confirms the `keepygaga` registration and all eight tools.
