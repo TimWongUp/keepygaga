@@ -1,16 +1,13 @@
 from __future__ import annotations
 
 import importlib.metadata
-import importlib.util
-import json
 import os
 import stat
 import subprocess
 import tempfile
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
 
 from keepygaga.config import PROJECT_ROOT, KeepygagaConfig
 from keepygaga.diagnostics import run_doctor
@@ -21,12 +18,6 @@ END_MARKER = "<!-- KEEPYGAGA:END -->"
 VERSION_PREFIX = "<!-- KEEPYGAGA:CONTRACT:"
 CONTRACT_RELATIVE_PATH = Path("docs/agent-contract.md")
 LEGACY_CONTRACT_RELATIVE_PATH = Path("docs/legacy-agent-contract-v0.md")
-HOOK_MERGER_RELATIVE_PATH = Path("agent_hook_runtime/hook_config.py")
-HOOK_ENTRYPOINTS = (
-    "hooks/context_hook.py",
-    "hooks/memory_route_hook.py",
-    "hooks/closeout_hook.py",
-)
 EXPECTED_ANY = object()
 
 
@@ -472,128 +463,6 @@ def probe_keepygaga_python(python: Path) -> None:
         expected_stdout=token,
         label="Keepygaga Python",
     )
-
-
-def probe_hook_python(python: Path) -> None:
-    token = "keepygaga-hook-python-ok\n"
-    _probe_python(
-        python,
-        statement=f"__import__('sys').stdout.write({token!r})",
-        expected_stdout=token,
-        label="Hook Python",
-    )
-
-
-def render_fragment(value: Any, replacements: Mapping[str, str]) -> Any:
-    if isinstance(value, str):
-        rendered = value
-        for old, new in replacements.items():
-            rendered = rendered.replace(old, new)
-        return rendered
-    if isinstance(value, list):
-        return [render_fragment(item, replacements) for item in value]
-    if isinstance(value, dict):
-        return {key: render_fragment(item, replacements) for key, item in value.items()}
-    return value
-
-
-def load_hook_merger(
-    runtime_root: Path,
-) -> Callable[[dict[str, Any], dict[str, Any]], dict[str, Any]]:
-    module_path = runtime_root / HOOK_MERGER_RELATIVE_PATH
-    if not module_path.is_file() or module_path.is_symlink():
-        raise HostSetupError(f"Agent Hook Runtime merger is missing: {module_path}")
-    specification = importlib.util.spec_from_file_location(
-        "_keepygaga_agent_hook_runtime_hook_config", module_path
-    )
-    if specification is None or specification.loader is None:
-        raise HostSetupError(
-            f"Agent Hook Runtime merger could not be loaded: {module_path}"
-        )
-    module = importlib.util.module_from_spec(specification)
-    specification.loader.exec_module(module)
-    merger = getattr(module, "merge_hook_fragment", None)
-    if not callable(merger):
-        raise HostSetupError("Agent Hook Runtime does not expose merge_hook_fragment")
-    return cast(Callable[[dict[str, Any], dict[str, Any]], dict[str, Any]], merger)
-
-
-def default_hook_config_path() -> Path:
-    configured = os.environ.get("AGENT_HOOK_RUNTIME_CONFIG", "").strip()
-    if configured:
-        configured_path = Path(configured).expanduser()
-        if not configured_path.is_absolute():
-            raise HostSetupError("AGENT_HOOK_RUNTIME_CONFIG must be absolute")
-        return Path(os.path.abspath(configured_path))
-    if os.name == "nt":
-        appdata = os.environ.get("APPDATA", "").strip()
-        if not appdata:
-            raise HostSetupError(
-                "APPDATA is required to locate Agent Hook Runtime config"
-            )
-        appdata_path = Path(appdata).expanduser()
-        if not appdata_path.is_absolute():
-            raise HostSetupError("APPDATA must be absolute")
-        return Path(
-            os.path.abspath(appdata_path / "agent-hook-runtime" / "config.json")
-        )
-    xdg = os.environ.get("XDG_CONFIG_HOME", "").strip()
-    base = Path(xdg).expanduser() if xdg else Path.home() / ".config"
-    if not base.is_absolute():
-        raise HostSetupError("XDG_CONFIG_HOME must be absolute")
-    return Path(os.path.abspath(base / "agent-hook-runtime" / "config.json"))
-
-
-def _parse_hook_runtime_config(original: bytes | None, *, path: Path) -> dict[str, Any]:
-    if original is None:
-        return {}
-    try:
-        loaded = json.loads(original.decode("utf-8"))
-    except (UnicodeError, json.JSONDecodeError) as exc:
-        raise HostSetupError(
-            f"Agent Hook Runtime config is invalid JSON: {path}"
-        ) from exc
-    if not isinstance(loaded, dict):
-        raise HostSetupError(f"Agent Hook Runtime config must be an object: {path}")
-    memory_root = loaded.get("memory_root")
-    if (
-        loaded.get("schema_version") != 1
-        or not isinstance(memory_root, str)
-        or not memory_root.strip()
-    ):
-        raise HostSetupError(
-            f"existing file is not an Agent Hook Runtime config: {path}"
-        )
-    return loaded
-
-
-def load_hook_runtime_config(path: Path) -> dict[str, Any]:
-    ensure_regular_target(path)
-    try:
-        original = path.read_bytes() if path.exists() else None
-    except OSError as exc:
-        raise HostSetupError(
-            f"Agent Hook Runtime config could not be read: {path}"
-        ) from exc
-    return _parse_hook_runtime_config(original, path=path)
-
-
-def prepare_hook_runtime_config(
-    path: Path, memory_root: Path
-) -> tuple[bytes | None, bytes]:
-    ensure_regular_target(path)
-    try:
-        original = path.read_bytes() if path.exists() else None
-    except OSError as exc:
-        raise HostSetupError(
-            f"Agent Hook Runtime config could not be read: {path}"
-        ) from exc
-    existing = _parse_hook_runtime_config(original, path=path)
-    merged = {**existing, "schema_version": 1, "memory_root": str(memory_root)}
-    if merged == existing and original is not None:
-        return original, original
-    content = (json.dumps(merged, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
-    return original, content
 
 
 def validate_hook_command_path(path: Path, *, label: str) -> None:

@@ -572,6 +572,21 @@ def _contract_status(host: str) -> str:
     return "current" if block.text == canonical else "drift"
 
 
+def _wiring_status(host: str, config_path: Path) -> str:
+    try:
+        if host == "codex":
+            from keepygaga.host_setup import codex_wiring_current
+
+            current = codex_wiring_current(config_path)
+        else:
+            from keepygaga.host_adapters import host_wiring_current
+
+            current = host_wiring_current(host, config_path)
+    except (RuntimeError, OSError, ValueError):
+        return "conflict"
+    return "current" if current else "drift"
+
+
 def _lifecycle_result(
     base: Mapping[str, object], action: str, reason: str
 ) -> dict[str, object]:
@@ -654,6 +669,7 @@ def _configured_lifecycle(
     *,
     host: str,
     base: Mapping[str, object],
+    host_status: Mapping[str, object],
 ) -> dict[str, object]:
     if not config_path.exists() or not config.memory.root.strip():
         return _lifecycle_result(
@@ -672,7 +688,7 @@ def _configured_lifecycle(
             "manual_review",
             "Doctor found an error that must be resolved before changing the installation",
         )
-    contract = _contract_status(host)
+    contract = host_status["contract"]
     if contract == "conflict":
         return _lifecycle_result(
             base,
@@ -684,13 +700,16 @@ def _configured_lifecycle(
             base, "activate", "the current host is not recorded as active"
         )
     host_state = hosts[host]
-    if not isinstance(host_state, Mapping):
-        return _lifecycle_result(
-            base, "manual_review", "the current host install state is invalid"
-        )
     if contract != "current":
         return _lifecycle_result(
             base, "repair", f"the current host Agent Contract is {contract}"
+        )
+    wiring = host_status["wiring"]
+    if wiring != "current":
+        return _lifecycle_result(
+            base,
+            "manual_review" if wiring == "conflict" else "repair",
+            f"the current host MCP or Hook wiring is {wiring}",
         )
     expected_host_state = _host_state(host)
     if any(host_state.get(key) != value for key, value in expected_host_state.items()):
@@ -720,6 +739,7 @@ def _lifecycle_plan(
     *,
     latest_version: str,
     host: str,
+    host_status: Mapping[str, object],
 ) -> dict[str, object]:
     base, runtime_result = _runtime_lifecycle(
         state,
@@ -735,6 +755,7 @@ def _lifecycle_plan(
         doctor,
         host=host,
         base=base,
+        host_status=host_status,
     )
 
 
@@ -752,7 +773,20 @@ def status(
     config = load_config(config_path)
     raw_hosts = state.get("hosts", {})
     hosts = list(raw_hosts) if isinstance(raw_hosts, Mapping) else []
-    reported_hosts = hosts if host is None else ([host] if host in hosts else [])
+    checked_hosts = hosts if host is None else [host]
+    host_statuses = {
+        selected: {
+            "recorded": selected in hosts,
+            "contract": (contract := _contract_status(selected)),
+            "wiring": (
+                _wiring_status(selected, config_path)
+                if selected in hosts and contract == "current"
+                else "unchecked"
+            ),
+            "live_verified": False,
+        }
+        for selected in checked_hosts
+    }
     doctor = run_doctor(config_path, project_root=PROJECT_ROOT)
     payload: dict[str, object] = {
         "status": "ok" if doctor.get("status") != "error" else "error",
@@ -766,13 +800,9 @@ def status(
         "limits_source": config.limits_source,
         "doctor": doctor.get("status"),
         "hosts": {
-            recorded_host: {
-                "recorded": True,
-                "contract": _contract_status(recorded_host),
-                "live_verified": False,
-            }
-            for recorded_host in reported_hosts
-            if recorded_host in SUPPORTED_HOSTS
+            selected: snapshot
+            for selected, snapshot in host_statuses.items()
+            if selected in hosts
         },
         "note": "状态文件仅用于发现；宿主 live 配置与官方诊断仍是最终证据。",
     }
@@ -784,6 +814,7 @@ def status(
             doctor,
             latest_version=latest_version,
             host=host,
+            host_status=host_statuses[host],
         )
     return payload
 

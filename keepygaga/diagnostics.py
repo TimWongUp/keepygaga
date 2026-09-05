@@ -96,7 +96,7 @@ def _memory_checks(config: KeepygagaConfig, checks: list[dict[str, object]]) -> 
             message="memory.root is not configured",
         )
         return
-    root = Path(config.memory.root).expanduser().resolve()
+    root = Path(config.memory.root).expanduser()
     inspected = MemoryStore(root, config.memory).inspect()
     status = inspected.get("status")
     if status != "ok":

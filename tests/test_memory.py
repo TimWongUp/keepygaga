@@ -2869,3 +2869,16 @@ def test_move_cannot_hide_overlimit_destination_growth_with_raw_whitespace(
 
     assert result["status"] == "capacity_exceeded"
     assert (source.read_bytes(), destination.read_bytes()) == before
+
+
+def test_yaml_scalar_compatibility(memory_store: tuple[Path, MemoryStore]) -> None:
+    root, store = memory_store
+    page = root / "topics" / "scalar.md"
+    page.write_text(
+        "---\nname: scalar\ndescription: 1e3\naliases: [1e4]\n---\n",
+        encoding="utf-8",
+    )
+    read = store.read(["topics/scalar.md"])
+    assert read["status"] == "ok"
+    assert read["files"][0]["description"] == "1e3"  # type: ignore[index]
+    assert read["files"][0]["aliases"] == ["1e4"]  # type: ignore[index]

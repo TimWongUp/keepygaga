@@ -3,13 +3,10 @@
 from __future__ import annotations
 
 import html
-import json
 from pathlib import Path
 from typing import Any
 
-from keepygaga.config import load_config
 from keepygaga.hooks.protocol import additional_context_payload
-from keepygaga.memory import MemoryStore
 
 HOME_PAGES = ("profile.md", "preferences.md")
 SCOPE_ROUTING = (
@@ -47,6 +44,9 @@ def _facts(item: dict[str, Any]) -> str:
 
 
 def load_bootstrap(config_path: Path) -> str:
+    from keepygaga.config import load_config
+    from keepygaga.memory_store import MemoryStore
+
     config = load_config(config_path)
     if not config.memory.root.strip():
         raise RuntimeError("memory.root is not configured")
@@ -107,11 +107,3 @@ def run(
     return additional_context_payload(
         host, actual_event, context, capability="bootstrap"
     )
-
-
-def loads_stdin(raw: str) -> dict[str, Any]:
-    try:
-        value = json.loads(raw) if raw.strip() else {}
-    except json.JSONDecodeError:
-        return {}
-    return value if isinstance(value, dict) else {}

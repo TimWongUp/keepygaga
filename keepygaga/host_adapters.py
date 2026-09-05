@@ -17,42 +17,31 @@ from filelock import Timeout as FileLockTimeout
 
 from keepygaga import __version__
 from keepygaga.config import KeepygagaConfig
-from keepygaga.hooks import build_fragment, merge_hook_fragment
+from keepygaga.hooks.fragments import build_fragment
+from keepygaga.hooks.merge import merge_hook_fragment
 from keepygaga.host_common import (
-    HOOK_ENTRYPOINTS,
     HostSetupError,
     HostSetupPartialError,
     atomic_write,
-    default_hook_config_path,
     ensure_regular_target,
     exclusive_backup,
     json_result,
     load_canonical_contract,
-    load_hook_merger,
     load_legacy_contract,
     merge_managed_contract,
     parse_managed_block,
-    prepare_hook_runtime_config,
-    probe_hook_python,
     probe_keepygaga_python,
     remove_managed_contract,
-    render_fragment,
     run_captured,
-    validate_hook_command_path,
     validate_host_source,
 )
 from keepygaga.launchers import resolve_launcher
 
 _atomic_write = atomic_write
-_default_hook_config_path = default_hook_config_path
 _ensure_regular_target = ensure_regular_target
 _exclusive_backup = exclusive_backup
 _json_result = json_result
-_load_hook_merger = load_hook_merger
-_probe_hook_python = probe_hook_python
 _probe_keepygaga_python = probe_keepygaga_python
-_render_fragment = render_fragment
-_validate_hook_command_path = validate_hook_command_path
 
 
 def _yaml_runtime() -> Any:
@@ -93,15 +82,6 @@ class JsonHostSpec:
     hook_fragment: str
     mcp_fields: Mapping[str, object]
     legacy_mcp_path: Callable[[Path], Path] | None = None
-
-
-@dataclass(frozen=True)
-class HookSelection:
-    fragment: dict[str, Any]
-    merger: Callable[[dict[str, Any], dict[str, Any]], dict[str, Any]]
-    runtime_config: FilePlan | None
-    runtime_root: Path
-    hook_python: Path
 
 
 @dataclass(frozen=True)
@@ -495,201 +475,88 @@ def _apply_existing_json_mcp(plan: ExistingJsonMcpPlan) -> dict[str, object]:
     return _apply_file(plan.update)
 
 
-def _select_hook_runtime(runtime_root: Path, hook_python: Path) -> tuple[Path, Path]:
-    raw_runtime = runtime_root.expanduser()
-    if raw_runtime.is_symlink():
-        raise HostSetupError(
-            f"Agent Hook Runtime root must not be a symlink: {raw_runtime}"
-        )
-    runtime = raw_runtime.resolve()
-    selected_python = Path(os.path.abspath(hook_python.expanduser()))
-    if not runtime.is_dir():
-        raise HostSetupError(f"Agent Hook Runtime root is invalid: {runtime}")
-    if not selected_python.is_file():
-        raise HostSetupError(f"Hook Python is invalid: {selected_python}")
-    _probe_hook_python(selected_python)
-    _validate_hook_command_path(runtime, label="Agent Hook Runtime root")
-    _validate_hook_command_path(selected_python, label="Hook Python")
-    for relative in HOOK_ENTRYPOINTS:
-        entrypoint = runtime / relative
-        if entrypoint.is_symlink() or not entrypoint.is_file():
-            raise HostSetupError(
-                f"Agent Hook Runtime entrypoint is missing: {entrypoint}"
-            )
-    return runtime, selected_python
-
-
-def _render_host_hook_fragment(
-    host: str, runtime: Path, selected_python: Path
+def _hook_fragment(
+    host: str, config_path: Path, *, enabled: bool = True
 ) -> dict[str, Any]:
-    fragment_path = runtime / "config" / "hooks" / f"{host}.json"
-    if fragment_path.is_symlink():
-        raise HostSetupError(
-            f"Agent Hook Runtime fragment must not be a symlink: {fragment_path}"
-        )
-    try:
-        fragment = json.loads(fragment_path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
-        raise HostSetupError(
-            f"Agent Hook Runtime fragment could not be loaded: {fragment_path}"
-        ) from exc
-    if not isinstance(fragment, dict) or fragment.get("host") != host:
-        raise HostSetupError(f"Agent Hook Runtime {host} fragment is invalid")
-    rendered = _render_fragment(
-        fragment,
-        {"{{PYTHON}}": str(selected_python), "{{RUNTIME_ROOT}}": str(runtime)},
-    )
-    if not isinstance(rendered, dict):
-        raise HostSetupError(f"rendered {host} Hook fragment is invalid")
-    markers = rendered.get("owned_command_markers")
-    if not isinstance(markers, list):
-        raise HostSetupError(f"rendered {host} Hook ownership markers are invalid")
-    markers.extend(str(runtime / relative) for relative in HOOK_ENTRYPOINTS)
-    return rendered
-
-
-def _load_hook_runtime(
-    host: str,
-    runtime_root: Path,
-    hook_python: Path,
-) -> tuple[
-    dict[str, Any],
-    Callable[[dict[str, Any], dict[str, Any]], dict[str, Any]],
-    Path,
-    Path,
-]:
-    runtime, selected_python = _select_hook_runtime(runtime_root, hook_python)
-    rendered = _render_host_hook_fragment(host, runtime, selected_python)
-    return rendered, _load_hook_merger(runtime), runtime, selected_python
-
-
-def _hook_material_for_removal(
-    host: str,
-    config_path: Path,
-    runtime_root: Path | None,
-    hook_python: Path | None,
-) -> tuple[dict[str, Any], Callable[[dict[str, Any], dict[str, Any]], dict[str, Any]]]:
-    if runtime_root is not None or hook_python is not None:
-        if runtime_root is None or hook_python is None:
-            raise HostSetupError(
-                "hook runtime and hook Python must be supplied together"
-            )
-        fragment, merger, _runtime, _python = _load_hook_runtime(
-            host, runtime_root, hook_python
-        )
-        return fragment, merger
     try:
         launcher = resolve_launcher("keepygaga")
     except RuntimeError as exc:
         raise HostSetupError(str(exc)) from exc
-    return (
-        build_fragment(
-            host,
-            launcher=launcher,
-            config_path=config_path.resolve(),
-            enabled=False,
-        ),
-        merge_hook_fragment,
+    return build_fragment(
+        host, launcher=launcher, config_path=config_path.resolve(), enabled=enabled
     )
 
 
-def _prepare_hook_selection(
-    host: str,
-    memory_root: Path,
-    runtime_root: Path | None,
-    hook_python: Path | None,
-    *,
-    config_path: Path,
-    hook_config_path: Path | None,
-) -> HookSelection:
-    if runtime_root is None and hook_python is None:
-        try:
-            launcher = resolve_launcher("keepygaga")
-        except RuntimeError as exc:
-            raise HostSetupError(str(exc)) from exc
-        fragment = build_fragment(
-            host,
-            launcher=launcher,
-            config_path=config_path.resolve(),
+def host_wiring_current(host: str, config_path: Path) -> bool:
+    """Compare live wiring with the same read-only plans used by setup."""
+    if host == "grok":
+        return _grok_wiring_current(config_path)
+    if host == "hermes":
+        home = _resolve_home(None, ".hermes", host, create=False)
+        plan = _prepare_hermes_config(
+            home / "config.yaml",
+            invocation=_select_mcp_invocation(None),
+            config_path=config_path,
+            hook_selection=_hook_fragment("hermes", config_path),
         )
-        return HookSelection(
-            fragment=fragment,
-            merger=merge_hook_fragment,
-            runtime_config=None,
-            runtime_root=Path(__file__).resolve().parent / "hooks",
-            hook_python=Path(sys.executable).resolve(),
+        return not plan.mcp_changed and not plan.hooks_changed
+    spec = {item.host: item for item in (CLAUDE_CODE, WORKBUDDY, ANTIGRAVITY)}[host]
+    home = _resolve_home(None, spec.default_home, host, create=False)
+    invocation = _select_mcp_invocation(None)
+    mcp = _prepare_json_mcp(
+        spec.mcp_path(home),
+        invocation=invocation,
+        config_path=config_path,
+        fixed_fields=spec.mcp_fields,
+    )
+    hooks = _prepare_json_hooks(
+        home / spec.hook_relative, _hook_fragment(spec.hook_fragment, config_path)
+    )
+    plans = [mcp, hooks]
+    if spec.legacy_mcp_path is not None:
+        legacy = _prepare_existing_json_mcp(
+            spec.legacy_mcp_path(home),
+            invocation=invocation,
+            config_path=config_path,
+            fixed_fields=spec.mcp_fields,
         )
-    if runtime_root is None or hook_python is None:
-        raise HostSetupError("hook runtime and hook Python must be supplied together")
-    rendered, merger, runtime, selected_python = _load_hook_runtime(
-        host, runtime_root, hook_python
+        if legacy.update is not None:
+            plans.append(legacy.update)
+    return all(plan.original == plan.content for plan in plans)
+
+
+def _grok_wiring_current(config_path: Path) -> bool:
+    home = _resolve_home(None, ".grok", "grok", create=False)
+    if not home.is_dir():
+        return False
+    mcp = _prepare_grok_mcp(
+        home, config_path, invocation=_select_mcp_invocation(None), grok_binary=None
     )
-    default_config = _default_hook_config_path()
-    selected_config = (
-        Path(os.path.abspath(hook_config_path.expanduser()))
-        if hook_config_path is not None
-        else default_config
-    )
-    if selected_config != default_config:
-        raise HostSetupError(
-            "selected Hook config is not the path Agent Hook Runtime will load; "
-            "set AGENT_HOOK_RUNTIME_CONFIG to the same absolute path"
-        )
-    configured_environment_root = os.environ.get(
-        "AGENT_HOOK_RUNTIME_MEMORY_ROOT", ""
-    ).strip()
-    if configured_environment_root:
-        raw_environment_root = Path(configured_environment_root).expanduser()
-        if not raw_environment_root.is_absolute():
-            raise HostSetupError("AGENT_HOOK_RUNTIME_MEMORY_ROOT must be absolute")
-        environment_root = raw_environment_root.resolve()
-        if environment_root != memory_root:
-            raise HostSetupError(
-                "AGENT_HOOK_RUNTIME_MEMORY_ROOT conflicts with configured memory.root"
-            )
-    runtime_original, runtime_content = prepare_hook_runtime_config(
-        selected_config, memory_root
-    )
-    return HookSelection(
-        fragment=rendered,
-        merger=merger,
-        runtime_config=FilePlan(selected_config, runtime_original, runtime_content),
-        runtime_root=runtime,
-        hook_python=selected_python,
+    fragment = _hook_fragment("grok", config_path, enabled=False)
+    hooks = [
+        _prepare_json_hooks_removal(home / "hooks" / name, fragment)
+        for name in ("keepygaga.json", "agent-hook-runtime.json")
+    ]
+    return not mcp.needs_update and all(
+        plan is None or plan.original == plan.content for plan in hooks
     )
 
 
-def _prepare_json_hooks(path: Path, selection: HookSelection) -> FilePlan:
+def _prepare_json_hooks(path: Path, selection: dict[str, Any]) -> FilePlan:
     original, existing = _load_json_object(path)
     try:
-        merged = selection.merger(existing, selection.fragment)
+        merged = merge_hook_fragment(existing, selection)
     except Exception as exc:
-        raise HostSetupError(f"Agent Hook Runtime rejected host hooks: {exc}") from exc
-    if not isinstance(merged, dict):
-        raise HostSetupError("Agent Hook Runtime merger must return a JSON object")
+        raise HostSetupError(f"Keepygaga rejected host hooks: {exc}") from exc
     content = _json_bytes(merged)
     if merged == existing and original is not None:
         content = original
     return FilePlan(path, original, content)
 
 
-def _apply_hooks(host_plan: FilePlan, selection: HookSelection) -> dict[str, object]:
-    parts: dict[str, object] = {}
-    try:
-        if selection.runtime_config is not None:
-            parts["runtime_config"] = _apply_file(selection.runtime_config)
-        host = _apply_file(host_plan)
-        parts["host_config"] = host
-    except Exception as exc:
-        if _has_applied_component(parts):
-            raise HostSetupPartialError(
-                f"Hook setup partially applied: {exc}",
-                {"hooks": _json_result("applied", **parts)},
-            ) from exc
-        if isinstance(exc, HostSetupError):
-            raise
-        raise HostSetupError(str(exc)) from exc
-    return _json_result(_component_status(parts), **parts)
+def _apply_hooks(host_plan: FilePlan) -> dict[str, object]:
+    host = _apply_file(host_plan)
+    return _json_result(str(host["status"]), host_config=host)
 
 
 def _has_applied_component(components: Mapping[str, object]) -> bool:
@@ -720,8 +587,7 @@ def _run_components(
     doctor: Mapping[str, object],
     mcp_plan: FilePlan,
     rules_plan: FilePlan,
-    hooks_plan: FilePlan | None,
-    hook_selection: HookSelection | None,
+    hooks_plan: FilePlan,
     legacy_mcp_plan: ExistingJsonMcpPlan | None = None,
 ) -> dict[str, object]:
     components: dict[str, object] = {}
@@ -730,13 +596,7 @@ def _run_components(
         if legacy_mcp_plan is not None:
             components["legacy_mcp"] = _apply_existing_json_mcp(legacy_mcp_plan)
         components["rules"] = _apply_file(rules_plan)
-        components["hooks"] = (
-            _apply_hooks(hooks_plan, hook_selection)
-            if hooks_plan is not None and hook_selection is not None
-            else _json_result(
-                "skipped", reason="compatible Agent Hook Runtime was not selected"
-            )
-        )
+        components["hooks"] = _apply_hooks(hooks_plan)
     except Exception as exc:
         _raise_component_failure(exc, components)
     return _json_result(
@@ -756,11 +616,8 @@ def _setup_json_host(
     *,
     host_home: Path | None,
     python: Path | None,
-    hook_runtime: Path | None,
-    hook_python: Path | None,
-    hook_config_path: Path | None,
 ) -> dict[str, object]:
-    memory_root, doctor = _validated_source(config_path, config)
+    _memory_root, doctor = _validated_source(config_path, config)
     home = _resolve_home(host_home, spec.default_home, spec.host)
     invocation = _select_mcp_invocation(python)
     lock = FileLock(str(home / ".keepygaga-host-setup.lock"), timeout=30)
@@ -771,14 +628,7 @@ def _setup_json_host(
             f"{spec.host} setup lock could not be acquired: {exc}"
         ) from exc
     try:
-        selection = _prepare_hook_selection(
-            spec.hook_fragment,
-            memory_root,
-            hook_runtime,
-            hook_python,
-            config_path=config_path,
-            hook_config_path=hook_config_path,
-        )
+        selection = _hook_fragment(spec.hook_fragment, config_path)
         mcp = _prepare_json_mcp(
             spec.mcp_path(home),
             invocation=invocation,
@@ -803,7 +653,6 @@ def _setup_json_host(
             mcp_plan=mcp,
             rules_plan=rules,
             hooks_plan=hooks,
-            hook_selection=selection,
             legacy_mcp_plan=legacy_mcp,
         )
     finally:
@@ -816,9 +665,6 @@ def setup_claude_code_host(
     *,
     host_home: Path | None = None,
     python: Path | None = None,
-    hook_runtime: Path | None = None,
-    hook_python: Path | None = None,
-    hook_config_path: Path | None = None,
 ) -> dict[str, object]:
     return _setup_json_host(
         CLAUDE_CODE,
@@ -826,9 +672,6 @@ def setup_claude_code_host(
         config,
         host_home=host_home,
         python=python,
-        hook_runtime=hook_runtime,
-        hook_python=hook_python,
-        hook_config_path=hook_config_path,
     )
 
 
@@ -838,9 +681,6 @@ def setup_workbuddy_host(
     *,
     host_home: Path | None = None,
     python: Path | None = None,
-    hook_runtime: Path | None = None,
-    hook_python: Path | None = None,
-    hook_config_path: Path | None = None,
 ) -> dict[str, object]:
     return _setup_json_host(
         WORKBUDDY,
@@ -848,9 +688,6 @@ def setup_workbuddy_host(
         config,
         host_home=host_home,
         python=python,
-        hook_runtime=hook_runtime,
-        hook_python=hook_python,
-        hook_config_path=hook_config_path,
     )
 
 
@@ -860,9 +697,6 @@ def setup_antigravity_host(
     *,
     host_home: Path | None = None,
     python: Path | None = None,
-    hook_runtime: Path | None = None,
-    hook_python: Path | None = None,
-    hook_config_path: Path | None = None,
 ) -> dict[str, object]:
     return _setup_json_host(
         ANTIGRAVITY,
@@ -870,9 +704,6 @@ def setup_antigravity_host(
         config,
         host_home=host_home,
         python=python,
-        hook_runtime=hook_runtime,
-        hook_python=hook_python,
-        hook_config_path=hook_config_path,
     )
 
 
@@ -1115,12 +946,8 @@ def setup_grok_host(
     host_home: Path | None = None,
     python: Path | None = None,
     grok_binary: Path | None = None,
-    hook_runtime: Path | None = None,
-    hook_python: Path | None = None,
-    hook_config_path: Path | None = None,
 ) -> dict[str, object]:
     _memory_root, doctor = _validated_source(config_path, config)
-    del hook_config_path
     home = _resolve_home(host_home, ".grok", "grok")
     if home.name != ".grok":
         raise HostSetupError(
@@ -1134,9 +961,7 @@ def setup_grok_host(
         raise HostSetupError(f"grok setup lock could not be acquired: {exc}") from exc
     components: dict[str, object] = {}
     try:
-        fragment, merger = _hook_material_for_removal(
-            "grok", config_path, hook_runtime, hook_python
-        )
+        fragment = _hook_fragment("grok", config_path, enabled=False)
         mcp_plan = _prepare_grok_mcp(
             home,
             config_path,
@@ -1145,11 +970,10 @@ def setup_grok_host(
         )
         rules_plan = _prepare_rules(resolve_grok_rules_path(home))
         hooks_path = home / "hooks" / "keepygaga.json"
-        hooks_plan = _prepare_json_hooks_removal(hooks_path, fragment, merger)
+        hooks_plan = _prepare_json_hooks_removal(hooks_path, fragment)
         legacy_hooks_plan = _prepare_json_hooks_removal(
             home / "hooks" / "agent-hook-runtime.json",
             fragment,
-            merger,
         )
         try:
             components["mcp"] = _apply_grok_mcp(mcp_plan)
@@ -1191,7 +1015,7 @@ def _prepare_hermes_config(
     *,
     invocation: McpInvocation,
     config_path: Path,
-    hook_selection: HookSelection | None,
+    hook_selection: dict[str, Any],
 ) -> HermesConfigPlan:
     original, loaded = _load_yaml_object(path)
     merged = deepcopy(loaded)
@@ -1211,28 +1035,20 @@ def _prepare_hermes_config(
         fixed_fields={},
     )
     mcp_changed = previous_mcp != servers["keepygaga"]
-    hooks_changed = False
-    if hook_selection is not None:
-        before_hooks = deepcopy(merged.get("hooks"))
-        try:
-            hook_merged = hook_selection.merger(
-                _plain_data(merged), hook_selection.fragment
-            )
-        except Exception as exc:
-            raise HostSetupError(
-                f"Agent Hook Runtime rejected Hermes hooks: {exc}"
-            ) from exc
-        if not isinstance(hook_merged, dict):
-            raise HostSetupError("Agent Hook Runtime merger must return a mapping")
-        desired_hooks = hook_merged.get("hooks")
-        if before_hooks is None and desired_hooks in ({}, []):
-            desired_hooks = None
-        hooks_changed = _plain_data(before_hooks) != _plain_data(desired_hooks)
-        if hooks_changed:
-            if desired_hooks is None:
-                merged.pop("hooks", None)
-            else:
-                merged["hooks"] = desired_hooks
+    before_hooks = deepcopy(merged.get("hooks"))
+    try:
+        hook_merged = merge_hook_fragment(_plain_data(merged), hook_selection)
+    except Exception as exc:
+        raise HostSetupError(f"Keepygaga rejected Hermes hooks: {exc}") from exc
+    desired_hooks = hook_merged.get("hooks")
+    if before_hooks is None and desired_hooks in ({}, []):
+        desired_hooks = None
+    hooks_changed = _plain_data(before_hooks) != _plain_data(desired_hooks)
+    if hooks_changed:
+        if desired_hooks is None:
+            merged.pop("hooks", None)
+        else:
+            merged["hooks"] = desired_hooks
     content = _yaml_bytes(merged)
     if not mcp_changed and not hooks_changed and original is not None:
         content = original
@@ -1249,11 +1065,8 @@ def setup_hermes_host(
     *,
     host_home: Path | None = None,
     python: Path | None = None,
-    hook_runtime: Path | None = None,
-    hook_python: Path | None = None,
-    hook_config_path: Path | None = None,
 ) -> dict[str, object]:
-    memory_root, doctor = _validated_source(config_path, config)
+    _memory_root, doctor = _validated_source(config_path, config)
     home = _resolve_home(host_home, ".hermes", "hermes")
     invocation = _select_mcp_invocation(python)
     lock = FileLock(str(home / ".keepygaga-host-setup.lock"), timeout=30)
@@ -1263,14 +1076,7 @@ def setup_hermes_host(
         raise HostSetupError(f"hermes setup lock could not be acquired: {exc}") from exc
     components: dict[str, object] = {}
     try:
-        selection = _prepare_hook_selection(
-            "hermes",
-            memory_root,
-            hook_runtime,
-            hook_python,
-            config_path=config_path,
-            hook_config_path=hook_config_path,
-        )
+        selection = _hook_fragment("hermes", config_path)
         config_plan = _prepare_hermes_config(
             home / "config.yaml",
             invocation=invocation,
@@ -1303,14 +1109,6 @@ def setup_hermes_host(
                 approval_required=config_plan.hooks_changed,
             )
             components["rules"] = _apply_file(rules_plan)
-            if selection.runtime_config is not None:
-                runtime = _apply_file(selection.runtime_config)
-                hook_result = components["hooks"]
-                if not isinstance(hook_result, dict):
-                    raise HostSetupError("Hermes Hook result is invalid")
-                hook_result["runtime_config"] = runtime
-                if runtime["status"] == "applied":
-                    hook_result["status"] = "applied"
         except Exception as exc:
             if _has_applied_component(components):
                 raise HostSetupPartialError(str(exc), components) from exc
@@ -1423,7 +1221,6 @@ def _without_empty_hook_target(
 def _prepare_json_hooks_removal(
     path: Path,
     fragment: Mapping[str, Any],
-    merger: Callable[[dict[str, Any], dict[str, Any]], dict[str, Any]],
 ) -> FilePlan | None:
     original, existing = _load_json_object(path)
     if original is None:
@@ -1431,11 +1228,9 @@ def _prepare_json_hooks_removal(
     strip_fragment = dict(fragment)
     strip_fragment["payload"] = {}
     try:
-        merged = merger(existing, strip_fragment)
+        merged = merge_hook_fragment(existing, strip_fragment)
     except Exception as exc:
-        raise HostSetupError(f"Agent Hook Runtime rejected host hooks: {exc}") from exc
-    if not isinstance(merged, dict):
-        raise HostSetupError("Agent Hook Runtime merger must return a JSON object")
+        raise HostSetupError(f"Keepygaga rejected host hooks: {exc}") from exc
     merged = _without_empty_hook_target(existing, merged, strip_fragment)
     if merged == existing:
         return FilePlan(path, original, original)
@@ -1452,7 +1247,6 @@ def _run_uninstall_components(
     mcp_plan: FilePlan | None,
     rules_plan: FilePlan | None,
     hooks_plan: FilePlan | None,
-    hooks_selected: bool,
     legacy_mcp_plan: ExistingJsonMcpPlan | None = None,
     mcp_path: Path,
     rules_path: Path,
@@ -1463,13 +1257,7 @@ def _run_uninstall_components(
         components["hooks"] = (
             _apply_file(hooks_plan)
             if hooks_plan is not None
-            else (
-                _json_result(
-                    "skipped", reason="compatible Agent Hook Runtime was not selected"
-                )
-                if not hooks_selected
-                else _absent_component(hooks_path, kind="hooks file")
-            )
+            else _absent_component(hooks_path, kind="hooks file")
         )
         components["rules"] = (
             _apply_file(rules_plan)
@@ -1501,11 +1289,8 @@ def _uninstall_json_host(
     *,
     host_home: Path | None,
     python: Path | None,
-    hook_runtime: Path | None,
-    hook_python: Path | None,
-    hook_config_path: Path | None,
 ) -> dict[str, object]:
-    del config, python, hook_config_path
+    del config, python
     home = _resolve_home(host_home, spec.default_home, spec.host, create=False)
     lock = None
     if home.exists():
@@ -1517,9 +1302,7 @@ def _uninstall_json_host(
                 f"{spec.host} setup lock could not be acquired: {exc}"
             ) from exc
     try:
-        fragment, merger = _hook_material_for_removal(
-            spec.hook_fragment, config_path, hook_runtime, hook_python
-        )
+        fragment = _hook_fragment(spec.hook_fragment, config_path, enabled=False)
         mcp_path = spec.mcp_path(home)
         rules_path = home / spec.rules_relative
         hooks_path = home / spec.hook_relative
@@ -1530,13 +1313,12 @@ def _uninstall_json_host(
             else None
         )
         rules = _prepare_rules_removal(rules_path)
-        hooks = _prepare_json_hooks_removal(hooks_path, fragment, merger)
+        hooks = _prepare_json_hooks_removal(hooks_path, fragment)
         return _run_uninstall_components(
             host=spec.host,
             mcp_plan=mcp,
             rules_plan=rules,
             hooks_plan=hooks,
-            hooks_selected=fragment is not None,
             legacy_mcp_plan=legacy_mcp,
             mcp_path=mcp_path,
             rules_path=rules_path,
@@ -1553,9 +1335,6 @@ def uninstall_claude_code_host(
     *,
     host_home: Path | None = None,
     python: Path | None = None,
-    hook_runtime: Path | None = None,
-    hook_python: Path | None = None,
-    hook_config_path: Path | None = None,
 ) -> dict[str, object]:
     return _uninstall_json_host(
         CLAUDE_CODE,
@@ -1563,9 +1342,6 @@ def uninstall_claude_code_host(
         config,
         host_home=host_home,
         python=python,
-        hook_runtime=hook_runtime,
-        hook_python=hook_python,
-        hook_config_path=hook_config_path,
     )
 
 
@@ -1575,9 +1351,6 @@ def uninstall_workbuddy_host(
     *,
     host_home: Path | None = None,
     python: Path | None = None,
-    hook_runtime: Path | None = None,
-    hook_python: Path | None = None,
-    hook_config_path: Path | None = None,
 ) -> dict[str, object]:
     return _uninstall_json_host(
         WORKBUDDY,
@@ -1585,9 +1358,6 @@ def uninstall_workbuddy_host(
         config,
         host_home=host_home,
         python=python,
-        hook_runtime=hook_runtime,
-        hook_python=hook_python,
-        hook_config_path=hook_config_path,
     )
 
 
@@ -1597,9 +1367,6 @@ def uninstall_antigravity_host(
     *,
     host_home: Path | None = None,
     python: Path | None = None,
-    hook_runtime: Path | None = None,
-    hook_python: Path | None = None,
-    hook_config_path: Path | None = None,
 ) -> dict[str, object]:
     return _uninstall_json_host(
         ANTIGRAVITY,
@@ -1607,9 +1374,6 @@ def uninstall_antigravity_host(
         config,
         host_home=host_home,
         python=python,
-        hook_runtime=hook_runtime,
-        hook_python=hook_python,
-        hook_config_path=hook_config_path,
     )
 
 
@@ -1742,11 +1506,8 @@ def uninstall_grok_host(
     host_home: Path | None = None,
     python: Path | None = None,
     grok_binary: Path | None = None,
-    hook_runtime: Path | None = None,
-    hook_python: Path | None = None,
-    hook_config_path: Path | None = None,
 ) -> dict[str, object]:
-    del config, python, hook_config_path
+    del config, python
     home = _resolve_home(host_home, ".grok", "grok", create=False)
     if home.name != ".grok":
         raise HostSetupError(
@@ -1763,9 +1524,7 @@ def uninstall_grok_host(
             ) from exc
     components: dict[str, object] = {}
     try:
-        fragment, merger = _hook_material_for_removal(
-            "grok", config_path, hook_runtime, hook_python
-        )
+        fragment = _hook_fragment("grok", config_path, enabled=False)
         mcp_plan = (
             _prepare_grok_mcp_removal(home, grok_binary=grok_binary)
             if home.exists()
@@ -1776,11 +1535,9 @@ def uninstall_grok_host(
         )
         rules_plan = _prepare_rules_removal(rules_path) if home.exists() else None
         hooks_path = home / "hooks" / "keepygaga.json"
-        hooks_plan = _prepare_json_hooks_removal(hooks_path, fragment, merger)
+        hooks_plan = _prepare_json_hooks_removal(hooks_path, fragment)
         legacy_hooks_path = home / "hooks" / "agent-hook-runtime.json"
-        legacy_hooks_plan = _prepare_json_hooks_removal(
-            legacy_hooks_path, fragment, merger
-        )
+        legacy_hooks_plan = _prepare_json_hooks_removal(legacy_hooks_path, fragment)
         try:
             components["hooks"] = (
                 _apply_file(hooks_plan)
@@ -1851,22 +1608,15 @@ def _remove_hermes_mcp(merged: MutableMapping[str, Any], path: Path) -> bool:
 
 def _remove_hermes_hooks(
     merged: MutableMapping[str, Any],
-    fragment: Mapping[str, Any] | None,
-    merger: Callable[[dict[str, Any], dict[str, Any]], dict[str, Any]] | None,
+    fragment: Mapping[str, Any],
 ) -> bool:
-    if fragment is None or merger is None:
-        return False
     before_hooks = deepcopy(merged.get("hooks"))
     strip_fragment = dict(fragment)
     strip_fragment["payload"] = {}
     try:
-        hook_merged = merger(_plain_data(merged), strip_fragment)
+        hook_merged = merge_hook_fragment(_plain_data(merged), strip_fragment)
     except Exception as exc:
-        raise HostSetupError(
-            f"Agent Hook Runtime rejected Hermes hooks: {exc}"
-        ) from exc
-    if not isinstance(hook_merged, dict):
-        raise HostSetupError("Agent Hook Runtime merger must return a mapping")
+        raise HostSetupError(f"Keepygaga rejected Hermes hooks: {exc}") from exc
     desired_hooks = hook_merged.get("hooks")
     if before_hooks is None and desired_hooks in ({}, []):
         desired_hooks = None
@@ -1881,15 +1631,14 @@ def _remove_hermes_hooks(
 def _prepare_hermes_config_removal(
     path: Path,
     *,
-    fragment: Mapping[str, Any] | None,
-    merger: Callable[[dict[str, Any], dict[str, Any]], dict[str, Any]] | None,
+    fragment: Mapping[str, Any],
 ) -> HermesConfigPlan | None:
     original, loaded = _load_yaml_object(path)
     if original is None:
         return None
     merged = deepcopy(loaded)
     mcp_changed = _remove_hermes_mcp(merged, path)
-    hooks_changed = _remove_hermes_hooks(merged, fragment, merger)
+    hooks_changed = _remove_hermes_hooks(merged, fragment)
     content = _yaml_bytes(merged)
     if not mcp_changed and not hooks_changed and original is not None:
         content = original
@@ -1906,11 +1655,8 @@ def uninstall_hermes_host(
     *,
     host_home: Path | None = None,
     python: Path | None = None,
-    hook_runtime: Path | None = None,
-    hook_python: Path | None = None,
-    hook_config_path: Path | None = None,
 ) -> dict[str, object]:
-    del config, python, hook_config_path
+    del config, python
     home = _resolve_home(host_home, ".hermes", "hermes", create=False)
     lock = None
     if home.exists():
@@ -1923,13 +1669,10 @@ def uninstall_hermes_host(
             ) from exc
     components: dict[str, object] = {}
     try:
-        fragment, merger = _hook_material_for_removal(
-            "hermes", config_path, hook_runtime, hook_python
-        )
+        fragment = _hook_fragment("hermes", config_path, enabled=False)
         config_plan = _prepare_hermes_config_removal(
             home / "config.yaml",
             fragment=fragment,
-            merger=merger,
         )
         rules_plan = _prepare_rules_removal(home / "SOUL.md")
         try:
@@ -1942,13 +1685,8 @@ def uninstall_hermes_host(
                 components["mcp"] = _absent_component(
                     home / "config.yaml", kind="Hermes config"
                 )
-                components["hooks"] = (
-                    _json_result(
-                        "skipped",
-                        reason="compatible Agent Hook Runtime was not selected",
-                    )
-                    if fragment is None
-                    else _absent_component(home / "config.yaml", kind="Hermes config")
+                components["hooks"] = _absent_component(
+                    home / "config.yaml", kind="Hermes config"
                 )
             else:
                 host_config = _apply_file(config_plan.file)
@@ -1961,30 +1699,24 @@ def uninstall_hermes_host(
                         host_config.get("backup") if config_plan.mcp_changed else None
                     ),
                 )
-                if fragment is None:
-                    components["hooks"] = _json_result(
-                        "skipped",
-                        reason="compatible Agent Hook Runtime was not selected",
-                    )
-                else:
-                    components["hooks"] = _json_result(
-                        "applied"
-                        if host_applied and config_plan.hooks_changed
-                        else "no_op",
-                        host_config={
-                            "status": (
-                                "applied"
-                                if host_applied and config_plan.hooks_changed
-                                else "no_op"
-                            ),
-                            "path": str(config_plan.file.path),
-                            "backup": (
-                                host_config.get("backup")
-                                if config_plan.hooks_changed
-                                else None
-                            ),
-                        },
-                    )
+                components["hooks"] = _json_result(
+                    "applied"
+                    if host_applied and config_plan.hooks_changed
+                    else "no_op",
+                    host_config={
+                        "status": (
+                            "applied"
+                            if host_applied and config_plan.hooks_changed
+                            else "no_op"
+                        ),
+                        "path": str(config_plan.file.path),
+                        "backup": (
+                            host_config.get("backup")
+                            if config_plan.hooks_changed
+                            else None
+                        ),
+                    },
+                )
         except Exception as exc:
             if _has_applied_component(components):
                 raise HostSetupPartialError(str(exc), components) from exc
