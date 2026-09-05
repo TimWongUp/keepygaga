@@ -1,9 +1,11 @@
 # Built-in Hooks
 
-Keepygaga owns three semantic Hooks: Context Bootstrap, Memory Route, and Memory Closeout. They are part of the published package and run through the stable `keepygaga hook run` command; no external runtime or checkout is required.
+Keepygaga owns Context Bootstrap and Memory Route. They are part of the published package and run through `keepygaga hook run context|route`; no external runtime or checkout is required.
 
-`keepygaga install` projects only Keepygaga-owned commands into the selected host's native Hook configuration. Rerunning setup replaces current or legacy Keepygaga entries and preserves unrelated Hooks. `keepygaga uninstall` removes those owned entries only.
+Context Bootstrap reads the live Profile and Preferences pages and includes fixed scope-routing guidance. Memory Route is a stateless reminder for information routing and completion checks. Compact recovery restores the active task before checking for any omitted durable updates. Keepygaga does not register PostToolUse or Stop reminders, classify prompts by keywords, or maintain per-session Hook files.
 
-Host capability varies. Codex, Claude Code, and WorkBuddy can receive all three capabilities; Hermes maps them to its native lifecycle; Antigravity currently receives bootstrap and route. Grok uses the managed Agent Contract as its closeout fallback because its blocking `Stop` feedback starts another inference round and can replace the original final response in headless clients. Omitted capabilities are unsupported projections, not silent failures.
+`keepygaga install` projects only Keepygaga-owned commands into the selected host's native Hook configuration. Rerunning setup replaces current or legacy Keepygaga entries, including obsolete closeout commands, and preserves unrelated Hooks. `keepygaga uninstall` removes those owned entries only.
 
-See [Codex](codex.md) and [Grok](grok.md) for host-specific notes. Other supported host paths are maintained by their adapter and covered by configuration tests.
+Codex and Claude Code use SessionStart, SubagentStart, UserPromptSubmit, and compact recovery. WorkBuddy uses SessionStart and UserPromptSubmit. Hermes and Antigravity CLI each combine bootstrap and routing in one native pre-invocation command. Grok relies on the managed Agent Contract because its passive lifecycle events do not provide this context-injection surface and blocking Stop feedback can replace the original final response.
+
+See the host-specific notes for [Codex](codex.md), [Claude Code](claude-code.md), [WorkBuddy](workbuddy.md), [Hermes](hermes.md), [Antigravity CLI](antigravity.md), and [Grok](grok.md).

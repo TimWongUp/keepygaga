@@ -467,12 +467,13 @@ def test_status_plan_never_downgrades_or_switches_a_specific_owner(
     assert mismatch["lifecycle"]["action"] == "manual_review"  # type: ignore[index]
 
 
-def test_status_plan_refuses_legacy_generic_channel_state(
-    tmp_path: Path, monkeypatch
+@pytest.mark.parametrize("live_channel", ["uv-tool", "python-package"])
+def test_status_plan_refuses_generic_channel_even_at_same_version(
+    tmp_path: Path, monkeypatch, live_channel: str
 ) -> None:
     config_path = tmp_path / "config.toml"
     memory_root = tmp_path / "memory"
-    monkeypatch.setattr(installer, "_channel", lambda: "uv-tool")
+    monkeypatch.setattr(installer, "_channel", lambda: live_channel)
     monkeypatch.setattr(
         installer,
         "_call_host",
@@ -491,7 +492,7 @@ def test_status_plan_refuses_legacy_generic_channel_state(
         host="codex",
     )
 
-    assert result["install_channel"] == "uv-tool"
+    assert result["install_channel"] == live_channel
     assert result["recorded_install_channel"] == "python-package"
     assert result["lifecycle"]["action"] == "manual_review"  # type: ignore[index]
 

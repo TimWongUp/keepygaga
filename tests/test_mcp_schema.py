@@ -231,6 +231,9 @@ def test_tool_protocol_is_discoverable_from_descriptions_and_schema() -> None:
     assert "optional dynamic page" in instructions
     assert "may be absent before its first Fact" in instructions
     assert "exactly one Fact per maintained project" in instructions
+    assert "without a major-milestone threshold" in instructions
+    assert "fresh fetch or live remote API" in instructions
+    assert "otherwise mark it unreleased" in instructions
     assert "<https://github.com/owner/repo>" in instructions
     assert "use `create` with the initial project Fact" in instructions
     assert "do not create a duplicate canonical page" in instructions

@@ -19,14 +19,18 @@ The optional `[memory.limits]` table controls fixed-page characters, dynamic-pag
 
 To update through the current GitHub Release channel, download the newer wheel and matching `SHA256SUMS`, rehash the exact absolute wheel path, set `UV_TOOL_DIR` to the `lifecycle.tool_root` returned by planned `status` for that command, run `uv tool install --force /absolute/private/path/keepygaga-X.Y.Z-py3-none-any.whl`, then run `keepygaga install --yes --host HOST` to reconcile only the current host. `keepygaga upgrade --yes` remains the explicit all-recorded-host path for a verified `uv-tool` installation and binds `uv` to the active tool root; it is not the update path for a versioned GitHub Release wheel. `pipx`, unknown, and state-mismatched owners fail closed for manual owner-correct replacement instead of being routed through `uv`.
 
-### Contract 3 project-index migration
+### Project-index migration
 
 `repair` never rewrites Memory Root. Before the next project-memory write under the current Agent Contract, use scoped `list(scope=areas)` and `read` to inventory every legacy project page and identify each project's current Authority from the project itself. Then converge as follows:
+
+A complete Fact follows Contract 7: a brief, canonical Authority, and latest verified integrated outcome and release status when available. For each project being updated, verify the canonical remote primary branch and whether a published Release points to a tag commit containing the outcome; do not infer publication from release-note wording or matching version numbers. If verification is unavailable, preserve the existing Fact and leave that project pending rather than claim its progress is current.
 
 1. If one legacy page already contains one complete Fact per project, rename it to `areas/projects.md`.
 2. If no legacy project page exists, create `areas/projects.md` together with its first complete project Fact.
 3. If several pages or several Facts describe the same project, compose one complete Fact per project in `areas/projects.md`, then ask the user for explicit current-turn authorization before deleting superseded Facts or pages.
 4. Finish only when each maintained project occurs once in the canonical page and no conflicting legacy project record remains.
+
+Existing Contract 4–6 indexes that already have one Fact per project need no structural migration. On the next relevant project-memory update, verify that project against the Contract 7 evidence rules and refine its Fact in place; do not automatically rewrite every project when upgrading the runtime.
 
 Do not create a second canonical index to bypass a conflict, and do not treat `repair` success as migration evidence.
 
@@ -51,7 +55,9 @@ Temporary homes prove only Config-tested behavior. Real host verification must i
 
 ## Hook diagnostics
 
-Built-in Hooks execute through `keepygaga hook run context|route|closeout`. The Codex projection carries the absolute config path as a URL-safe encoded `--config-base64` argument that the Keepygaga CLI decodes; this keeps the config path and its shell-sensitive characters out of the Windows command parser without relying on unsupported Hook-entry environment fields. Codex setup must execute the final projected `SessionStart` command through the target platform's command interpreter, close stdin, and validate the Codex output envelope before writing `hooks.json`; calling the Python module through an argument array is not equivalent verification. This is protocol verification of the projected command, not live-host verification. Verify that projected commands use the installed launcher and resolve the current absolute config path. Context failures return an explicit bootstrap-error payload; they must not silently substitute another memory source. Route state is transient, contains no raw prompt, and expires. Closeout is deduplicated and respects host re-entry signals.
+Built-in Hooks execute through `keepygaga hook run context|route`. The Codex projection carries the absolute config path as a URL-safe encoded `--config-base64` argument that the Keepygaga CLI decodes; this keeps the config path and its shell-sensitive characters out of the Windows command parser without relying on unsupported Hook-entry environment fields. Codex setup must execute the final projected `SessionStart` command through the target platform's command interpreter, close stdin, and validate the Codex output envelope before writing `hooks.json`; calling the Python module through an argument array is not equivalent verification. This is protocol verification of the projected command, not live-host verification. Verify that projected commands use the installed launcher and resolve the current absolute config path. Context failures return an explicit bootstrap-error payload; they must not silently substitute another memory source. Route reminders are stateless and do not read or write session files. Completion checks are part of the per-turn reminder; Keepygaga registers no PostToolUse or Stop reminder. Hermes and Antigravity combine bootstrap and routing in a single invocation.
+
+The `0.9.0` Hook migration removes `hook run closeout`. Upgrade and reconcile the selected hosts together so their old PostToolUse registrations are removed before normal use resumes. Setup still recognizes old owned closeout and route commands, removes obsolete projections, and preserves unrelated Hooks. Existing temporary Hook-state files are no longer used; no migration or cleanup is required.
 
 If Hook setup fails, inspect the target host's native event schema, the Keepygaga ownership markers, the stable launcher, and the configured Memory Root. Do not add an external Hook runtime as a fallback.
 
@@ -71,5 +77,14 @@ If Hook setup fails, inspect the target host's native event schema, the Keepygag
 Doctor reports non-sensitive metadata only. `ok` means applicable checks passed, `warning` requires reading the individual check, and `error` blocks setup. Per-scope page counts and page-capacity warnings may be soft; missing legacy Fact dates are valid and produce no warning. Permissions, malformed content, invalid dates, or unwritable paths are blocking.
 
 ## Release
+
+Apply the [application version policy](architecture.md#application-version-policy) before preparing a release or updating installed hosts:
+
+1. Compare all unreleased product changes with the latest published Release and confirm the reserved version has the required increment. Change only `APPLICATION_VERSION` for the application number and refresh `uv.lock` with `uv lock`; independently change a contract/schema version only when its own compatibility boundary changed.
+2. Complete the relevant validation and PR review, then merge the release candidate through the normal branch workflow. A merge or a version edit does not publish anything.
+3. With explicit release authorization, create the matching tag on the verified commit and wait for the tag workflow to publish the canonical assets successfully. Never move an existing release tag or replace its assets with a different build. A correction to published product code needs a new version.
+4. Update daily-use hosts from that Release's wheel and matching `SHA256SUMS`, through the detected installation owner, then reconcile the requested hosts and verify their configuration and protocol. Report the installed Release version and any host reload still required.
+
+If requested changes are merged but not released, report that they are unreleased and complete any already-authorized release preparation. Obtain release authorization only when it is missing; do not substitute a local wheel or mutable `main` build for the daily-use installation. Contributor checks run in the repository `.venv` and report the source commit plus its unreleased status. A local build's version string alone must never be presented as proof that it is an official Release.
 
 Release tags are `v<application-version>`. The tag workflow reruns tests and static checks, builds wheel and sdist, verifies inventory, and creates a GitHub Release containing the two distributions, a workflow-canonical all-in-one distribution bundle, and `SHA256SUMS`. The bundle becomes canonical as soon as it is uploaded to the draft: a failed run resumes from that bundle, uploads only missing individual assets, verifies existing assets byte-for-byte, and publishes only after the asset set is internally consistent. Workflow reruns never overwrite or delete existing release assets; this policy is not GitHub immutable-release enforcement or cryptographic provenance. Protect the `v*` tag namespace before the first tag. PyPI publishing is not enabled; adding it later requires a trusted publisher and must consume the verified GitHub Release assets without rebuilding them. Never add a publishing token to the repository.

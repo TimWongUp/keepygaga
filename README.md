@@ -22,7 +22,7 @@ The product has three deliberately separate surfaces:
 
 Keepygaga ships the complete runtime: an eight-tool MCP server, a concise global Agent Contract, built-in cross-host Hooks, and the CLI control plane. It does not require a database, embeddings, a source checkout, or an external Hook runtime. Obsidian is the recommended human interface, not a runtime dependency.
 
-Core memory contains `profile.md`, `preferences.md`, and direct pages below `topics/`, `areas/`, and `people/`. Ongoing projects share the optional canonical index `areas/projects.md`, created with its first project Fact: one Fact per project holds a brief, its canonical Authority, and optionally its latest completed major milestone, with later changes replacing that Fact. Complete history, terminology, architecture, operating guides, decisions, and current state remain in the repository or another direct project source.
+Core memory contains `profile.md`, `preferences.md`, and direct pages below `topics/`, `areas/`, and `people/`. Ongoing projects share the optional canonical index `areas/projects.md`, created with its first project Fact: one Fact per project holds a brief, its canonical Authority, and its latest verified integrated outcome and release status when available, with later changes replacing that Fact and no major-milestone threshold. For Git projects, verify the canonical remote primary branch; record a published version only when a published Release points to a tag commit containing that outcome. Complete history, terminology, architecture, operating guides, decisions, and current state remain in the repository or another direct project source.
 
 Host-native memories can continue to own host-specific conversation recall and project learning. Keepygaga owns the small set of stable user facts that should follow the user across hosts. A durable instruction admitted to source selection has exactly two possible owners: `preferences.md` when every connected Agent should follow it, or one host's effective global-rules entry when only that Agent should. Prose style and code style do not determine ownership by themselves. When the user has not specified the intended scope, the Agent must ask first, and one meaning may have only one source. Project rules stay in the project Authority and do not enter this choice.
 
@@ -30,7 +30,7 @@ The public MCP surface is exactly `list`, `read`, `create`, `add`, `update`, `mo
 
 Session bootstrap injects only `profile.md`, `preferences.md`, a shared routing rule, and descriptions of the three dynamic scopes. Agents treat those descriptions as first-stage semantic routes: when a task depends on covered information that the current request or a live direct source does not already provide, they call `list` for that scope and select pages from the returned path, description, and aliases before reading them. New or semantically updated Facts receive a Store-owned local date suffix; existing undated Facts remain readable and upgrades do not rewrite the Memory Root.
 
-Contract 3 users with existing project pages should follow the [project-index migration](docs/operations.md#contract-3-project-index-migration) before their next project-memory write under the current Agent Contract.
+Contract 3 users with existing project pages should follow the [project-index migration](docs/operations.md#project-index-migration) before their next project-memory write under the current Agent Contract.
 
 ## Install
 
@@ -106,7 +106,7 @@ Advanced deterministic host commands remain available as `keepygaga host setup|u
 - `keepygaga-mcp` is the stable MCP launcher used by host registrations.
 - The short managed Agent Contract contains only durable safety and routing rules.
 - The full read, convergence, mutation, conflict, and receipt protocol is delivered through negotiated MCP server instructions (modern discovery or the legacy initialize handshake).
-- Built-in Context Bootstrap, Memory Route, and Memory Closeout capabilities are projected through each host's supported native events. Unsupported surfaces use documented fallbacks; Grok uses the managed Agent Contract for Memory Closeout.
+- Built-in Context Bootstrap and stateless Memory Route reminders are projected through each host's supported native events. Routing reminders include completion checks; there is no PostToolUse closeout Hook. Unsupported surfaces use documented fallbacks; Grok uses the managed Agent Contract for memory guidance.
 - Application, Agent Contract, Hook protocol, installer state, and memory schema versions evolve independently.
 
 Configuration-level tests prove projection, preservation, idempotency, and failure boundaries. A host is live-verified only after its real client or official diagnostic confirms the `keepygaga` registration and all eight tools.

@@ -1,3 +1,3 @@
 # WorkBuddy Hooks
 
-`keepygaga install --yes --host workbuddy` projects built-in Context Bootstrap, Memory Route, and Memory Closeout into `~/.workbuddy/settings.json`. It preserves unrelated commands and does not claim subagent or compact support.
+`keepygaga install --yes --host workbuddy` projects Context Bootstrap at SessionStart and a stateless Memory Route reminder at UserPromptSubmit into `~/.workbuddy/settings.json`. Setup removes obsolete Keepygaga PostToolUse closeout commands and preserves unrelated commands. This adapter does not yet project subagent or compact events; that is an integration limit, not a claim that the host lacks those events.

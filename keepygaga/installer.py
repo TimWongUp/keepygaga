@@ -624,6 +624,12 @@ def _runtime_lifecycle(
             "manual_review",
             "the live installation owner differs from or is not supported by the recorded owner",
         )
+    if live_channel == "python-package":
+        return base, _lifecycle_result(
+            base,
+            "manual_review",
+            "the installation owner is unknown; matching versions do not verify a release runtime",
+        )
     if current_parts < latest_parts:
         if live_channel != "uv-tool":
             return base, _lifecycle_result(

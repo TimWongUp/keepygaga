@@ -121,7 +121,9 @@ def build_fragment(
     payload: dict[str, list[dict[str, object]]] = {}
     target = "shared-context-bootstrap" if host == "antigravity" else "hooks"
 
-    if enabled and host == "codex":
+    if enabled and host in {"codex", "claude", "workbuddy"}:
+        bootstrap_options = {"additionalContextLimit": 0} if host == "codex" else {}
+        reminder_options = {"additionalContextLimit": 300} if host == "codex" else {}
         payload = {
             "SessionStart": [
                 {
@@ -135,12 +137,33 @@ def build_fragment(
                                 "SessionStart",
                             ),
                             10,
-                            additionalContextLimit=0,
+                            **bootstrap_options,
                         )
                     ]
-                },
+                }
+            ],
+            "UserPromptSubmit": [
                 {
-                    "matcher": "^compact$",
+                    "hooks": [
+                        _entry(
+                            _command(
+                                launcher,
+                                config_path,
+                                "route",
+                                platform,
+                                "UserPromptSubmit",
+                            ),
+                            2,
+                            **reminder_options,
+                        )
+                    ]
+                }
+            ],
+        }
+        if host in {"codex", "claude"}:
+            payload["SessionStart"].append(
+                {
+                    "matcher": "^compact$" if host == "codex" else "compact",
                     "hooks": [
                         _entry(
                             _command(
@@ -152,46 +175,12 @@ def build_fragment(
                                 compact=True,
                             ),
                             2,
-                            additionalContextLimit=180,
-                        )
-                    ],
-                },
-            ],
-            "UserPromptSubmit": [
-                {
-                    "hooks": [
-                        _entry(
-                            _command(
-                                launcher,
-                                config_path,
-                                "route",
-                                platform,
-                                "UserPromptSubmit",
-                            ),
-                            2,
-                            additionalContextLimit=120,
-                        )
-                    ]
-                }
-            ],
-            "PostToolUse": [
-                {
-                    "matcher": "Write|Edit",
-                    "hooks": [
-                        _entry(
-                            _command(
-                                launcher,
-                                config_path,
-                                "closeout",
-                                platform,
-                                "PostToolUse",
-                            ),
-                            2,
+                            **reminder_options,
                         )
                     ],
                 }
-            ],
-            "SubagentStart": [
+            )
+            payload["SubagentStart"] = [
                 {
                     "hooks": [
                         _entry(
@@ -203,147 +192,11 @@ def build_fragment(
                                 "SubagentStart",
                             ),
                             10,
+                            **bootstrap_options,
                         )
                     ]
                 }
-            ],
-        }
-    elif enabled and host == "claude":
-        payload = {
-            "SessionStart": [
-                {
-                    "hooks": [
-                        _entry(
-                            _command(
-                                launcher,
-                                config_path,
-                                "context",
-                                platform,
-                                "SessionStart",
-                            ),
-                            10,
-                        )
-                    ]
-                },
-                {
-                    "matcher": "compact",
-                    "hooks": [
-                        _entry(
-                            _command(
-                                launcher,
-                                config_path,
-                                "route",
-                                platform,
-                                "SessionStart",
-                                compact=True,
-                            ),
-                            2,
-                        )
-                    ],
-                },
-            ],
-            "SubagentStart": [
-                {
-                    "hooks": [
-                        _entry(
-                            _command(
-                                launcher,
-                                config_path,
-                                "context",
-                                platform,
-                                "SubagentStart",
-                            ),
-                            10,
-                        )
-                    ]
-                }
-            ],
-            "UserPromptSubmit": [
-                {
-                    "hooks": [
-                        _entry(
-                            _command(
-                                launcher,
-                                config_path,
-                                "route",
-                                platform,
-                                "UserPromptSubmit",
-                            ),
-                            2,
-                        )
-                    ]
-                }
-            ],
-            "PostToolUse": [
-                {
-                    "matcher": "Write|Edit",
-                    "hooks": [
-                        _entry(
-                            _command(
-                                launcher,
-                                config_path,
-                                "closeout",
-                                platform,
-                                "PostToolUse",
-                            ),
-                            2,
-                        )
-                    ],
-                }
-            ],
-        }
-    elif enabled and host == "workbuddy":
-        payload = {
-            "SessionStart": [
-                {
-                    "hooks": [
-                        _entry(
-                            _command(
-                                launcher,
-                                config_path,
-                                "context",
-                                platform,
-                                "SessionStart",
-                            ),
-                            10,
-                        )
-                    ]
-                }
-            ],
-            "UserPromptSubmit": [
-                {
-                    "hooks": [
-                        _entry(
-                            _command(
-                                launcher,
-                                config_path,
-                                "route",
-                                platform,
-                                "UserPromptSubmit",
-                            ),
-                            2,
-                        )
-                    ]
-                }
-            ],
-            "PostToolUse": [
-                {
-                    "matcher": "Write|Edit",
-                    "hooks": [
-                        _entry(
-                            _command(
-                                launcher,
-                                config_path,
-                                "closeout",
-                                platform,
-                                "PostToolUse",
-                            ),
-                            2,
-                        )
-                    ],
-                }
-            ],
-        }
+            ]
     elif enabled and host == "hermes":
         payload = {
             "pre_llm_call": [
@@ -352,12 +205,6 @@ def build_fragment(
                         launcher, config_path, "context", platform, "pre_llm_call"
                     ),
                     "timeout": 10,
-                },
-                {
-                    "command": _command(
-                        launcher, config_path, "route", platform, "pre_llm_call"
-                    ),
-                    "timeout": 2,
                 },
             ],
         }
@@ -369,10 +216,6 @@ def build_fragment(
                         launcher, config_path, "context", platform, "PreInvocation"
                     ),
                     10,
-                ),
-                _entry(
-                    _command(launcher, config_path, "route", platform, "PreInvocation"),
-                    2,
                 ),
             ]
         }

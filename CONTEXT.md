@@ -69,7 +69,7 @@ _Avoid_: 已支持、已验证
 _Avoid_: 仅写入成功、仅临时目录通过
 
 **语义 Hook（Semantic Hook）**：
-Keepygaga 自身拥有的 Context Bootstrap、Memory Route 与 Memory Closeout 能力；宿主适配器只负责把能力投影为原生事件和 payload。
+Keepygaga 自身拥有的 Context Bootstrap 与 Memory Route 能力；前者注入基础记忆，后者提醒信息路由与完成前检查。宿主适配器只负责把能力投影为原生事件和 payload。
 _Avoid_: 外部 Hook Runtime、宿主事件名本身
 
 **安装状态（Install State）**：
@@ -81,11 +81,11 @@ _Avoid_: 配置真源、宿主注册 Authority
 _Avoid_: checkout 专属 Python 路径、源码目录
 
 **项目真源（Project Authority）**：
-能够裁决项目当前事实的直接来源；Git 项目通常使用以 Markdown 自动链接包裹的不带凭据规范远端仓库 URL，例如 `<https://github.com/owner/repo>`，没有持久远端或直接来源时才使用本机路径。
+能够裁决项目当前事实的直接来源；Git 项目的已整合进展以已确认规范远端的主分支为准，通常为 `origin/main`，发布状态以规范远端的已发布 Release 及其 tag commit 是否包含该成果裁决，不凭 release notes 或版本号推断。项目索引使用以 Markdown 自动链接包裹的不带凭据规范远端仓库 URL，没有持久远端或直接来源时才使用本机路径。
 _Avoid_: Memory 摘要、默认本机 checkout、机械采用名为 origin 的任意 fork
 
 **项目索引（Project Index）**：
-可选动态页 `areas/projects.md` 中用于跨任务定位持续项目的单页索引；首条项目 Fact 写入前可以不存在，每个项目只有一条 Fact，包含简介、项目真源及可选的最新重大节点，变化时原位更新。
+可选动态页 `areas/projects.md` 中用于跨任务定位持续项目的单页索引；首条项目 Fact 写入前可以不存在，每个项目只有一条 Fact，包含简介、项目真源及可核验的最新已整合成果与发布状态，变化时原位更新，不设置重大里程碑门槛。
 _Avoid_: 多 Fact 项目档案、里程碑历史、状态仪表板、项目真源副本
 
 **Route Catalog**：
