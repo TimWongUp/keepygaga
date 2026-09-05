@@ -67,7 +67,7 @@ def _state_root() -> Path:
     return (
         Path(configured).expanduser()
         if configured
-        else Path(tempfile.gettempdir()) / "keepygaga-hooks"
+        else Path(tempfile.gettempdir()).resolve() / "keepygaga-hooks"
     )
 
 

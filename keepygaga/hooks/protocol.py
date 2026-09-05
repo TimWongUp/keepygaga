@@ -2,7 +2,17 @@
 
 from __future__ import annotations
 
-from typing import Literal
+import json
+from typing import Any, Literal
+
+
+def loads_stdin(raw: str) -> dict[str, Any]:
+    try:
+        value = json.loads(raw) if raw.strip() else {}
+    except json.JSONDecodeError:
+        return {}
+    return value if isinstance(value, dict) else {}
+
 
 Capability = Literal["bootstrap", "route", "closeout"]
 

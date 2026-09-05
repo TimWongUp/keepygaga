@@ -7,11 +7,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from keepygaga.memory_contract import (
-    DYNAMIC_PAGE_LIMIT,
-    DYNAMIC_PAGE_LIMITS,
-    PROFILE_PAGE_LIMIT,
-)
+PROFILE_PAGE_LIMIT = 2000
+DYNAMIC_PAGE_LIMIT = 5000
+DYNAMIC_PAGE_LIMITS = {"topics": 50, "areas": 50, "people": 100}
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 CONFIG_ENV_VAR = "KEEPYGAGA_CONFIG"

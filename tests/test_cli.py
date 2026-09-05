@@ -23,7 +23,7 @@ def test_unknown_subcommand_is_a_usage_error() -> None:
         cli.main(["unknown"])
 
 
-def test_cli_import_does_not_load_host_implementations() -> None:
+def test_route_command_does_not_load_memory_or_host_implementations() -> None:
     probe = subprocess.run(
         [
             sys.executable,
@@ -31,13 +31,18 @@ def test_cli_import_does_not_load_host_implementations() -> None:
             "-c",
             (
                 "import sys; import keepygaga.cli; "
+                "keepygaga.cli.main(['hook', 'run', 'route', '--host', 'codex', "
+                "'--event', 'UserPromptSubmit']); "
                 "assert 'keepygaga.host_setup' not in sys.modules; "
-                "assert 'keepygaga.host_adapters' not in sys.modules"
+                "assert 'keepygaga.host_adapters' not in sys.modules; "
+                "assert 'keepygaga.memory_store' not in sys.modules; "
+                "assert 'pydantic' not in sys.modules"
             ),
         ],
         check=False,
         capture_output=True,
         text=True,
+        input="{}",
     )
     assert probe.returncode == 0, probe.stderr
 
@@ -173,10 +178,10 @@ def test_interactive_install_prompts_for_existing_memory_root(
     monkeypatch.setattr(
         installer,
         "install",
-        lambda config, root, hosts: received.update(
-            config=config, root=root, hosts=hosts
-        )
-        or {"status": "no_op"},
+        lambda config, root, hosts: (
+            received.update(config=config, root=root, hosts=hosts)
+            or {"status": "no_op"}
+        ),
     )
 
     assert (
@@ -211,10 +216,10 @@ def test_install_reuses_configured_memory_root_for_a_new_host(
     monkeypatch.setattr(
         installer,
         "install",
-        lambda config, root, hosts: received.update(
-            config=config, root=root, hosts=hosts
-        )
-        or {"status": "no_op"},
+        lambda config, root, hosts: (
+            received.update(config=config, root=root, hosts=hosts)
+            or {"status": "no_op"}
+        ),
     )
 
     assert (

@@ -8,13 +8,34 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date as calendar_date
 from pathlib import PurePosixPath
-from typing import Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
-import frontmatter
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+from yaml import YAMLError, load
+from yaml.constructor import ConstructorError
+from yaml.nodes import MappingNode
 
 from keepygaga.errors import MemoryValidationError
 from keepygaga.paths import canonical_memory_path
+
+if TYPE_CHECKING:
+    from yaml.loader import SafeLoader
+else:
+    try:
+        from yaml import CSafeLoader as SafeLoader
+    except ImportError:
+        from yaml import SafeLoader
+
+
+class _UniqueKeyLoader(SafeLoader):
+    def construct_mapping(self, node: MappingNode, deep: bool = False) -> dict:
+        mapping = super().construct_mapping(node, deep=deep)
+        if len(mapping) != len(node.value):
+            raise ConstructorError(
+                None, None, "duplicate frontmatter fields", node.start_mark
+            )
+        return mapping
+
 
 MAX_FACT_CONTENT_CHARS = 800
 MAX_STORED_FACT_CONTENT_CHARS = 4096
@@ -22,7 +43,7 @@ FACT_LINE_RE = re.compile(
     r"^- \[(stated|observed)\] (.+?)(?: \[(\d{4}-\d{2}-\d{2})\])?$"
 )
 FRONTMATTER_KEY_RE = re.compile(
-    r'''^\s*(?:(["'])(name|description|sources|aliases)\1|'''
+    r"""^\s*(?:(["'])(name|description|sources|aliases)\1|"""
     r"(name|description|sources|aliases))\s*:"
 )
 FRONTMATTER_FENCE_RE = re.compile(r"^-{3,}\s*$")
@@ -116,39 +137,20 @@ def _frontmatter_key(line: str) -> str | None:
     return match.group(2) or match.group(3)
 
 
-def _assert_no_duplicate_frontmatter_keys(header: str, path: str) -> None:
-    from ruamel.yaml import YAML
-    from ruamel.yaml.constructor import DuplicateKeyError
-    from ruamel.yaml.error import YAMLError
-
-    loader = YAML(typ="safe")
-    loader.allow_duplicate_keys = False
-    lines = normalize_text(header).splitlines()
-    payload = "\n".join(lines[1:-1])
+def _load_frontmatter(header: str, path: str) -> dict[str, Any]:
     try:
-        loader.load(payload)
-    except DuplicateKeyError as exc:
-        raise MemoryValidationError(
-            "invalid_source", f"{path} contains duplicate frontmatter fields", path=path
-        ) from exc
+        metadata = load(header, Loader=_UniqueKeyLoader)
     except YAMLError as exc:
         raise MemoryValidationError(
             "invalid_source",
             f"{path} frontmatter could not be parsed: {type(exc).__name__}: {exc}",
             path=path,
         ) from exc
-
-
-def _load_frontmatter(source: str, header: str, path: str) -> Any:
-    _assert_no_duplicate_frontmatter_keys(header, path)
-    try:
-        return frontmatter.loads(source)
-    except Exception as exc:
+    if not isinstance(metadata, dict):
         raise MemoryValidationError(
-            "invalid_source",
-            f"{path} frontmatter could not be parsed: {type(exc).__name__}: {exc}",
-            path=path,
-        ) from exc
+            "invalid_source", f"{path} frontmatter must be a mapping", path=path
+        )
+    return metadata
 
 
 def _validate_frontmatter_metadata(metadata: dict[str, Any], path: str) -> None:
@@ -226,8 +228,8 @@ def receipt(action: str, scope: str, contents: Sequence[str]) -> str:
 
 def parse_page_metadata(text: str, path: str) -> MemoryDocument:
     canonical_memory_path(path)
-    metadata, body = _parse_frontmatter(normalize_text(text), path, include_body=False)
-    _assert_fact_body(body, path)
+    metadata, body = _parse_frontmatter(normalize_text(text), path)
+    _parse_facts(body, path)
     aliases = _string_array(metadata["aliases"], "aliases", maximum=8)
     return validate_page_metadata(
         MemoryDocument(
@@ -301,10 +303,11 @@ def _validated_aliases(aliases: tuple[str, ...], path: str) -> tuple[str, ...]:
     return normalized
 
 
-def _assert_fact_body(body_text: str, path: str) -> None:
+def _parse_facts(body_text: str, path: str) -> tuple[StoredFact, ...]:
     body = normalize_text(body_text).strip()
     if not body:
-        return
+        return ()
+    facts: list[StoredFact] = []
     seen: set[tuple[str, str]] = set()
     for line in body.splitlines():
         if not line.strip():
@@ -336,11 +339,11 @@ def _assert_fact_body(body_text: str, path: str) -> None:
                 "invalid_entry", f"{path} contains duplicate facts", path=path
             )
         seen.add(key)
+        facts.append(fact)
+    return tuple(facts)
 
 
-def _parse_frontmatter(
-    normalized: str, path: str, *, include_body: bool = True
-) -> tuple[dict[str, Any], str]:
+def _parse_frontmatter(normalized: str, path: str) -> tuple[dict[str, Any], str]:
     if not normalized.startswith("---\n"):
         raise MemoryValidationError(
             "invalid_source", f"{path} must begin with YAML frontmatter", path=path
@@ -375,9 +378,7 @@ def _parse_frontmatter(
             f"{path} frontmatter must contain name, description, aliases in order",
             path=path,
         )
-    header = "\n".join(lines[: closing_index + 1]) + "\n"
-    post = _load_frontmatter(header if not include_body else normalized, header, path)
-    metadata = dict(post.metadata)
+    metadata = _load_frontmatter("\n".join(lines[1:closing_index]), path)
     accepted_keys = (
         ("name", "description", "aliases"),
         ("name", "description", "sources", "aliases"),
@@ -389,49 +390,17 @@ def _parse_frontmatter(
             path=path,
         )
     _validate_frontmatter_metadata(metadata, path)
-    if include_body:
-        return metadata, post.content
     body = "\n".join(lines[closing_index + 1 :])
     if body:
         body += "\n"
     return metadata, body
 
 
-def _parse_facts(body_text: str, path: str) -> tuple[StoredFact, ...]:
-    _assert_fact_body(body_text, path)
-    facts: list[StoredFact] = []
-    body = normalize_text(body_text).strip()
-    if not body:
-        return ()
-    for line in body.splitlines():
-        if not line.strip():
-            continue
-        match = FACT_LINE_RE.fullmatch(line)
-        assert match is not None
-        basis = match.group(1)
-        assert basis in ("stated", "observed")
-        try:
-            facts.append(
-                StoredFact(
-                    basis=cast(Basis, basis),
-                    content=match.group(2),
-                    date=match.group(3),
-                )
-            )
-        except ValueError as orig_exc:
-            raise MemoryValidationError(
-                "invalid_source",
-                f"{path} contains a fact that violates the page schema",
-                path=path,
-            ) from orig_exc
-    return tuple(facts)
-
-
 def parse_memory_file(text: str, path: str) -> MemoryDocument:
     canonical_memory_path(path)
     metadata, body = _parse_frontmatter(normalize_text(text), path)
     aliases = _string_array(metadata["aliases"], "aliases", maximum=8)
-    return validate_document(
+    return validate_page_metadata(
         MemoryDocument(
             name=metadata["name"],
             description=metadata["description"],
@@ -464,16 +433,13 @@ def _repair_frontmatter(normalized: str, path: str) -> tuple[dict[str, Any], lis
         )
     header_lines = lines[1:closing_index]
     field_names = [
-        key
-        for line in header_lines
-        if (key := _frontmatter_key(line)) is not None
+        key for line in header_lines if (key := _frontmatter_key(line)) is not None
     ]
     if len(field_names) != len(set(field_names)):
         raise MemoryValidationError(
             "invalid_source", f"{path} contains duplicate frontmatter fields", path=path
         )
-    header = "---\n" + "\n".join(header_lines) + "\n---\n"
-    metadata = dict(_load_frontmatter(header, header, path).metadata)
+    metadata = _load_frontmatter("\n".join(header_lines), path)
     keys = set(metadata)
     if not {"name", "description", "aliases"}.issubset(keys) or not keys.issubset(
         {"name", "description", "sources", "aliases"}
@@ -576,7 +542,10 @@ def repair_memory_file(text: str, path: str) -> MemoryDocument:
 
 
 def render_memory_file(document: MemoryDocument, path: str) -> str:
-    validated = validate_document(document, path)
+    return _render_validated_document(validate_document(document, path))
+
+
+def _render_validated_document(validated: MemoryDocument) -> str:
     lines = [
         "---",
         f"name: {json.dumps(validated.name, ensure_ascii=False)}",

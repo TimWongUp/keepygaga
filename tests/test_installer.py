@@ -160,9 +160,7 @@ def test_explicit_configs_have_independent_state_paths(tmp_path: Path) -> None:
     assert installer.state_path(first) != installer.state_path(second)
 
 
-@pytest.mark.parametrize(
-    "hosts", [["codex"], {"unknown": {}}, {"codex": []}]
-)
+@pytest.mark.parametrize("hosts", [["codex"], {"unknown": {}}, {"codex": []}])
 def test_load_state_rejects_malformed_hosts(tmp_path: Path, hosts: object) -> None:
     config_path = tmp_path / "config.toml"
     installer.state_path(config_path).write_text(
@@ -223,9 +221,7 @@ def test_install_does_not_overwrite_a_concurrent_sibling_record(
     with pytest.raises(HostSetupPartialError, match="state could not be updated"):
         installer.install(config_path, memory_root, ["codex"])
 
-    assert json.loads(state.read_text(encoding="utf-8"))["hosts"] == {
-        "claude-code": {}
-    }
+    assert json.loads(state.read_text(encoding="utf-8"))["hosts"] == {"claude-code": {}}
 
 
 def test_install_restarts_when_upgrade_generation_is_newer(
@@ -336,6 +332,7 @@ def test_status_plan_distinguishes_activate_repair_and_no_op(
     installer.install(config_path, memory_root, ["codex"])
 
     monkeypatch.setattr(installer, "_contract_status", lambda _host: "current")
+    monkeypatch.setattr(installer, "_wiring_status", lambda *_args: "current")
     activate = installer.status(
         config_path,
         latest_version=installer.__version__,
@@ -384,6 +381,7 @@ def test_status_plan_keeps_unreconciled_sibling_stale(
     monkeypatch.setattr(installer, "__version__", "0.8.0")
     installer.install(config_path, memory_root, ["codex"])
     monkeypatch.setattr(installer, "_contract_status", lambda _host: "current")
+    monkeypatch.setattr(installer, "_wiring_status", lambda *_args: "current")
 
     current = installer.status(
         config_path,
@@ -412,6 +410,7 @@ def test_planned_status_reads_only_the_current_host_contract(
     monkeypatch.setattr(installer, "_call_host", lambda *_args: {"status": "no_op"})
     installer.install(config_path, memory_root, ["codex", "claude-code"])
     checked: list[str] = []
+    monkeypatch.setattr(installer, "_wiring_status", lambda *_args: "current")
     monkeypatch.setattr(
         installer,
         "_contract_status",
@@ -484,6 +483,7 @@ def test_status_plan_refuses_legacy_generic_channel_state(
     state["install_channel"] = "python-package"
     installer.state_path(config_path).write_text(json.dumps(state), encoding="utf-8")
     monkeypatch.setattr(installer, "_contract_status", lambda _host: "current")
+    monkeypatch.setattr(installer, "_wiring_status", lambda *_args: "current")
 
     result = installer.status(
         config_path,
@@ -572,8 +572,9 @@ def test_contract_status_detects_conflicting_host_candidates(
     assert installer._contract_status("grok") == "conflict"
 
 
+@pytest.mark.parametrize("latest_version", [installer.__version__, "99.0.0"])
 def test_status_plan_sends_contract_conflict_to_manual_review(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch, latest_version: str
 ) -> None:
     config_path = tmp_path / "config.toml"
     memory_root = tmp_path / "memory"
@@ -584,7 +585,7 @@ def test_status_plan_sends_contract_conflict_to_manual_review(
 
     result = installer.status(
         config_path,
-        latest_version=installer.__version__,
+        latest_version=latest_version,
         host="codex",
     )
 
@@ -933,3 +934,53 @@ def test_upgrade_failure_with_missing_streams_stays_structured(
         assert "unknown uv error" in str(exc)
     else:
         raise AssertionError("expected structured upgrade error")
+
+
+def test_status_detects_live_mcp_and_hook_drift_without_writes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, uv_tool_root: Path
+) -> None:
+    monkeypatch.setattr(Path, "home", classmethod(lambda _cls: tmp_path))
+    monkeypatch.setattr(installer, "_channel", lambda: "uv-tool")
+    config_path = tmp_path / "config.toml"
+    memory_root = tmp_path / "memory"
+    installer.install(config_path, memory_root, ["workbuddy"])
+    home = tmp_path / ".workbuddy"
+    mcp_path = home / "mcp.json"
+    hooks_path = home / "settings.json"
+    original_mcp = mcp_path.read_bytes()
+    original_hooks = hooks_path.read_bytes()
+    state_path = installer.state_path(config_path)
+    original_state = state_path.read_bytes()
+
+    current = installer.status(
+        config_path, latest_version=installer.__version__, host="workbuddy"
+    )
+    assert current["lifecycle"]["action"] == "no_op"  # type: ignore[index]
+    assert current["hosts"]["workbuddy"]["wiring"] == "current"  # type: ignore[index]
+
+    mcp_path.unlink()
+    missing = installer.status(
+        config_path, latest_version=installer.__version__, host="workbuddy"
+    )
+    assert missing["lifecycle"]["action"] == "repair"  # type: ignore[index]
+    assert not mcp_path.exists()
+    mcp_path.write_bytes(original_mcp)
+
+    hooks = json.loads(original_hooks)
+    hooks["hooks"].pop("UserPromptSubmit")
+    hooks_path.write_text(json.dumps(hooks), encoding="utf-8")
+    drift = installer.status(
+        config_path, latest_version=installer.__version__, host="workbuddy"
+    )
+    assert drift["lifecycle"]["action"] == "repair"  # type: ignore[index]
+    assert json.loads(hooks_path.read_bytes()) == hooks
+
+    hooks_path.write_text("invalid JSON", encoding="utf-8")
+    for latest_version in (installer.__version__, "99.0.0"):
+        conflict = installer.status(
+            config_path, latest_version=latest_version, host="workbuddy"
+        )
+        assert conflict["lifecycle"]["action"] == "manual_review"  # type: ignore[index]
+    assert hooks_path.read_text(encoding="utf-8") == "invalid JSON"
+    assert state_path.read_bytes() == original_state
+    assert mcp_path.read_bytes() == original_mcp

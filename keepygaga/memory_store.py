@@ -17,6 +17,7 @@ from keepygaga.codec import (
     MemoryDocument,
     StoredFact,
     _identity,
+    _render_validated_document,
     fact_key,
     normalize_text,
     parse_memory_file,
@@ -296,7 +297,6 @@ class MemoryStore:
                 text=text,
                 version=sha256_text(text),
             )
-        _validate_catalog(files)
         return files
 
     def _read_catalog_text(
@@ -321,7 +321,9 @@ class MemoryStore:
                 )
             with os.fdopen(descriptor, encoding="utf-8") as handle:
                 descriptor = -1
-                text = handle.read() if max_chars is None else handle.read(max_chars + 1)
+                text = (
+                    handle.read() if max_chars is None else handle.read(max_chars + 1)
+                )
                 if max_chars is not None and len(text) > max_chars:
                     raise MemoryValidationError(
                         "capacity_exceeded",
@@ -344,9 +346,7 @@ class MemoryStore:
 
     def _open_catalog_descriptor(self, target: Path, relative: str) -> int:
         flags = (
-            os.O_RDONLY
-            | getattr(os, "O_NOFOLLOW", 0)
-            | getattr(os, "O_NONBLOCK", 0)
+            os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
         )
         if os.open not in os.supports_dir_fd or not hasattr(os, "O_DIRECTORY"):
             if _is_link_like(target) or _is_link_like(target.parent):
@@ -360,9 +360,7 @@ class MemoryStore:
         parts = PurePosixPath(relative).parts
         root_descriptor = os.open(
             self.root,
-            os.O_RDONLY
-            | getattr(os, "O_DIRECTORY", 0)
-            | getattr(os, "O_NOFOLLOW", 0),
+            os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0),
         )
         parent_descriptor = -1
         try:
@@ -920,9 +918,7 @@ class MemoryStore:
             working[new_path] = self._loaded(new_path, document)
             renamed_from[new_path] = current.path
             mutations.append(self._mutation("rename", "page", current.path, [new_path]))
-        return self._finish(
-            initial, working, mutations, renamed_from=renamed_from
-        )
+        return self._finish(initial, working, mutations, renamed_from=renamed_from)
 
     def _delete_locked(self, operations: list[DeleteOperation]) -> dict[str, object]:
         self._require_operations(operations)
@@ -979,11 +975,8 @@ class MemoryStore:
         *,
         renamed_from: dict[str, str] | None = None,
     ) -> dict[str, object]:
-        _validate_catalog(working)
         self._validate_scope_capacity(initial, working)
-        self._validate_page_capacity(
-            initial, working, mutations, renamed_from or {}
-        )
+        self._validate_page_capacity(initial, working, mutations, renamed_from or {})
         changed_paths = sorted(
             path
             for path in set(initial) | set(working)
@@ -1034,9 +1027,7 @@ class MemoryStore:
         mutations: list[dict[str, object]],
         renamed_from: dict[str, str],
     ) -> None:
-        mutation_by_path = {
-            str(mutation["path"]): mutation for mutation in mutations
-        }
+        mutation_by_path = {str(mutation["path"]): mutation for mutation in mutations}
         for path, after in working.items():
             source_path = renamed_from.get(path)
             before = initial.get(source_path or path)
@@ -1231,10 +1222,11 @@ class MemoryStore:
             )
 
     def _loaded(self, path: str, document: MemoryDocument) -> LoadedFile:
-        text = render_memory_file(document, path)
+        document = validate_document(document, path)
+        text = _render_validated_document(document)
         return LoadedFile(
             path=path,
-            document=validate_document(document, path),
+            document=document,
             text=text,
             version=sha256_text(text),
         )
@@ -1345,9 +1337,3 @@ class MemoryStore:
             "path": path,
             "receipt": receipt(action, path, contents),
         }
-
-
-def _validate_catalog(files: dict[str, LoadedFile]) -> None:
-    for path, loaded in files.items():
-        canonical_memory_path(path)
-        validate_document(loaded.document, path)

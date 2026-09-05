@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
@@ -23,45 +22,12 @@ def canonical() -> str:
     )
 
 
-def minimal_hook_runtime(tmp_path: Path) -> tuple[Path, Path]:
-    runtime = tmp_path / "runtime"
-    (runtime / "agent_hook_runtime").mkdir(parents=True)
-    (runtime / "config/hooks").mkdir(parents=True)
-    (runtime / "hooks").mkdir()
-    (runtime / "agent_hook_runtime/hook_config.py").write_text(
-        "def merge_hook_fragment(existing, fragment):\n"
-        "    return {'hooks': dict(existing.get('hooks', {}))}\n",
-        encoding="utf-8",
-    )
-    (runtime / "config/hooks/codex.json").write_text(
-        json.dumps(
-            {
-                "host": "codex",
-                "owned_command_markers": ["context_hook.py"],
-                "payload": {},
-            }
-        ),
-        encoding="utf-8",
-    )
-    for name in ("context_hook.py", "memory_route_hook.py", "closeout_hook.py"):
-        content = "print('{}')\n" if name == "context_hook.py" else "# fixture\n"
-        (runtime / "hooks" / name).write_text(content, encoding="utf-8")
-    return runtime, Path(sys.executable)
-
-
 def test_canonical_contract_uses_independent_contract_version() -> None:
     contract = host_setup.load_canonical_contract()
 
     assert f"<!-- KEEPYGAGA:CONTRACT:{CONTRACT_VERSION} -->" in contract
     assert "KEEPYGAGA:HASH" not in contract
     assert "SHA256" not in contract.upper()
-
-
-def test_host_setup_preserves_public_common_symbols() -> None:
-    assert (
-        host_setup.HOOK_MERGER_RELATIVE_PATH
-        == host_common.HOOK_MERGER_RELATIVE_PATH
-    )
 
 
 def test_canonical_contract_is_short_and_delegates_full_protocol() -> None:
@@ -178,11 +144,7 @@ def test_merge_fails_closed_for_corrupt_or_duplicate_blocks(existing: str) -> No
 
 
 def test_remove_managed_contract_strips_block_and_preserves_outside_bytes() -> None:
-    existing = (
-        "before\r\n"
-        + canonical().replace("\n", "\r\n")
-        + "after\r\n"
-    )
+    existing = "before\r\n" + canonical().replace("\n", "\r\n") + "after\r\n"
 
     removed = host_setup.remove_managed_contract(existing, source="AGENTS.md")
 
@@ -192,9 +154,7 @@ def test_remove_managed_contract_strips_block_and_preserves_outside_bytes() -> N
 def test_remove_managed_contract_is_noop_without_block() -> None:
     existing = "# Personal\nkeep this\n"
 
-    assert (
-        host_setup.remove_managed_contract(existing, source="AGENTS.md") == existing
-    )
+    assert host_setup.remove_managed_contract(existing, source="AGENTS.md") == existing
 
 
 def test_remove_managed_contract_strips_exact_unmanaged_legacy() -> None:
@@ -217,7 +177,6 @@ def test_remove_managed_contract_refuses_modified_unmanaged_legacy() -> None:
         )
 
 
-
 def test_remove_managed_contract_preserves_leading_blank_lines() -> None:
     existing = canonical() + "\nkept\n"
 
@@ -231,9 +190,8 @@ def test_remove_managed_contract_refuses_leftover_legacy_after_block() -> None:
     existing = canonical() + legacy
 
     with pytest.raises(HostSetupError, match="still contains an unmanaged legacy"):
-        host_setup.remove_managed_contract(
-            existing, source="AGENTS.md", legacy=legacy
-        )
+        host_setup.remove_managed_contract(existing, source="AGENTS.md", legacy=legacy)
+
 
 def test_rules_use_nonempty_global_override_and_are_idempotent(tmp_path: Path) -> None:
     codex_home = tmp_path / ".codex"
@@ -773,186 +731,51 @@ def test_mcp_registration_preserves_virtualenv_python_symlink(
     assert calls[1][-3:] == [str(venv_python), "-m", "keepygaga.server"]
 
 
-def test_hooks_delegate_merge_and_preserve_unrelated_entries(
+def test_hooks_migrate_legacy_commands_and_preserve_unrelated_entries(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    runtime = tmp_path / "renamed-runtime"
-    (runtime / "agent_hook_runtime").mkdir(parents=True)
-    (runtime / "config/hooks").mkdir(parents=True)
-    (runtime / "hooks").mkdir()
-    hook_python = Path(sys.executable)
-    (runtime / "agent_hook_runtime/hook_config.py").write_text(
-        "def merge_hook_fragment(existing, fragment):\n"
-        "    result = dict(existing)\n"
-        "    hooks = dict(result.get('hooks', {}))\n"
-        "    markers = tuple(fragment['owned_command_markers'])\n"
-        "    def owned(item):\n"
-        "        command = str(item)\n"
-        "        return any(marker in command for marker in markers)\n"
-        "    hooks['SessionStart'] = [\n"
-        "        item for item in hooks.get('SessionStart', [])\n"
-        "        if 'old/context_hook.py' not in str(item) and not owned(item)\n"
-        "    ] + fragment['payload']['SessionStart']\n"
-        "    result['hooks'] = hooks\n"
-        "    return result\n",
-        encoding="utf-8",
-    )
-    fragment = {
-        "schema": "agent-hook-runtime-hook-fragment-v1",
-        "host": "codex",
-        "merge_target": "hooks",
-        "owned_command_markers": ["context_hook.py"],
-        "payload": {
-            "SessionStart": [
-                {
-                    "hooks": [
-                        {
-                            "type": "command",
-                            "command": '"{{PYTHON}}" "{{RUNTIME_ROOT}}/hooks/context_hook.py" codex',
-                        }
-                    ]
-                }
-            ]
-        },
-    }
-    (runtime / "config/hooks/codex.json").write_text(
-        json.dumps(fragment), encoding="utf-8"
-    )
-    for name in ("context_hook.py", "memory_route_hook.py", "closeout_hook.py"):
-        content = (
-            "print('{\"hookSpecificOutput\": {}}')\n"
-            if name == "context_hook.py"
-            else "# fixture\n"
-        )
-        (runtime / "hooks" / name).write_text(content, encoding="utf-8")
+    from keepygaga.hooks import fragments
+    from keepygaga.memory_init import initialize_memory_tree
 
+    monkeypatch.setattr(fragments, "USER_HOME", tmp_path)
+    memory_root = tmp_path / "memory"
+    initialize_memory_tree(memory_root, MemoryFilesConfig(root=str(memory_root)))
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        f"[memory]\nroot = '{memory_root.as_posix()}'\n", encoding="utf-8"
+    )
     codex_home = tmp_path / ".codex"
     codex_home.mkdir()
+    third_party = {"hooks": [{"type": "command", "command": "third-party"}]}
+    legacy = tmp_path / ".codex/hooks/context_hook.py"
     (codex_home / "hooks.json").write_text(
         json.dumps(
             {
                 "hooks": {
                     "SessionStart": [
-                        {"hooks": [{"type": "command", "command": "third-party"}]},
-                        {
-                            "hooks": [
-                                {"type": "command", "command": "old/context_hook.py"}
-                            ]
-                        },
+                        third_party,
+                        {"hooks": [{"command": f'python "{legacy}" codex'}]},
                     ]
                 }
             }
         ),
         encoding="utf-8",
     )
-    hook_config = tmp_path / "ahr-config.json"
-    monkeypatch.setenv("AGENT_HOOK_RUNTIME_CONFIG", str(hook_config))
-    memory_root = tmp_path / "memory"
-    memory_root.mkdir()
 
-    result = host_setup.reconcile_codex_hooks(
-        codex_home,
-        memory_root,
-        runtime,
-        hook_python,
-        hook_config_path=hook_config,
-    )
-    second = host_setup.reconcile_codex_hooks(
-        codex_home,
-        memory_root,
-        runtime,
-        hook_python,
-        hook_config_path=hook_config,
-    )
+    first = host_setup.reconcile_codex_hooks(codex_home, config_path)
+    second = host_setup.reconcile_codex_hooks(codex_home, config_path)
 
-    assert result["status"] == "applied"
+    assert first["status"] == "applied"
     assert second["status"] == "no_op"
     installed = json.loads((codex_home / "hooks.json").read_text(encoding="utf-8"))
-    serialized = json.dumps(installed)
-    assert "third-party" in serialized
-    assert "old/context_hook.py" not in serialized
-    commands = [
-        hook["command"]
-        for registration in installed["hooks"]["SessionStart"]
-        for hook in registration["hooks"]
-    ]
-    expected_entrypoint = (runtime / "hooks/context_hook.py").as_posix()
-    normalized_commands = [command.replace("\\", "/") for command in commands]
-    assert sum(expected_entrypoint in command for command in normalized_commands) == 1
-    assert json.loads(hook_config.read_text(encoding="utf-8")) == {
-        "schema_version": 1,
-        "memory_root": str(memory_root),
-    }
-
-
-def test_hook_preflight_rejects_conflicting_memory_environment(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    runtime, hook_python = minimal_hook_runtime(tmp_path)
-    hook_config = tmp_path / "ahr-config.json"
-    monkeypatch.setenv("AGENT_HOOK_RUNTIME_CONFIG", str(hook_config))
-    monkeypatch.setenv("AGENT_HOOK_RUNTIME_MEMORY_ROOT", str(tmp_path / "stale"))
-
-    with pytest.raises(HostSetupError, match="conflicts"):
-        host_setup.reconcile_codex_hooks(
-            tmp_path / ".codex",
-            tmp_path / "memory",
-            runtime,
-            hook_python,
-            hook_config_path=hook_config,
-        )
-
-
-def test_hook_preflight_rejects_symlink_config(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    runtime, hook_python = minimal_hook_runtime(tmp_path)
-    target = tmp_path / "real-config.json"
-    target.write_text("{}\n", encoding="utf-8")
-    link = tmp_path / "config-link.json"
-    link.symlink_to(target)
-    monkeypatch.setenv("AGENT_HOOK_RUNTIME_CONFIG", str(link))
-
-    with pytest.raises(HostSetupError, match="symlink"):
-        host_setup.reconcile_codex_hooks(
-            tmp_path / ".codex",
-            tmp_path / "memory",
-            runtime,
-            hook_python,
-            hook_config_path=link,
-        )
-
-    assert target.read_text(encoding="utf-8") == "{}\n"
-
-
-def test_hook_preflight_rejects_symlink_fragment(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    runtime, hook_python = minimal_hook_runtime(tmp_path)
-    fragment = runtime / "config/hooks/codex.json"
-    target = tmp_path / "fragment.json"
-    target.write_text(fragment.read_text(encoding="utf-8"), encoding="utf-8")
-    fragment.unlink()
-    fragment.symlink_to(target)
-    hook_config = tmp_path / "ahr-config.json"
-    monkeypatch.setenv("AGENT_HOOK_RUNTIME_CONFIG", str(hook_config))
-
-    with pytest.raises(HostSetupError, match="must be a regular file"):
-        host_setup.reconcile_codex_hooks(
-            tmp_path / ".codex",
-            tmp_path / "memory",
-            runtime,
-            hook_python,
-            hook_config_path=hook_config,
-        )
+    assert third_party in installed["hooks"]["SessionStart"]
+    assert "context_hook.py" not in json.dumps(installed)
+    assert "--owner=keepygaga-hook-v1" in json.dumps(installed)
 
 
 def test_hook_preflight_rejects_symlink_hooks_file(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    runtime, hook_python = minimal_hook_runtime(tmp_path)
-    hook_config = tmp_path / "ahr-config.json"
-    monkeypatch.setenv("AGENT_HOOK_RUNTIME_CONFIG", str(hook_config))
     codex_home = tmp_path / ".codex"
     codex_home.mkdir()
     target = tmp_path / "hooks-target.json"
@@ -962,74 +785,20 @@ def test_hook_preflight_rejects_symlink_hooks_file(
     with pytest.raises(HostSetupError, match="refusing symlink target"):
         host_setup._prepare_codex_hooks(
             codex_home,
-            tmp_path / "memory",
-            runtime,
-            hook_python,
-            hook_config_path=hook_config,
+            tmp_path / "config.toml",
         )
-
-    assert not hook_config.exists()
-
-
-def test_hook_preflight_rejects_nonobject_merger_result(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    runtime, hook_python = minimal_hook_runtime(tmp_path)
-    (runtime / "agent_hook_runtime/hook_config.py").write_text(
-        "def merge_hook_fragment(existing, fragment):\n    return []\n",
-        encoding="utf-8",
-    )
-    hook_config = tmp_path / "ahr-config.json"
-    monkeypatch.setenv("AGENT_HOOK_RUNTIME_CONFIG", str(hook_config))
-
-    with pytest.raises(HostSetupError, match="must return a JSON object"):
-        host_setup._prepare_codex_hooks(
-            tmp_path / ".codex",
-            tmp_path / "memory",
-            runtime,
-            hook_python,
-            hook_config_path=hook_config,
-        )
-
-
-@pytest.mark.skipif(os.name == "nt", reason="executable bits are POSIX-specific")
-def test_hook_preflight_rejects_nonexecutable_python(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    runtime, _hook_python = minimal_hook_runtime(tmp_path)
-    hook_python = tmp_path / "hook-python"
-    hook_python.touch(mode=0o600)
-    hook_config = tmp_path / "ahr-config.json"
-    monkeypatch.setenv("AGENT_HOOK_RUNTIME_CONFIG", str(hook_config))
-
-    with pytest.raises(HostSetupError, match="not executable"):
-        host_setup._prepare_codex_hooks(
-            tmp_path / ".codex",
-            tmp_path / "memory",
-            runtime,
-            hook_python,
-            hook_config_path=hook_config,
-        )
-
-    assert not hook_config.exists()
 
 
 def test_hook_apply_refuses_concurrent_hooks_change(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    runtime, hook_python = minimal_hook_runtime(tmp_path)
-    hook_config = tmp_path / "ahr-config.json"
-    monkeypatch.setenv("AGENT_HOOK_RUNTIME_CONFIG", str(hook_config))
     codex_home = tmp_path / ".codex"
     codex_home.mkdir()
     hooks_path = codex_home / "hooks.json"
     hooks_path.write_text('{"hooks": {}}\n', encoding="utf-8")
     plan = host_setup._prepare_codex_hooks(
         codex_home,
-        tmp_path / "memory",
-        runtime,
-        hook_python,
-        hook_config_path=hook_config,
+        tmp_path / "config.toml",
     )
     concurrent = '{"hooks": {"SessionStart": [{"command": "other"}]}}\n'
     hooks_path.write_text(concurrent, encoding="utf-8")
@@ -1038,35 +807,6 @@ def test_hook_apply_refuses_concurrent_hooks_change(
         host_setup._apply_codex_hooks_plan(plan)
 
     assert hooks_path.read_text(encoding="utf-8") == concurrent
-    assert not hook_config.exists()
-
-
-def test_hook_apply_refuses_concurrent_runtime_config_change(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    runtime, hook_python = minimal_hook_runtime(tmp_path)
-    hook_config = tmp_path / "ahr-config.json"
-    hook_config.write_text(
-        '{"schema_version": 1, "memory_root": "/old"}\n', encoding="utf-8"
-    )
-    monkeypatch.setenv("AGENT_HOOK_RUNTIME_CONFIG", str(hook_config))
-    codex_home = tmp_path / ".codex"
-    codex_home.mkdir()
-    plan = host_setup._prepare_codex_hooks(
-        codex_home,
-        tmp_path / "memory",
-        runtime,
-        hook_python,
-        hook_config_path=hook_config,
-    )
-    concurrent = '{"schema_version": 1, "memory_root": "/concurrent"}\n'
-    hook_config.write_text(concurrent, encoding="utf-8")
-
-    with pytest.raises(HostSetupError, match="write conflict"):
-        host_setup._apply_codex_hooks_plan(plan)
-
-    assert hook_config.read_text(encoding="utf-8") == concurrent
-    assert not (codex_home / "hooks.json").exists()
 
 
 def test_host_source_rejects_non_memory_doctor_error(
@@ -1090,16 +830,6 @@ def test_host_source_rejects_non_memory_doctor_error(
         host_common.validate_host_source(tmp_path / "keepygaga.toml", config)
 
 
-def test_hook_config_refuses_unrelated_json(tmp_path: Path) -> None:
-    config = tmp_path / "config.json"
-    config.write_text('{"unrelated": true}\n', encoding="utf-8")
-
-    with pytest.raises(HostSetupError, match="not an Agent Hook Runtime config"):
-        host_setup._reconcile_hook_runtime_config(config, tmp_path / "memory")
-
-    assert json.loads(config.read_text(encoding="utf-8")) == {"unrelated": True}
-
-
 def test_hook_command_path_rejects_shell_expansion(tmp_path: Path) -> None:
     with pytest.raises(HostSetupError, match="unsafe shell characters"):
         host_setup._validate_hook_command_path(
@@ -1111,7 +841,6 @@ def test_hook_command_path_rejects_shell_expansion(tmp_path: Path) -> None:
 def test_hook_command_path_rejects_backslash(tmp_path: Path) -> None:
     with pytest.raises(HostSetupError, match="unsafe shell characters"):
         host_setup._validate_hook_command_path(tmp_path / "bad\\path", label="runtime")
-
 
 
 def test_setup_accepts_dynamic_page_limit_warning(
@@ -1130,9 +859,7 @@ def test_setup_accepts_dynamic_page_limit_warning(
                 {
                     "id": "memory_tree",
                     "status": "warning",
-                    "details": {
-                        "dynamic_page_limit_exceeded": {"topics": True}
-                    },
+                    "details": {"dynamic_page_limit_exceeded": {"topics": True}},
                 }
             ],
         },
@@ -1274,71 +1001,26 @@ def test_setup_accepts_valid_soft_limit_warning(
     assert result["doctor"] == "warning"
 
 
-def test_setup_rejects_incomplete_hook_selection_before_writes(
+def test_setup_preflights_hooks_before_host_writes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     memory_root = tmp_path / "memory"
-    memory_root.mkdir()
-    config = KeepygagaConfig(MemoryFilesConfig(root=str(memory_root)))
-    codex_home = tmp_path / ".codex"
-
     monkeypatch.setattr(
         host_setup,
         "validate_host_source",
-        lambda *_args, **_kwargs: (memory_root, {"status": "ok"}),
+        lambda *_args: (memory_root, {"status": "ok"}),
     )
+    codex_home = tmp_path / ".codex"
+    codex_home.mkdir()
+    (codex_home / "hooks.json").write_text("invalid json", encoding="utf-8")
 
-    with pytest.raises(HostSetupError, match="supplied together"):
+    with pytest.raises(HostSetupError, match="invalid JSON"):
         host_setup.setup_codex_host(
-            tmp_path / "keepygaga.toml",
-            config,
-            codex_home=codex_home,
-            hook_runtime=tmp_path / "runtime",
+            tmp_path / "config.toml", KeepygagaConfig(), codex_home=codex_home
         )
 
-    assert not codex_home.exists()
-
-
-def test_setup_preflights_hook_config_before_host_writes(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    memory_root = tmp_path / "memory"
-    memory_root.mkdir()
-    runtime, hook_python = minimal_hook_runtime(tmp_path)
-    hook_config = tmp_path / "ahr-config.json"
-    hook_config.write_text('{"unrelated": true}\n', encoding="utf-8")
-    monkeypatch.setenv("AGENT_HOOK_RUNTIME_CONFIG", str(hook_config))
-    monkeypatch.setattr(
-        host_common,
-        "run_doctor",
-        lambda *_args, **_kwargs: {
-            "status": "ok",
-            "checks": [{"id": "memory_tree", "status": "ok", "details": {}}],
-        },
-    )
-    called: list[str] = []
-    monkeypatch.setattr(
-        host_setup,
-        "reconcile_codex_rules",
-        lambda _home: called.append("rules") or {"status": "no_op"},
-    )
-    monkeypatch.setattr(
-        host_setup,
-        "reconcile_codex_mcp",
-        lambda *_args, **_kwargs: called.append("mcp") or {"status": "no_op"},
-    )
-
-    with pytest.raises(HostSetupError, match="not an Agent Hook Runtime config"):
-        host_setup.setup_codex_host(
-            tmp_path / "keepygaga.toml",
-            KeepygagaConfig(MemoryFilesConfig(root=str(memory_root))),
-            codex_home=tmp_path / ".codex",
-            hook_runtime=runtime,
-            hook_python=hook_python,
-            hook_config_path=hook_config,
-        )
-
-    assert called == []
+    assert not (codex_home / "config.toml").exists()
+    assert not (codex_home / "AGENTS.md").exists()
 
 
 def test_setup_preflights_mcp_before_rules(
@@ -1378,7 +1060,7 @@ def test_setup_preflights_mcp_before_rules(
     assert called == []
 
 
-def test_setup_applies_mcp_then_rules_then_optional_hooks(
+def test_setup_applies_mcp_then_rules_then_hooks(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     memory_root = tmp_path / "memory"
@@ -1422,8 +1104,6 @@ def test_setup_applies_mcp_then_rules_then_optional_hooks(
         tmp_path / "keepygaga.toml",
         KeepygagaConfig(MemoryFilesConfig(root=str(memory_root))),
         codex_home=tmp_path / ".codex",
-        hook_runtime=tmp_path / "runtime",
-        hook_python=tmp_path / "python",
     )
 
     assert result["status"] == "no_op"
@@ -1716,12 +1396,15 @@ def test_uninstall_codex_does_not_require_doctor(
     assert (home / "AGENTS.md").read_text(encoding="utf-8") == "# Existing\n"
     assert hooks["status"] == "no_op"
 
+
 def test_uninstall_codex_refuses_corrupt_rules_before_writes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     home = tmp_path / ".codex"
     home.mkdir()
-    (home / "AGENTS.md").write_text("<!-- KEEPYGAGA:START -->\nmissing end\n", encoding="utf-8")
+    (home / "AGENTS.md").write_text(
+        "<!-- KEEPYGAGA:START -->\nmissing end\n", encoding="utf-8"
+    )
     hooks = home / "hooks.json"
     hooks.write_text("{}", encoding="utf-8")
     monkeypatch.setattr(
@@ -1750,8 +1433,6 @@ def test_uninstall_codex_refuses_corrupt_rules_before_writes(
             tmp_path / "keepygaga.toml",
             KeepygagaConfig(MemoryFilesConfig(root=str(tmp_path / "memory"))),
             codex_home=home,
-            hook_runtime=tmp_path / "runtime",
-            hook_python=Path(sys.executable),
         )
 
     assert (home / "AGENTS.md").read_text(encoding="utf-8") == (

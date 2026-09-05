@@ -83,6 +83,28 @@ def test_doctor_reports_healthy_initialized_memory(
     assert memory["status"] == "ok"
 
 
+def test_doctor_rejects_linked_memory_root(tmp_path: Path) -> None:
+    memory_root = tmp_path / "memory"
+    initialize_memory_tree(memory_root, MemoryFilesConfig(root=str(memory_root)))
+    linked = tmp_path / "linked"
+    try:
+        linked.symlink_to(memory_root, target_is_directory=True)
+    except OSError:
+        pytest.skip("directory symlinks are unavailable")
+    path = tmp_path / "config.toml"
+    path.write_text(f'[memory]\nroot = "{linked.as_posix()}"\n', encoding="utf-8")
+
+    result = run_doctor(path, project_root=tmp_path)
+
+    assert result["status"] == "error"
+    checks = cast(list[dict[str, object]], result["checks"])
+    memory = next(item for item in checks if item["id"] == "memory_tree")
+    assert memory["details"] == {
+        "root": str(linked),
+        "source_status": "invalid_source",
+    }
+
+
 def test_doctor_reports_effective_memory_limits_and_source(tmp_path: Path) -> None:
     path = tmp_path / "keepygaga.toml"
     memory_root = tmp_path / "memory"

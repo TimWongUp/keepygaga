@@ -12,10 +12,6 @@ from dataclasses import dataclass
 from io import TextIOWrapper
 from pathlib import Path
 
-from keepygaga.config import PROJECT_ROOT, load_config, resolve_config_path
-from keepygaga.diagnostics import run_doctor
-from keepygaga.memory import initialize_memory_tree
-
 
 @dataclass(frozen=True)
 class HostCliSpec:
@@ -200,6 +196,8 @@ def _interactive_hosts() -> list[str]:
 
 
 def _configured_memory_root(config_path: Path) -> Path | None:
+    from keepygaga.config import load_config
+
     try:
         configured = load_config(config_path)
     except Exception as exc:
@@ -232,7 +230,9 @@ def _install_payload(
         if interactive:
             print(f"Using configured Memory Root: {memory_root}")
     elif interactive:
-        memory_root = _interactive_memory_root(installer.default_memory_root().resolve())
+        memory_root = _interactive_memory_root(
+            installer.default_memory_root().resolve()
+        )
     else:
         memory_root = installer.default_memory_root().resolve()
     hosts = args.hosts or (_interactive_hosts() if interactive else [])
@@ -291,22 +291,28 @@ def _run_installer_command(
 
 
 def _run_hook_command(args: argparse.Namespace, config_path: Path) -> int:
-    from keepygaga.hooks import closeout as closeout_hook
-    from keepygaga.hooks import context as context_hook
-    from keepygaga.hooks import route as route_hook
+    from keepygaga.hooks.protocol import loads_stdin
 
-    payload = context_hook.loads_stdin(sys.stdin.read())
+    payload = loads_stdin(sys.stdin.read())
     if args.hook == "context":
+        from keepygaga.hooks import context as context_hook
+
         result = context_hook.run(config_path, args.host, args.event, payload)
     elif args.hook == "route":
+        from keepygaga.hooks import route as route_hook
+
         result = route_hook.run(args.host, args.event, payload, compact=args.compact)
     else:
+        from keepygaga.hooks import closeout as closeout_hook
+
         result = closeout_hook.run(args.host, args.event, payload)
     _print(result)
     return 0
 
 
 def _load_command_config(config_path: Path):
+    from keepygaga.config import load_config
+
     try:
         return load_config(config_path)
     except Exception as exc:
@@ -320,6 +326,8 @@ def _load_command_config(config_path: Path):
 
 
 def _run_memory_command(config_path: Path) -> int:
+    from keepygaga.memory_init import initialize_memory_tree
+
     config = _load_command_config(config_path)
     if config is None:
         return 1
@@ -331,7 +339,9 @@ def _run_memory_command(config_path: Path) -> int:
             }
         )
         return 1
-    payload = initialize_memory_tree(Path(config.memory.root).expanduser(), config.memory)
+    payload = initialize_memory_tree(
+        Path(config.memory.root).expanduser(), config.memory
+    )
     _print(payload)
     return 0 if payload["status"] in {"applied", "no_op"} else 1
 
@@ -379,12 +389,17 @@ def main(argv: list[str] | None = None) -> int:
     explicit_config = (
         selected_config.expanduser().resolve() if selected_config else None
     )
+    from keepygaga.config import resolve_config_path
+
     config_path = resolve_config_path(explicit_config)
 
     if args.command in {"install", "status", "repair", "upgrade", "uninstall"}:
         return _run_installer_command(args, parser, config_path)
 
     if args.command == "doctor":
+        from keepygaga.config import PROJECT_ROOT
+        from keepygaga.diagnostics import run_doctor
+
         payload = run_doctor(config_path, project_root=PROJECT_ROOT)
         _print(payload)
         return 1 if payload["status"] == "error" else 0
