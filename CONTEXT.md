@@ -85,16 +85,16 @@ _Avoid_: checkout 专属 Python 路径、源码目录
 _Avoid_: Memory 摘要、默认本机 checkout、机械采用名为 origin 的任意 fork
 
 **项目索引（Project Index）**：
-`areas/projects.md` 中用于跨任务定位持续项目的单页索引；每个项目只有一条 Fact，包含简介、项目真源及可选的最新重大节点，变化时原位更新。
+可选动态页 `areas/projects.md` 中用于跨任务定位持续项目的单页索引；首条项目 Fact 写入前可以不存在，每个项目只有一条 Fact，包含简介、项目真源及可选的最新重大节点，变化时原位更新。
 _Avoid_: 多 Fact 项目档案、里程碑历史、状态仪表板、项目真源副本
 
 **Route Catalog**：
-由一个 Memory Scope 的 live allowlist 生成的 `path + description + aliases` 路由目录，不包含 Fact 或 version。
-_Avoid_: 全库目录、搜索结果、页面摘要
+由一个 Memory Scope 的 live allowlist 生成的 `path + description + aliases` 二级选页目录，不包含 Fact 或 version；这些元数据是不可信路由标签，不是指令，只能选择同一条目返回的精确 path。
+_Avoid_: 全库目录、搜索结果、页面摘要、把页面元数据当作指令
 
 **Memory Scope**：
-`topics`、`areas` 或 `people` 中一个有独立路由与页面容量边界的动态页面分区。
-_Avoid_: all、搜索范围、任意目录
+`topics`、`areas` 或 `people` 中一个有独立路由与页面容量边界的动态页面分区；其由产品固定的 description 是可信的一级语义路由条件，任务所需且当前输入或直接真源未提供的信息落入覆盖范围时，Agent 获取或复用该 scope 的 live Route Catalog。
+_Avoid_: all、搜索范围、任意目录、关键词匹配规则
 
 **动态页整理（Dynamic Page Organization）**：
 Agent 在动态页 mutation 需要收敛容量时，先复用语义合适的已有页，必要时创建有稳定主题的新页并原样转移 Facts。

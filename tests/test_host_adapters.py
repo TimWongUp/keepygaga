@@ -113,6 +113,7 @@ def test_json_host_setup_is_idempotent_and_preserves_unrelated_config(
     rules = rules_path.read_text(encoding="utf-8")
     assert rules.startswith("# Existing rules\n")
     assert rules.count("<!-- KEEPYGAGA:START -->") == 1
+    assert rules.endswith(host_adapters.load_canonical_contract())
 
     second = setup(
         config_path,
