@@ -746,9 +746,9 @@ def _lifecycle_plan(
         latest_version=latest_version,
         host=host,
     )
-    if runtime_result is not None:
+    if runtime_result is not None and runtime_result["action"] == "manual_review":
         return runtime_result
-    return _configured_lifecycle(
+    configured_result = _configured_lifecycle(
         config_path,
         config,
         state,
@@ -757,6 +757,9 @@ def _lifecycle_plan(
         base=base,
         host_status=host_status,
     )
+    if configured_result["action"] == "manual_review":
+        return configured_result
+    return runtime_result or configured_result
 
 
 def status(

@@ -572,8 +572,9 @@ def test_contract_status_detects_conflicting_host_candidates(
     assert installer._contract_status("grok") == "conflict"
 
 
+@pytest.mark.parametrize("latest_version", [installer.__version__, "99.0.0"])
 def test_status_plan_sends_contract_conflict_to_manual_review(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch, latest_version: str
 ) -> None:
     config_path = tmp_path / "config.toml"
     memory_root = tmp_path / "memory"
@@ -584,7 +585,7 @@ def test_status_plan_sends_contract_conflict_to_manual_review(
 
     result = installer.status(
         config_path,
-        latest_version=installer.__version__,
+        latest_version=latest_version,
         host="codex",
     )
 
@@ -975,10 +976,11 @@ def test_status_detects_live_mcp_and_hook_drift_without_writes(
     assert json.loads(hooks_path.read_bytes()) == hooks
 
     hooks_path.write_text("invalid JSON", encoding="utf-8")
-    conflict = installer.status(
-        config_path, latest_version=installer.__version__, host="workbuddy"
-    )
-    assert conflict["lifecycle"]["action"] == "manual_review"  # type: ignore[index]
+    for latest_version in (installer.__version__, "99.0.0"):
+        conflict = installer.status(
+            config_path, latest_version=latest_version, host="workbuddy"
+        )
+        assert conflict["lifecycle"]["action"] == "manual_review"  # type: ignore[index]
     assert hooks_path.read_text(encoding="utf-8") == "invalid JSON"
     assert state_path.read_bytes() == original_state
     assert mcp_path.read_bytes() == original_mcp
