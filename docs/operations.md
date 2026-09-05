@@ -19,14 +19,18 @@ The optional `[memory.limits]` table controls fixed-page characters, dynamic-pag
 
 To update through the current GitHub Release channel, download the newer wheel and matching `SHA256SUMS`, rehash the exact absolute wheel path, set `UV_TOOL_DIR` to the `lifecycle.tool_root` returned by planned `status` for that command, run `uv tool install --force /absolute/private/path/keepygaga-X.Y.Z-py3-none-any.whl`, then run `keepygaga install --yes --host HOST` to reconcile only the current host. `keepygaga upgrade --yes` remains the explicit all-recorded-host path for a verified `uv-tool` installation and binds `uv` to the active tool root; it is not the update path for a versioned GitHub Release wheel. `pipx`, unknown, and state-mismatched owners fail closed for manual owner-correct replacement instead of being routed through `uv`.
 
-### Contract 3 project-index migration
+### Project-index migration
 
 `repair` never rewrites Memory Root. Before the next project-memory write under the current Agent Contract, use scoped `list(scope=areas)` and `read` to inventory every legacy project page and identify each project's current Authority from the project itself. Then converge as follows:
+
+A complete Fact follows Contract 7: a brief, canonical Authority, and latest verified integrated outcome and release status when available. For each project being updated, verify the canonical remote primary branch and whether a published Release points to a tag commit containing the outcome; do not infer publication from release-note wording or matching version numbers. If verification is unavailable, preserve the existing Fact and leave that project pending rather than claim its progress is current.
 
 1. If one legacy page already contains one complete Fact per project, rename it to `areas/projects.md`.
 2. If no legacy project page exists, create `areas/projects.md` together with its first complete project Fact.
 3. If several pages or several Facts describe the same project, compose one complete Fact per project in `areas/projects.md`, then ask the user for explicit current-turn authorization before deleting superseded Facts or pages.
 4. Finish only when each maintained project occurs once in the canonical page and no conflicting legacy project record remains.
+
+Existing Contract 4–6 indexes that already have one Fact per project need no structural migration. On the next relevant project-memory update, verify that project against the Contract 7 evidence rules and refine its Fact in place; do not automatically rewrite every project when upgrading the runtime.
 
 Do not create a second canonical index to bypass a conflict, and do not treat `repair` success as migration evidence.
 

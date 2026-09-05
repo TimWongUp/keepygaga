@@ -22,7 +22,7 @@ Keepygaga 只保存少量、能跨任务长期发挥作用的信息：用户是�
 
 Keepygaga 独立提供完整运行时：八个 raw Tool 的 MCP Server、精简全局 Agent Contract、内置跨宿主 Hook，以及 CLI 控制面。它不依赖数据库、向量索引、源码 checkout 或外部 Hook Runtime；Obsidian 是推荐的人类界面，不是运行依赖。
 
-核心记忆由 `profile.md`、`preferences.md` 以及 `topics/`、`areas/`、`people/` 的直属页面组成。持续项目共用可选的规范索引 `areas/projects.md`，它随首条项目 Fact 创建：每个项目只用一条 Fact 保存简介、规范项目真源和可选的最新重大节点，后续变化直接替换原 Fact。完整历史、术语、架构、操作说明、重要决定与当前状态仍由项目仓库或其他直接真源负责。
+核心记忆由 `profile.md`、`preferences.md` 以及 `topics/`、`areas/`、`people/` 的直属页面组成。持续项目共用可选的规范索引 `areas/projects.md`，它随首条项目 Fact 创建：每个项目只用一条 Fact 保存简介、规范项目真源及可核验的最新已整合成果与发布状态，后续变化直接替换原 Fact，不设重大里程碑门槛。Git 项目须核对规范远端主分支；只有已发布 Release 所指 tag commit 包含该成果时，才记录其发布版本。完整历史、术语、架构、操作说明、重要决定与当前状态仍由项目仓库或其他直接真源负责。
 
 宿主原生记忆可以继续负责该宿主的会话召回与项目内学习；Keepygaga 只负责应当随用户跨宿主流动的少量稳定事实。进入来源选择的长期要求只能二选一：希望所有接入 Agent 都遵循的用户偏好进入 `preferences.md`，只约束某一 Agent 的规则留在该宿主的有效全局规则入口。文风和代码风格本身不能决定归属；用户没有说明适用范围时，Agent 必须先询问，并且同一含义只能由一个来源负责。项目规则留在项目真源，不进入这次选择。
 
@@ -106,7 +106,7 @@ keepygaga uninstall --yes
 - 宿主 MCP 注册统一指向稳定启动器 `keepygaga-mcp`。
 - 精简 Agent Contract 只保留稳定安全与路由规则。
 - 完整读取、收敛、mutation、冲突与 receipt 协议由协商后的 MCP Server instructions 下发（现代 discovery 或旧式 initialize 握手）。
-- 内置 Context Bootstrap、Memory Route、Memory Closeout 三项能力会投影到各宿主支持的原生事件；宿主缺少对应表面时使用文档化降级，其中 Grok 的 Memory Closeout 由托管 Agent Contract 兜底。
+- 内置 Context Bootstrap 和无状态 Memory Route 会投影到各宿主支持的原生事件；路由提醒包含完成前检查，不再注册 PostToolUse 收尾 Hook。未接入的表面采用文档化降级，Grok 的记忆指引由托管 Agent Contract 提供。
 - 应用、Agent Contract、Hook 协议、安装状态和记忆 schema 分别演进版本。
 
 配置级测试只证明投影、保留、幂等与失败边界；只有真实客户端或官方诊断确认 `keepygaga` 注册和八个 Tool 后，才能称为现场验证。
