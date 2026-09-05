@@ -30,7 +30,7 @@ Keepygaga 独立提供完整运行时：八个 raw Tool 的 MCP Server、精简�
 
 会话启动时只注入 `profile.md`、`preferences.md`、一条共享路由规则和三个动态分区的描述。Agent 将这些描述视为一级语义路由：任务依赖其覆盖的信息，且当前请求或 live direct source 尚未提供时，先对相应分区调用 `list`，再按返回的 path、description 与 aliases 选择并读取页面。新建或语义更新的 Fact 会获得由 Store 生成的本地日期后缀；已有无日期 Fact 仍可读取，升级也不会改写 Memory Root。
 
-已有项目页面的 Contract 3 用户，应在下次按当前 Agent Contract 写入项目记忆前完成[项目索引迁移](docs/operations.md#contract-3-project-index-migration)。
+已有项目页面的 Contract 3 用户，应在下次按当前 Agent Contract 写入项目记忆前完成[项目索引迁移](docs/operations.md#project-index-migration)。
 
 ## 安装
 

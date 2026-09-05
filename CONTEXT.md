@@ -81,7 +81,7 @@ _Avoid_: 配置真源、宿主注册 Authority
 _Avoid_: checkout 专属 Python 路径、源码目录
 
 **项目真源（Project Authority）**：
-能够裁决项目当前事实的直接来源；Git 项目的已整合进展以已确认规范远端的主分支为准，通常为 `origin/main`，发布状态由对应 Release 裁决。项目索引使用以 Markdown 自动链接包裹的不带凭据规范远端仓库 URL，没有持久远端或直接来源时才使用本机路径。
+能够裁决项目当前事实的直接来源；Git 项目的已整合进展以已确认规范远端的主分支为准，通常为 `origin/main`，发布状态以规范远端的已发布 Release 及其 tag commit 是否包含该成果裁决，不凭 release notes 或版本号推断。项目索引使用以 Markdown 自动链接包裹的不带凭据规范远端仓库 URL，没有持久远端或直接来源时才使用本机路径。
 _Avoid_: Memory 摘要、默认本机 checkout、机械采用名为 origin 的任意 fork
 
 **项目索引（Project Index）**：
