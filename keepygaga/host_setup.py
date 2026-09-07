@@ -160,6 +160,58 @@ def _run_codex(
         raise HostSetupError(f"Codex CLI could not be executed: {exc}") from exc
 
 
+def _windows_codex_desktop_candidates() -> tuple[Path, ...]:
+    if sys.platform != "win32" or not (local_app_data := os.environ.get("LOCALAPPDATA")):
+        return ()
+    desktop_root = Path(local_app_data) / "OpenAI" / "Codex" / "bin"
+    discovered: list[tuple[int, Path]] = []
+    try:
+        desktop_candidates = [
+            desktop_root / "codex.exe",
+            *desktop_root.glob("*/codex.exe"),
+        ]
+        for candidate in desktop_candidates:
+            try:
+                discovered.append((candidate.stat().st_mtime_ns, candidate))
+            except OSError:
+                continue
+    except OSError:
+        pass
+    ordered = sorted(
+        discovered,
+        key=lambda item: (item[0], str(item[1]).casefold()),
+        reverse=True,
+    )
+    return tuple(candidate for _modified, candidate in ordered)
+
+
+def _codex_binary_candidates(codex_binary: Path | None) -> tuple[Path, ...]:
+    if codex_binary is not None:
+        return (Path(os.path.abspath(codex_binary.expanduser())),)
+
+    candidates: list[Path] = []
+    configured = os.environ.get("CODEX_CLI_PATH")
+    discovered = ([Path(configured)] if configured else []) + list(
+        _windows_codex_desktop_candidates()
+    )
+
+    for directory in os.get_exec_path():
+        if found := shutil.which("codex", path=directory):
+            discovered.append(Path(found))
+    for candidate in discovered:
+        resolved = candidate.expanduser().resolve()
+        if resolved not in candidates:
+            candidates.append(resolved)
+    return tuple(candidates)
+
+
+def _select_codex_binary(codex_binary: Path | None) -> Path:
+    for candidate in _codex_binary_candidates(codex_binary):
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return candidate
+    raise HostSetupError("Codex CLI could not be located")
+
+
 def _matching_mcp_registration(
     payload: Mapping[str, Any],
     command: Path,
@@ -241,15 +293,7 @@ def _prepare_codex_mcp(
         except RuntimeError as exc:
             raise HostSetupError(str(exc)) from exc
         selected_args = ()
-    selected_codex = codex_binary or (
-        Path(found).resolve() if (found := shutil.which("codex")) else None
-    )
-    if (
-        selected_codex is None
-        or not selected_codex.is_file()
-        or not os.access(selected_codex, os.X_OK)
-    ):
-        raise HostSetupError("Codex CLI could not be located")
+    selected_codex = _select_codex_binary(codex_binary)
 
     codex_config = codex_home / "config.toml"
     _ensure_regular_target(codex_config)
@@ -791,15 +835,7 @@ def _prepare_codex_mcp_removal(
     *,
     codex_binary: Path | None = None,
 ) -> CodexMcpPlan:
-    selected_codex = codex_binary or (
-        Path(found).resolve() if (found := shutil.which("codex")) else None
-    )
-    if (
-        selected_codex is None
-        or not selected_codex.is_file()
-        or not os.access(selected_codex, os.X_OK)
-    ):
-        raise HostSetupError("Codex CLI could not be located")
+    selected_codex = _select_codex_binary(codex_binary)
     codex_config = codex_home / "config.toml"
     _ensure_regular_target(codex_config)
     config_original = codex_config.read_bytes() if codex_config.exists() else None

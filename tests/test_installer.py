@@ -241,6 +241,7 @@ def test_install_restarts_when_upgrade_generation_is_newer(
         encoding="utf-8",
     )
     monkeypatch.setattr(installer, "_call_host", lambda *_args: {"status": "no_op"})
+    monkeypatch.setattr(installer, "__version__", "0.8.1")
     installer.install(config_path, tmp_path / "memory", ["codex"])
     state = installer._load_state(config_path)
     assert state["upgrade_generation"] == "generation"
