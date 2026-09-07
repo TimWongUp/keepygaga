@@ -114,9 +114,9 @@ def test_core_memory_v1_contract_matches_current_page_format() -> None:
     assert manifest["page_version"] == {
         "normalization": "crlf-and-cr-to-lf",
         "encoding": "utf-8",
-        "algorithm": "sha256",
+        "algorithm": "sha1",
         "prefix": "",
-        "hex_chars": 8,
+        "hex_chars": 40,
     }
     assert manifest["fact_normalization"] == {
         "line_pattern": codec.FACT_LINE_RE.pattern,
@@ -692,7 +692,7 @@ def test_batch_preflight_failure_writes_nothing(
             ),
             AddOperation(
                 path="preferences.md",
-                if_version="00000000",
+                if_version="0" * 40,
                 facts=[fact("Also rejected.")],
             ),
         ]
@@ -1288,7 +1288,7 @@ def test_delete_requires_authorization_and_protects_fixed_pages(
         DeletePageOperation.model_validate(
             {
                 "path": "topics/page.md",
-                "if_version": "00000000",
+                "if_version": "0" * 40,
                 "target": "page",
                 "authorization": "implicit",
             }
@@ -1402,7 +1402,7 @@ def test_canonical_paths_and_symlinks_are_rejected(
         [
             RepairPageOperation(
                 path="topics/leak.md",
-                if_version="00000000",
+                if_version="0" * 40,
                 target="repair",
             )
         ]
@@ -1457,7 +1457,7 @@ def test_page_symlink_is_rejected_by_list_read_repair_and_write(
         [
             RepairPageOperation(
                 path="topics/linked.md",
-                if_version="00000000",
+                if_version="0" * 40,
                 target="repair",
             )
         ]
@@ -1467,7 +1467,7 @@ def test_page_symlink_is_rejected_by_list_read_repair_and_write(
         [
             AddOperation(
                 path="topics/linked.md",
-                if_version="00000000",
+                if_version="0" * 40,
                 facts=[fact("Do not write.")],
             )
         ]
@@ -1537,7 +1537,7 @@ def test_repair_rejects_fifo_without_blocking(
         [
             RepairPageOperation(
                 path="topics/pipe.md",
-                if_version="00000000",
+                if_version="0" * 40,
                 target="repair",
             )
         ]
@@ -2629,7 +2629,7 @@ def test_repair_batch_stale_second_page_writes_nothing(
             ),
             RepairPageOperation(
                 path="topics/two.md",
-                if_version="00000000",
+                if_version="0" * 40,
                 target="repair",
             ),
         ]

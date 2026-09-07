@@ -3,9 +3,9 @@
   "page_version": {
     "normalization": "crlf-and-cr-to-lf",
     "encoding": "utf-8",
-    "algorithm": "sha256",
+    "algorithm": "sha1",
     "prefix": "",
-    "hex_chars": 8
+    "hex_chars": 40
   },
   "limits": {
     "max_dynamic_pages": {
@@ -34,9 +34,9 @@
     "legacy_date": null
   },
   "fixtures": {
-    "canonical/profile.md": "76f26f56",
-    "canonical/preferences.md": "475eb15b",
-    "legacy-sources/profile.md": "7550a6e7",
-    "legacy-sources/preferences.md": "6f9a35ec"
+    "canonical/profile.md": "bf707ff6807eec7c241c3bca6ce0bea952ca2be9",
+    "canonical/preferences.md": "bf0c3d431dc6d9b9ef4946613c2bc0f4c16df920",
+    "legacy-sources/profile.md": "316e7c409a8ce931925f78b611de8e6c5428a50b",
+    "legacy-sources/preferences.md": "9608372ff816516669c0b8a7fb2a06fbb188cbb0"
   }
 }
