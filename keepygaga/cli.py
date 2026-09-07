@@ -219,9 +219,11 @@ def _install_payload(
 ) -> Mapping[str, object]:
     from keepygaga import installer
 
-    interactive = sys.stdin.isatty()
+    interactive = not args.yes and sys.stdin.isatty()
     if not args.yes and not interactive:
         parser.error("non-interactive install requires --yes and explicit --host")
+    if not interactive and not args.hosts:
+        parser.error("non-interactive install requires explicit --host")
     configured_root = _configured_memory_root(config_path)
     if args.memory_root:
         memory_root = args.memory_root.expanduser().resolve()
@@ -287,7 +289,7 @@ def _run_installer_command(
         _print({"status": "invalid_source", "message": str(exc)})
         return 1
     _print(payload)
-    return 1 if payload.get("status") == "error" else 0
+    return 1 if payload.get("status") in {"error", "manual_review"} else 0
 
 
 def _run_hook_command(args: argparse.Namespace, config_path: Path) -> int:

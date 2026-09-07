@@ -20,12 +20,12 @@ from keepygaga.codec import (
     _render_validated_document,
     fact_key,
     normalize_text,
+    page_version,
     parse_memory_file,
     parse_page_metadata,
     receipt,
     render_memory_file,
     repair_memory_file,
-    sha256_text,
     stored_fact,
     unicode_chars,
     validate_document,
@@ -66,7 +66,7 @@ from keepygaga.paths import (
     is_dynamic_path,
 )
 
-VERSION_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+VERSION_RE = re.compile(r"^[0-9a-f]{40}$")
 
 
 @dataclass(frozen=True)
@@ -295,7 +295,7 @@ class MemoryStore:
                 path=relative,
                 document=parse_memory_file(text, relative),
                 text=text,
-                version=sha256_text(text),
+                version=page_version(text),
             )
         return files
 
@@ -455,7 +455,7 @@ class MemoryStore:
                     repairable=repairable,
                     recovery=recovery,
                     raw=text if repairable else None,
-                    version=sha256_text(text) if repairable else None,
+                    version=page_version(text) if repairable else None,
                 ) from exc
             listing.append(
                 {
@@ -497,7 +497,7 @@ class MemoryStore:
                 path=path,
                 document=parse_memory_file(text, path),
                 text=text,
-                version=sha256_text(text),
+                version=page_version(text),
             )
         return {
             "status": "ok",
@@ -707,7 +707,7 @@ class MemoryStore:
                         "Call list for the same scope again; do not retry the stale repair."
                     ),
                 ) from exc
-            version = sha256_text(text)
+            version = page_version(text)
             if version != operation.if_version:
                 raise MemoryValidationError(
                     "write_conflict",
@@ -1206,7 +1206,7 @@ class MemoryStore:
                     "write_conflict",
                     f"memory path disappeared during mutation: {relative}",
                 ) from exc
-            if sha256_text(text) != before.version:
+            if page_version(text) != before.version:
                 raise MemoryValidationError(
                     "write_conflict", f"memory file changed during mutation: {relative}"
                 )
@@ -1228,7 +1228,7 @@ class MemoryStore:
             path=path,
             document=document,
             text=text,
-            version=sha256_text(text),
+            version=page_version(text),
         )
 
     def _read_item(self, loaded: LoadedFile) -> dict[str, object]:

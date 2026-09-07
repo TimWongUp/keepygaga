@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import subprocess
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from threading import Barrier
@@ -301,6 +300,7 @@ def test_status_plan_distinguishes_update_from_initialization(
     tmp_path: Path, monkeypatch, uv_tool_root: Path
 ) -> None:
     monkeypatch.setattr(installer, "_channel", lambda: "uv-tool")
+    monkeypatch.setattr(installer, "_install_source", lambda: "release-wheel")
     config_path = tmp_path / "config.toml"
 
     update = installer.status(
@@ -325,6 +325,7 @@ def test_status_plan_distinguishes_activate_repair_and_no_op(
     config_path = tmp_path / "config.toml"
     memory_root = tmp_path / "memory"
     monkeypatch.setattr(installer, "_channel", lambda: "uv-tool")
+    monkeypatch.setattr(installer, "_install_source", lambda: "release-wheel")
     monkeypatch.setattr(
         installer,
         "_call_host",
@@ -371,6 +372,7 @@ def test_status_plan_keeps_unreconciled_sibling_stale(
     config_path = tmp_path / "config.toml"
     memory_root = tmp_path / "memory"
     monkeypatch.setattr(installer, "_channel", lambda: "uv-tool")
+    monkeypatch.setattr(installer, "_install_source", lambda: "release-wheel")
     monkeypatch.setattr(
         installer,
         "_call_host",
@@ -408,6 +410,7 @@ def test_planned_status_reads_only_the_current_host_contract(
     config_path = tmp_path / "config.toml"
     memory_root = tmp_path / "memory"
     monkeypatch.setattr(installer, "_channel", lambda: "uv-tool")
+    monkeypatch.setattr(installer, "_install_source", lambda: "release-wheel")
     monkeypatch.setattr(installer, "_call_host", lambda *_args: {"status": "no_op"})
     installer.install(config_path, memory_root, ["codex", "claude-code"])
     checked: list[str] = []
@@ -447,6 +450,7 @@ def test_status_plan_never_downgrades_or_switches_a_specific_owner(
     tmp_path: Path, monkeypatch
 ) -> None:
     monkeypatch.setattr(installer, "_channel", lambda: "uv-tool")
+    monkeypatch.setattr(installer, "_install_source", lambda: "release-wheel")
     monkeypatch.setattr(installer, "__version__", "1.0.0")
     newer = installer.status(
         tmp_path / "config.toml",
@@ -503,6 +507,7 @@ def test_status_plan_refuses_invalid_recorded_owner(
     tmp_path: Path, monkeypatch, recorded: object
 ) -> None:
     monkeypatch.setattr(installer, "_channel", lambda: "uv-tool")
+    monkeypatch.setattr(installer, "_install_source", lambda: "release-wheel")
     monkeypatch.setattr(
         installer,
         "_load_state",
@@ -581,6 +586,7 @@ def test_status_plan_sends_contract_conflict_to_manual_review(
     config_path = tmp_path / "config.toml"
     memory_root = tmp_path / "memory"
     monkeypatch.setattr(installer, "_channel", lambda: "uv-tool")
+    monkeypatch.setattr(installer, "_install_source", lambda: "release-wheel")
     monkeypatch.setattr(installer, "_call_host", lambda *_args: {"status": "no_op"})
     installer.install(config_path, memory_root, ["codex"])
     monkeypatch.setattr(installer, "_contract_status", lambda _host: "conflict")
@@ -600,6 +606,7 @@ def test_status_plan_checks_contract_conflict_before_unrecorded_activation(
     config_path = tmp_path / "config.toml"
     memory_root = tmp_path / "memory"
     monkeypatch.setattr(installer, "_channel", lambda: "uv-tool")
+    monkeypatch.setattr(installer, "_install_source", lambda: "release-wheel")
     monkeypatch.setattr(installer, "_call_host", lambda *_args: {"status": "no_op"})
     installer.install(config_path, memory_root, ["codex"])
     state = installer._load_state(config_path)
@@ -625,161 +632,6 @@ def test_status_plan_rejects_invalid_or_incomplete_request(tmp_path: Path) -> No
             latest_version="latest",
             host="codex",
         )
-
-
-def test_upgrade_without_recorded_hosts_skips_repair(
-    tmp_path: Path, monkeypatch, uv_tool_root: Path
-) -> None:
-    monkeypatch.setattr(installer, "_channel", lambda: "uv-tool")
-    monkeypatch.setattr(installer.shutil, "which", lambda name: f"/bin/{name}")
-    calls: list[list[str]] = []
-    monkeypatch.setattr(
-        installer,
-        "run_captured",
-        lambda command, **_kwargs: (
-            calls.append(command)
-            or type("Result", (), {"returncode": 0, "stdout": "", "stderr": ""})()
-        ),
-    )
-
-    result = installer.upgrade(tmp_path / "config.toml", apply=True)
-
-    assert result["status"] == "applied"
-    assert result["repair"] == "skipped"
-    assert len(calls) == 1
-    state = installer._load_state(tmp_path / "config.toml")
-    assert state["installed_version"] == installer.package_version("keepygaga")
-    assert isinstance(state["upgrade_generation"], str)
-
-
-def test_upgrade_reports_concurrent_state_change(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, uv_tool_root: Path
-) -> None:
-    config_path = tmp_path / "config.toml"
-    state = installer.state_path(config_path)
-    initial = {
-        "schema_version": installer.INSTALLER_SCHEMA_VERSION,
-        "install_channel": "uv-tool",
-        "hosts": {},
-    }
-    state.write_text(json.dumps(initial), encoding="utf-8")
-    monkeypatch.setattr(installer, "_channel", lambda: "uv-tool")
-    monkeypatch.setattr(installer.shutil, "which", lambda name: f"/bin/{name}")
-
-    def change_state(command, **_kwargs):
-        concurrent = {**initial, "hosts": {"codex": {}}}
-        state.write_text(json.dumps(concurrent), encoding="utf-8")
-        return subprocess.CompletedProcess(command, 0, "", "")
-
-    monkeypatch.setattr(installer, "run_captured", change_state)
-
-    with pytest.raises(HostSetupPartialError, match="could not be verified") as caught:
-        installer.upgrade(config_path, apply=True)
-
-    assert caught.value.components["upgrade"]["status"] == "applied"  # type: ignore[index]
-    assert json.loads(state.read_text(encoding="utf-8"))["hosts"] == {"codex": {}}
-
-
-def test_upgrade_repairs_recorded_grok_host(tmp_path: Path, monkeypatch) -> None:
-    config_path = tmp_path / "config.toml"
-    monkeypatch.setattr(
-        installer,
-        "_read_state_snapshot",
-        lambda _path: (
-            {"install_channel": "uv-tool", "hosts": {"grok": {}}},
-            None,
-        ),
-    )
-    monkeypatch.setattr(installer.shutil, "which", lambda name: f"/bin/{name}")
-    monkeypatch.setattr(
-        installer,
-        "resolve_active_launcher",
-        lambda _name: Path("/active/bin/keepygaga"),
-    )
-    monkeypatch.setattr(installer, "_channel", lambda: "uv-tool")
-    tool_root = tmp_path / "uv" / "tools"
-    monkeypatch.setattr(installer, "_uv_tool_root", lambda: tool_root)
-    calls: list[tuple[list[str], dict[str, object]]] = []
-    monkeypatch.setattr(
-        installer,
-        "run_captured",
-        lambda command, **kwargs: (
-            calls.append((command, kwargs))
-            or subprocess.CompletedProcess(command, 0, "", "")
-        ),
-    )
-
-    result = installer.upgrade(config_path, apply=True)
-
-    assert result["status"] == "applied"
-    assert [command for command, _kwargs in calls] == [
-        ["/bin/uv", "tool", "upgrade", "keepygaga"],
-        [
-            str(Path("/active/bin/keepygaga")),
-            "--config",
-            str(config_path.resolve()),
-            "repair",
-            "--yes",
-        ],
-    ]
-    assert calls[0][1]["env"]["UV_TOOL_DIR"] == str(tool_root)  # type: ignore[index]
-
-
-def test_upgrade_timeout_becomes_host_setup_error(
-    tmp_path: Path, monkeypatch, uv_tool_root: Path
-) -> None:
-    monkeypatch.setattr(installer, "_channel", lambda: "uv-tool")
-    monkeypatch.setattr(installer.shutil, "which", lambda name: f"/bin/{name}")
-    monkeypatch.setattr(
-        installer,
-        "run_captured",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            subprocess.TimeoutExpired("uv", 300)
-        ),
-    )
-
-    try:
-        installer.upgrade(tmp_path / "config.toml", apply=True)
-    except HostSetupError as exc:
-        assert "could not be started" in str(exc)
-    else:
-        raise AssertionError("expected structured upgrade error")
-
-
-def test_upgrade_refuses_unknown_or_mismatched_install_owner(
-    tmp_path: Path, monkeypatch
-) -> None:
-    monkeypatch.setattr(installer, "_channel", lambda: "python-package")
-    with pytest.raises(HostSetupError, match="automatic upgrade"):
-        installer.upgrade(tmp_path / "config.toml", apply=True)
-
-    monkeypatch.setattr(installer, "_channel", lambda: "pipx")
-    with pytest.raises(HostSetupError, match="automatic upgrade"):
-        installer.upgrade(tmp_path / "config.toml", apply=True)
-
-    monkeypatch.setattr(installer, "_channel", lambda: "python-package")
-    monkeypatch.setattr(
-        installer,
-        "_read_state_snapshot",
-        lambda _path: ({"install_channel": "pipx"}, None),
-    )
-    with pytest.raises(HostSetupError, match="differs from or is not supported"):
-        installer.upgrade(tmp_path / "config.toml", apply=True)
-
-
-@pytest.mark.parametrize("recorded", ["mystery", [], {}, "python-package"])
-def test_upgrade_refuses_invalid_recorded_owner(
-    tmp_path: Path, monkeypatch, uv_tool_root: Path, recorded: object
-) -> None:
-    monkeypatch.setattr(installer, "_channel", lambda: "uv-tool")
-    monkeypatch.setattr(
-        installer,
-        "_read_state_snapshot",
-        lambda _path: ({"install_channel": recorded}, None),
-    )
-
-    with pytest.raises(HostSetupError, match="differs from or is not supported"):
-        installer.upgrade(tmp_path / "config.toml", apply=True)
 
 
 def test_memory_init_partial_commit_preserves_evidence(
@@ -848,101 +700,12 @@ def test_first_host_partial_failure_reports_created_config_and_memory(
         raise AssertionError("expected complete partial evidence")
 
 
-def test_upgrade_repair_failure_reports_partial_evidence(
-    tmp_path: Path, monkeypatch, uv_tool_root: Path
-) -> None:
-    monkeypatch.setattr(installer, "_channel", lambda: "uv-tool")
-    monkeypatch.setattr(
-        installer,
-        "_read_state_snapshot",
-        lambda _path: (
-            {"install_channel": "uv-tool", "hosts": {"codex": {}}},
-            None,
-        ),
-    )
-    monkeypatch.setattr(
-        installer,
-        "resolve_active_launcher",
-        lambda _name: Path("/active/bin/keepygaga"),
-    )
-    monkeypatch.setattr(installer.shutil, "which", lambda name: f"/bin/{name}")
-    results = iter((0, 1))
-    monkeypatch.setattr(
-        installer,
-        "run_captured",
-        lambda *_args, **_kwargs: type(
-            "Result",
-            (),
-            {"returncode": next(results), "stdout": "", "stderr": "repair failed"},
-        )(),
-    )
-
-    try:
-        installer.upgrade(tmp_path / "config.toml", apply=True)
-    except HostSetupPartialError as exc:
-        assert exc.components["upgrade"]["status"] == "applied"  # type: ignore[index]
-        assert exc.components["repair"]["status"] == "failed"  # type: ignore[index]
-    else:
-        raise AssertionError("expected partial upgrade evidence")
-
-
-def test_upgrade_missing_active_launcher_preserves_partial_evidence(
-    tmp_path: Path, monkeypatch, uv_tool_root: Path
-) -> None:
-    monkeypatch.setattr(installer, "_channel", lambda: "uv-tool")
-    monkeypatch.setattr(
-        installer,
-        "_read_state_snapshot",
-        lambda _path: (
-            {"install_channel": "uv-tool", "hosts": {"codex": {}}},
-            None,
-        ),
-    )
-    monkeypatch.setattr(installer.shutil, "which", lambda name: f"/bin/{name}")
-    monkeypatch.setattr(
-        installer,
-        "resolve_active_launcher",
-        lambda _name: (_ for _ in ()).throw(RuntimeError("launcher missing")),
-    )
-    monkeypatch.setattr(
-        installer,
-        "run_captured",
-        lambda command, **_kwargs: subprocess.CompletedProcess(command, 0, "", ""),
-    )
-
-    with pytest.raises(HostSetupPartialError) as caught:
-        installer.upgrade(tmp_path / "config.toml", apply=True)
-
-    assert caught.value.components["upgrade"]["status"] == "applied"  # type: ignore[index]
-    assert caught.value.components["repair"]["status"] == "failed"  # type: ignore[index]
-
-
-def test_upgrade_failure_with_missing_streams_stays_structured(
-    tmp_path: Path, monkeypatch, uv_tool_root: Path
-) -> None:
-    monkeypatch.setattr(installer, "_channel", lambda: "uv-tool")
-    monkeypatch.setattr(installer.shutil, "which", lambda name: f"/bin/{name}")
-    monkeypatch.setattr(
-        installer,
-        "run_captured",
-        lambda *_args, **_kwargs: subprocess.CompletedProcess(
-            ["uv", "tool", "upgrade", "keepygaga"], 1, None, None
-        ),
-    )
-
-    try:
-        installer.upgrade(tmp_path / "config.toml", apply=True)
-    except HostSetupError as exc:
-        assert "unknown uv error" in str(exc)
-    else:
-        raise AssertionError("expected structured upgrade error")
-
-
 def test_status_detects_live_mcp_and_hook_drift_without_writes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, uv_tool_root: Path
 ) -> None:
     monkeypatch.setattr(Path, "home", classmethod(lambda _cls: tmp_path))
     monkeypatch.setattr(installer, "_channel", lambda: "uv-tool")
+    monkeypatch.setattr(installer, "_install_source", lambda: "release-wheel")
     config_path = tmp_path / "config.toml"
     memory_root = tmp_path / "memory"
     installer.install(config_path, memory_root, ["workbuddy"])
@@ -986,3 +749,73 @@ def test_status_detects_live_mcp_and_hook_drift_without_writes(
     assert hooks_path.read_text(encoding="utf-8") == "invalid JSON"
     assert state_path.read_bytes() == original_state
     assert mcp_path.read_bytes() == original_mcp
+
+
+@pytest.mark.parametrize("apply", [False, True])
+def test_upgrade_requires_explicit_wheel_replacement(
+    tmp_path: Path, apply: bool
+) -> None:
+    config = tmp_path / "config.toml"
+    result = installer.upgrade(config, apply=apply)
+    assert result["status"] == "manual_review"
+    assert "uv tool install --force" in str(result["message"])
+    assert not list(tmp_path.iterdir())
+
+
+@pytest.mark.parametrize(
+    ("metadata", "expected"),
+    [
+        ({"url": "file:///checkout", "dir_info": {"editable": True}}, "editable"),
+        ({"url": "file:///checkout", "dir_info": {}}, "source-directory"),
+        ({"url": "https://github.com/example/repo", "vcs_info": {}}, "vcs"),
+        ({"url": "file:///keepygaga.whl", "archive_info": {}}, "local-archive"),
+        (
+            {"url": "https://example.com/keepygaga.whl", "archive_info": {}},
+            "other-archive",
+        ),
+        ({}, "unknown"),
+        (
+            {
+                "url": "https://github.com/TimWongUp/keepygaga/releases/download/"
+                f"v{installer.__version__}/keepygaga-{installer.__version__}-py3-none-any.whl",
+                "archive_info": {},
+            },
+            "release-wheel",
+        ),
+    ],
+)
+def test_runtime_plan_uses_live_source_metadata(
+    monkeypatch, metadata, expected
+) -> None:
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(
+        installer,
+        "distribution",
+        lambda _: SimpleNamespace(read_text=lambda _: json.dumps(metadata)),
+    )
+    monkeypatch.setattr(installer, "_channel", lambda: "uv-tool")
+    for version in (installer.__version__, "99.0.0"):
+        base, result = installer._runtime_lifecycle(
+            {}, latest_version=version, host="codex"
+        )
+        assert base["install_source"] == expected
+        if expected == "local-archive" and version == installer.__version__:
+            assert result is None
+        elif expected != "release-wheel":
+            assert result is not None and result["action"] == "manual_review"
+        elif version == "99.0.0":
+            assert result is not None and result["action"] == "update"
+        else:
+            assert result is None
+
+
+def test_same_version_local_wheel_can_initialize(tmp_path, monkeypatch, uv_tool_root):
+    monkeypatch.setattr(installer, "_channel", lambda: "uv-tool")
+    monkeypatch.setattr(installer, "_install_source", lambda: "local-archive")
+    result = installer.status(
+        tmp_path / "config.toml", latest_version=installer.__version__, host="codex"
+    )
+    lifecycle = result["lifecycle"]
+    assert isinstance(lifecycle, dict)
+    assert lifecycle["action"] == "initialize"

@@ -57,7 +57,7 @@ Restart the terminal so the tool directory is on `PATH`, then run `keepygaga ins
 
 The checksum detects corruption or an asset mismatch. It is not a signature, provenance proof, independent publisher authentication, or verification of dependencies resolved from the package index.
 
-Interactive installation first offers a Memory Root path, then detects available hosts without selecting them on the user's behalf. Point it at an existing `agents-memory` tree to connect another Agent to the same memory. Once configured, later installs reuse that root automatically. Automation must name every target explicitly:
+Interactive installation first offers a Memory Root path, then detects available hosts without selecting them on the user's behalf. Point it at an existing `agents-memory` tree to connect another Agent to the same memory. Once configured, later installs reuse that root automatically. `--yes` disables prompts even in a TTY, reuses the configured Memory Root or the platform default, and requires explicit target hosts:
 
 ```shell
 keepygaga install --yes --host codex --host claude-code
@@ -98,6 +98,10 @@ keepygaga uninstall --yes
 `status` treats the install-state file as discovery data only and reports when live host verification is still required. With the latest official release tag and current host, it returns a read-only lifecycle action: `update`, `initialize`, `activate`, `repair`, `no_op`, or `manual_review`. A missing launcher is the separate clean-install case. `repair` reconciles recorded hosts from their current configuration. `uninstall` removes only Keepygaga host wiring; it preserves the configuration and memory tree.
 
 For a current-host-only update, download the newer wheel and matching `SHA256SUMS`, rehash the exact absolute wheel path, set `UV_TOOL_DIR` to the `lifecycle.tool_root` returned by planned `status` for that command, run `uv tool install --force /absolute/private/path/keepygaga-X.Y.Z-py3-none-any.whl`, then run `keepygaga install --yes --host HOST`. Run `keepygaga repair --yes` instead only when you intentionally want to reconcile every recorded host.
+
+`keepygaga upgrade` returns `manual_review` without changing anything: `uv tool upgrade` cannot discover a newer versioned Release wheel. Live installation metadata distinguishes the package manager from its source; locally downloaded archives require origin verification before runtime replacement because their metadata does not retain the official download URL. Same-version initialization and host reconciliation remain available without replacing the runtime.
+
+Claude Code lifecycle commands honor `CLAUDE_CONFIG_DIR`; keep that environment variable set for install, status, repair, and uninstall.
 
 Advanced deterministic host commands remain available as `keepygaga host setup|uninstall HOST`.
 

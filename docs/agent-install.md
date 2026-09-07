@@ -23,6 +23,8 @@ Use this procedure when a user asks an Agent to install or update Keepygaga. Opt
 
 Do not inventory, activate, repair, or rewrite sibling Agents on the fast path. Existing valid configuration, `profile.md`, `preferences.md`, and dynamic pages are user data and are reused without another initialization interview.
 
+A local archive at the selected version may proceed to initialization or host reconciliation without runtime replacement; matching versions do not prove publisher authenticity. For `manual_review` caused by a local archive that needs replacement, inspect the existing installation evidence. A local filename or matching version is insufficient to prove official origin. Continue only after the source is independently verified and any replacement of an unknown source is explicitly authorized; otherwise report the blocker. `uv-tool` names the package manager, not the publisher.
+
 This step is complete when exactly one lifecycle action is selected.
 
 ## 2. Install or update the runtime when selected
@@ -38,7 +40,7 @@ For `install` or `update`, download the versioned `keepygaga-X.Y.Z-py3-none-any.
 
 The user already authorized the selected ordinary install or update by invoking this procedure. Report verification failures and unexpected commands instead of requesting ceremonial confirmation for the known wheel, checksum, or owner-correct command.
 
-After `install` or `update`, rerun `keepygaga status --latest-version TAG --host HOST` and use its post-runtime `lifecycle.action` for the next section.
+The `upgrade` command provides manual guidance only. After `install` or `update`, verify the selected version with a fresh installed launcher, then rerun `keepygaga status --latest-version TAG --host HOST` and use its post-runtime `lifecycle.action` for the next section.
 
 This step is complete when the stable `keepygaga` and `keepygaga-mcp` launchers resolve to the selected version and the post-runtime lifecycle action is known, or when no runtime change was selected.
 
@@ -54,9 +56,11 @@ Extract initialization candidates from the current host's effective global-rules
 
 If initialization or a concrete duplicate requires moving meanings between Home Pages and global rules, follow [Home Page source migration](source-migration.md). That is an exception branch, not part of a routine update, activation, repair, or `no_op` run.
 
-For a default host home, use `keepygaga install --yes --host HOST`; on first initialization with a selected non-default Memory Root, add `--memory-root PATH`. This idempotent command creates missing empty structure, preserves existing pages, registers the MCP server, and projects the managed Contract and owned Hooks for the current host.
+For a default host home, or Claude Code with `CLAUDE_CONFIG_DIR` set, use `keepygaga install --yes --host HOST`; on first initialization with a selected non-default Memory Root, add `--memory-root PATH`. This idempotent command creates missing empty structure, preserves existing pages, registers the MCP server, and projects the managed Contract and owned Hooks for the current host.
 
-For a custom host home with an existing valid config and initialized Memory Root, use `keepygaga --config CONFIG host setup HOST --host-home PATH`, or `--codex-home PATH` for Codex. First installation into a custom home remains outside the recommended path and returns `manual_review`.
+Keep `CLAUDE_CONFIG_DIR` set for every Claude lifecycle operation so MCP, rules, and Hooks resolve to the same effective directory. `--yes` never prompts; it reuses the configured Memory Root or the platform default and requires an explicit host.
+
+For other custom host homes with an existing valid config and initialized Memory Root, use `keepygaga --config CONFIG host setup HOST --host-home PATH`, or `--codex-home PATH` for Codex. First installation into a custom home remains outside the recommended path and returns `manual_review`.
 
 Treat `partial_commit`, malformed configuration, ambiguous ownership markers, unsafe paths, and concurrent changes as conflicts. Preserve the reported evidence and ask before any recovery that overwrites or deletes live data.
 

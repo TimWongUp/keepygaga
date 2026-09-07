@@ -110,12 +110,13 @@ def test_core_memory_v1_contract_matches_current_page_format() -> None:
         ]
 
     manifest = json.loads((CONTRACT_ROOT / "contract.json").read_text(encoding="utf-8"))
-    assert manifest["schema_version"] == 2
+    assert manifest["schema_version"] == 3
     assert manifest["page_version"] == {
         "normalization": "crlf-and-cr-to-lf",
         "encoding": "utf-8",
-        "algorithm": "sha256",
-        "prefix": "sha256:",
+        "algorithm": "sha1",
+        "prefix": "",
+        "hex_chars": 40,
     }
     assert manifest["fact_normalization"] == {
         "line_pattern": codec.FACT_LINE_RE.pattern,
@@ -144,7 +145,7 @@ def test_core_memory_v1_contract_matches_current_page_format() -> None:
     with pytest.raises(ValidationError):
         Fact(basis="stated", content="x" * (codec.MAX_FACT_CONTENT_CHARS + 1))
     assert manifest["fixtures"] == {
-        relative: codec.sha256_text(
+        relative: codec.page_version(
             codec.normalize_text((CONTRACT_ROOT / relative).read_text(encoding="utf-8"))
         )
         for relative in (
@@ -691,7 +692,7 @@ def test_batch_preflight_failure_writes_nothing(
             ),
             AddOperation(
                 path="preferences.md",
-                if_version="sha256:" + "0" * 64,
+                if_version="0" * 40,
                 facts=[fact("Also rejected.")],
             ),
         ]
@@ -1287,7 +1288,7 @@ def test_delete_requires_authorization_and_protects_fixed_pages(
         DeletePageOperation.model_validate(
             {
                 "path": "topics/page.md",
-                "if_version": "sha256:" + "0" * 64,
+                "if_version": "0" * 40,
                 "target": "page",
                 "authorization": "implicit",
             }
@@ -1401,7 +1402,7 @@ def test_canonical_paths_and_symlinks_are_rejected(
         [
             RepairPageOperation(
                 path="topics/leak.md",
-                if_version="sha256:" + "0" * 64,
+                if_version="0" * 40,
                 target="repair",
             )
         ]
@@ -1456,7 +1457,7 @@ def test_page_symlink_is_rejected_by_list_read_repair_and_write(
         [
             RepairPageOperation(
                 path="topics/linked.md",
-                if_version="sha256:" + "0" * 64,
+                if_version="0" * 40,
                 target="repair",
             )
         ]
@@ -1466,7 +1467,7 @@ def test_page_symlink_is_rejected_by_list_read_repair_and_write(
         [
             AddOperation(
                 path="topics/linked.md",
-                if_version="sha256:" + "0" * 64,
+                if_version="0" * 40,
                 facts=[fact("Do not write.")],
             )
         ]
@@ -1536,7 +1537,7 @@ def test_repair_rejects_fifo_without_blocking(
         [
             RepairPageOperation(
                 path="topics/pipe.md",
-                if_version="sha256:" + "0" * 64,
+                if_version="0" * 40,
                 target="repair",
             )
         ]
@@ -2623,12 +2624,12 @@ def test_repair_batch_stale_second_page_writes_nothing(
         [
             RepairPageOperation(
                 path="topics/one.md",
-                if_version=codec.sha256_text(originals["topics/one.md"]),
+                if_version=codec.page_version(originals["topics/one.md"]),
                 target="repair",
             ),
             RepairPageOperation(
                 path="topics/two.md",
-                if_version="sha256:" + "0" * 64,
+                if_version="0" * 40,
                 target="repair",
             ),
         ]
@@ -2658,7 +2659,7 @@ def test_oversized_invalid_page_is_not_returned_or_mechanically_repaired(
         [
             RepairPageOperation(
                 path="topics/huge.md",
-                if_version=codec.sha256_text(page.read_text(encoding="utf-8")),
+                if_version=codec.page_version(page.read_text(encoding="utf-8")),
                 target="repair",
             )
         ]

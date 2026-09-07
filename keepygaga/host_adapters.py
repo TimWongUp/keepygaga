@@ -141,7 +141,9 @@ CLAUDE_CODE = JsonHostSpec(
     host="claude-code",
     default_home=".claude",
     rules_relative=Path("CLAUDE.md"),
-    mcp_path=lambda home: home.parent / ".claude.json",
+    mcp_path=lambda home: (
+        (home if os.environ.get("CLAUDE_CONFIG_DIR") else home.parent) / ".claude.json"
+    ),
     hook_relative=Path("settings.json"),
     hook_fragment="claude",
     mcp_fields={"type": "stdio"},
@@ -175,6 +177,12 @@ _validated_source = validate_host_source
 def _resolve_home(
     selected: Path | None, default_name: str, label: str, *, create: bool = True
 ) -> Path:
+    if (
+        selected is None
+        and label == "claude-code"
+        and os.environ.get("CLAUDE_CONFIG_DIR")
+    ):
+        selected = Path(os.environ["CLAUDE_CONFIG_DIR"])
     raw = selected.expanduser() if selected is not None else Path.home() / default_name
     if not raw.is_absolute():
         raise HostSetupError(f"{label} home must be an absolute path: {raw}")

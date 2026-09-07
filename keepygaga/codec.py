@@ -59,9 +59,8 @@ def unicode_chars(text: str) -> int:
     return len(normalize_text(text))
 
 
-def sha256_text(text: str) -> str:
-    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
-    return f"sha256:{digest}"
+def page_version(text: str) -> str:
+    return hashlib.sha1(text.encode("utf-8"), usedforsecurity=False).hexdigest()
 
 
 class StrictModel(BaseModel):
