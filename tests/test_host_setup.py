@@ -414,6 +414,7 @@ def test_codex_cli_discovery_prefers_newest_desktop_binary(
     for binary in (older_desktop, current_desktop, path_codex):
         binary.parent.mkdir(parents=True, exist_ok=True)
         binary.touch()
+        binary.chmod(0o755)
     os.utime(older_desktop, (1, 1))
     os.utime(current_desktop, (2, 2))
     monkeypatch.setattr(host_setup.sys, "platform", "win32")
