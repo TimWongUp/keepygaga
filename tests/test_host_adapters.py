@@ -1525,3 +1525,45 @@ def test_hermes_uninstall_skips_empty_hooks_target(
 
     assert result["hooks"]["status"] == "no_op"  # type: ignore[index]
     assert (home / "config.yaml").read_text(encoding="utf-8") == original
+
+
+def test_claude_config_dir_lifecycle_preserves_siblings(tmp_path, monkeypatch) -> None:
+    from keepygaga import installer
+
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    home = tmp_path / "custom Claude 配置"
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(home))
+    home.mkdir()
+    mcp = home / ".claude.json"
+    mcp.write_text(json.dumps({"mcpServers": {"other": {"command": "other"}}}))
+    (home / "CLAUDE.md").write_text("# Personal rules\n")
+    sibling_hook = {
+        "matcher": "",
+        "hooks": [{"type": "command", "command": "echo sibling"}],
+    }
+    (home / "settings.json").write_text(
+        json.dumps({"env": {"KEEP": "yes"}, "hooks": {"SessionStart": [sibling_hook]}})
+    )
+    config_path, config = setup_source(tmp_path)
+    memory = Path(config.memory.root)
+    before = {p.name: p.read_bytes() for p in memory.glob("*.md")}
+
+    first = installer.install(config_path, memory, ["claude-code"])
+    assert first["status"] == "applied"
+    assert installer.install(config_path, memory, ["claude-code"])["status"] == "no_op"
+    status = installer.status(config_path)
+    hosts = status["hosts"]
+    assert isinstance(hosts, dict)
+    assert hosts["claude-code"]["contract"] == "current"
+    assert hosts["claude-code"]["wiring"] == "current"
+    assert installer.repair(config_path)["status"] == "no_op"
+    assert installer.uninstall(config_path, ["claude-code"])["status"] == "applied"
+    assert installer.uninstall(config_path, ["claude-code"])["status"] == "no_op"
+    assert json.loads(mcp.read_text())["mcpServers"] == {"other": {"command": "other"}}
+    assert (home / "CLAUDE.md").read_text() == "# Personal rules\n\n"
+    settings = json.loads((home / "settings.json").read_text())
+    assert settings["env"] == {"KEEP": "yes"}
+    assert settings["hooks"]["SessionStart"] == [sibling_hook]
+    assert {p.name: p.read_bytes() for p in memory.glob("*.md")} == before
+    assert not (tmp_path / ".claude").exists()
+    assert not (tmp_path / ".claude.json").exists()

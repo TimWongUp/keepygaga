@@ -6,15 +6,11 @@ import importlib
 import json
 import os
 import re
-import shutil
-import subprocess
 import sys
 import tomllib
-import uuid
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
-from importlib.metadata import PackageNotFoundError
-from importlib.metadata import version as package_version
+from importlib.metadata import PackageNotFoundError, distribution
 from pathlib import Path
 from typing import Any
 
@@ -32,12 +28,9 @@ from keepygaga.host_common import (
     HostSetupError,
     HostSetupPartialError,
     atomic_write,
-    captured_output,
     load_canonical_contract,
     parse_managed_block,
-    run_captured,
 )
-from keepygaga.launchers import resolve_active_launcher
 from keepygaga.memory import initialize_memory_tree
 from keepygaga.memory_files import _memory_lock
 from keepygaga.version import (
@@ -272,6 +265,33 @@ def _channel() -> str:
     if any("/pipx/venvs/keepygaga/" in location for location in locations):
         return "pipx"
     return "python-package"
+
+
+def _install_source() -> str:
+    """Classify live PEP 610 metadata; a local archive does not prove provenance."""
+    try:
+        raw = distribution("keepygaga").read_text("direct_url.json")
+        source = json.loads(raw) if raw else {}
+    except (PackageNotFoundError, OSError, UnicodeError, ValueError):
+        return "unknown"
+    if not isinstance(source, dict):
+        return "unknown"
+    directory = source.get("dir_info")
+    if isinstance(directory, dict):
+        return "editable" if directory.get("editable") else "source-directory"
+    if "vcs_info" in source:
+        return "vcs"
+    url = source.get("url")
+    if not isinstance(url, str) or not isinstance(source.get("archive_info"), dict):
+        return "unknown"
+    version = re.escape(__version__)
+    if re.fullmatch(
+        rf"https://github\.com/TimWongUp/keepygaga/releases/download/v{version}/"
+        rf"keepygaga-{version}-py3-none-any\.whl",
+        url,
+    ):
+        return "release-wheel"
+    return "local-archive" if url.startswith("file:") else "other-archive"
 
 
 def _release_version(
@@ -541,6 +561,9 @@ def _rules_path(host: str) -> Path:
             "keepygaga.host_setup"
         ).resolve_codex_agents_path
         return resolver(codex_home)
+    if host == "claude-code":
+        adapter = importlib.import_module("keepygaga.host_adapters")
+        return adapter._resolve_home(None, ".claude", host, create=False) / "CLAUDE.md"
     if host == "grok":
         grok_home = home / ".grok"
         if not grok_home.exists():
@@ -550,7 +573,6 @@ def _rules_path(host: str) -> Path:
         ).resolve_grok_rules_path
         return resolver(grok_home)
     return {
-        "claude-code": home / ".claude" / "CLAUDE.md",
         "workbuddy": home / ".workbuddy" / "CODEBUDDY.md",
         "hermes": home / ".hermes" / "SOUL.md",
         "antigravity": home / ".gemini" / "AGENTS.md",
@@ -613,6 +635,7 @@ def _runtime_lifecycle(
         "current_version": current,
         "latest_version": latest,
         "install_channel": live_channel,
+        "install_source": _install_source(),
         "host": host,
     }
     tool_root = _uv_tool_root()
@@ -629,6 +652,13 @@ def _runtime_lifecycle(
             base,
             "manual_review",
             "the installation owner is unknown; matching versions do not verify a release runtime",
+        )
+    if live_channel == "uv-tool" and base["install_source"] != "release-wheel":
+        return base, _lifecycle_result(
+            base,
+            "manual_review",
+            "the installation source is not a confirmed official Release URL; "
+            "verify its origin before replacing the runtime",
         )
     if current_parts < latest_parts:
         if live_channel != "uv-tool":
@@ -801,6 +831,7 @@ def status(
         "status": "ok" if doctor.get("status") != "error" else "error",
         "application_version": __version__,
         "install_channel": _channel(),
+        "install_source": _install_source(),
         "recorded_application_version": state.get("installed_version"),
         "recorded_install_channel": state.get("install_channel"),
         "config_path": str(config_path.resolve()),
@@ -828,120 +859,22 @@ def status(
     return payload
 
 
-def _upgrade_command(
-    state: Mapping[str, Any],
-) -> tuple[str, list[str], dict[str, str] | None]:
-    channel = _channel()
-    if _recorded_channel_conflicts(state, channel):
-        raise HostSetupError(
-            "the live installation owner differs from or is not supported by the recorded "
-            "owner; resolve it before upgrading"
-        )
-    environment = None
-    if channel == "uv-tool":
-        tool_root = _uv_tool_root()
-        executable = shutil.which("uv")
-        if executable and tool_root is not None:
-            command = [executable, "tool", "upgrade", "keepygaga"]
-            environment = dict(os.environ)
-            environment["UV_TOOL_DIR"] = str(tool_root)
-        else:
-            command = []
-    else:
-        command = []
-    return channel, command, environment
-
-
 def upgrade(config_path: Path, *, apply: bool) -> dict[str, object]:
-    state, state_snapshot = _read_state_snapshot(config_path)
-    channel, command, environment = _upgrade_command(state)
-    if not command:
-        raise HostSetupError(
-            f"automatic upgrade for {channel} could not locate its package manager; "
-            "reinstall a newer GitHub Release wheel manually"
-        )
-    if not apply:
-        return {
-            "status": "approval_required",
-            "command": command,
-            "message": "rerun with --yes to upgrade the installed release and repair recorded hosts",
-        }
-    try:
-        completed = run_captured(command, timeout=300, env=environment)
-    except (OSError, subprocess.SubprocessError) as exc:
-        raise HostSetupError(f"Keepygaga upgrade could not be started: {exc}") from exc
-    if completed.returncode != 0:
-        detail = captured_output(completed) or "unknown uv error"
-        raise HostSetupError(f"Keepygaga upgrade failed: {detail}")
-    upgrade_component = {"status": "applied", "command": command}
-    try:
-        upgraded_version, _ = _release_version(
-            package_version("keepygaga"), label="upgraded application version"
-        )
-        config = load_config(config_path)
-        memory_root = (
-            Path(config.memory.root).expanduser().resolve()
-            if config.memory.root.strip()
-            else default_memory_root()
-        )
-        raw_hosts = state.get("hosts", {})
-        _write_state(
-            config_path,
-            memory_root,
-            raw_hosts if isinstance(raw_hosts, Mapping) else {},
-            expected_original=state_snapshot,
-            installed_version=upgraded_version,
-            upgrade_generation=uuid.uuid4().hex,
-        )
-    except (HostSetupError, PackageNotFoundError) as exc:
-        raise HostSetupPartialError(
-            f"Keepygaga upgraded but install state could not be verified: {exc}",
-            {
-                "upgrade": upgrade_component,
-                "repair": {"status": "failed", "message": str(exc)},
-            },
-        ) from exc
-    if not isinstance(raw_hosts, Mapping) or not raw_hosts:
-        return {
-            "status": "applied",
-            "command": command,
-            "repair": "skipped",
-            "message": "runtime upgraded; no recorded hosts required repair",
-        }
-    try:
-        launcher = resolve_active_launcher("keepygaga")
-        repair_command = [
-            str(launcher),
-            "--config",
-            str(config_path.resolve()),
-            "repair",
-            "--yes",
-        ]
-        repaired = run_captured(repair_command, timeout=300)
-    except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
-        raise HostSetupPartialError(
-            f"Keepygaga upgraded but repair could not be started: {exc}",
-            {
-                "upgrade": upgrade_component,
-                "repair": {"status": "failed", "message": str(exc)},
-            },
-        ) from exc
-    if repaired.returncode != 0:
-        detail = captured_output(repaired) or "unknown repair error"
-        raise HostSetupPartialError(
-            f"Keepygaga upgraded but host repair failed: {detail}",
-            {
-                "upgrade": upgrade_component,
-                "repair": {
-                    "status": "failed",
-                    "command": repair_command,
-                    "message": detail,
-                },
-            },
-        )
+    """A versioned wheel requires explicit replacement, not manager discovery."""
+    del config_path, apply
     return {
-        "status": "applied",
-        "command": command,
-        "repair_command": repair_command,
-        "message": "runtime upgraded and recorded hosts reconciled",
+        "status": "manual_review",
+        "install_channel": _channel(),
+        "install_source": _install_source(),
+        "message": (
+            "Automatic upgrade is unavailable. Download the selected official GitHub "
+            "Release wheel and SHA256SUMS, verify the wheel, and confirm the existing "
+            "installation source before replacing it through its package manager. "
+            "For a confirmed uv tool install, retain its UV_TOOL_DIR and run "
+            "uv tool install --force /absolute/path/keepygaga-X.Y.Z-py3-none-any.whl. "
+            "Start the installed launcher again to verify the selected version, then "
+            "run keepygaga install --yes --host HOST for each intended host. "
+            "No runtime or host configuration was changed."
+        ),
+        "release_url": "https://github.com/TimWongUp/keepygaga/releases/latest",
     }

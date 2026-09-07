@@ -585,3 +585,33 @@ def test_doctor_prints_json_and_reports_eight_tools(
     assert '"tools"' in captured.out
     assert '"list"' in captured.out
     assert '"delete"' in captured.out
+
+
+@pytest.mark.parametrize("tty", [False, True])
+def test_yes_install_never_prompts(tmp_path, monkeypatch, tty) -> None:
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: tty)
+    monkeypatch.setattr("builtins.input", lambda *_: pytest.fail("unexpected prompt"))
+    received = []
+    monkeypatch.setattr(
+        installer,
+        "install",
+        lambda config, root, hosts: (
+            received.append((root, hosts)) or {"status": "no_op"}
+        ),
+    )
+    config = tmp_path / "config.toml"
+    assert (
+        cli.main(["--config", str(config), "install", "--yes", "--host", "codex"]) == 0
+    )
+    assert received == [(installer.default_memory_root().resolve(), ["codex"])]
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["--config", str(config), "install", "--yes"])
+    assert exc.value.code == 2
+    assert len(received) == 1
+
+
+def test_upgrade_manual_review_is_nonzero(tmp_path, capsys) -> None:
+    assert (
+        cli.main(["--config", str(tmp_path / "config.toml"), "upgrade", "--yes"]) == 1
+    )
+    assert json.loads(capsys.readouterr().out)["status"] == "manual_review"
