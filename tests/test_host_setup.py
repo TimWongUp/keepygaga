@@ -403,6 +403,31 @@ def test_rules_use_base_when_override_is_empty(tmp_path: Path) -> None:
     assert override.read_bytes() == b"\r\n"
 
 
+def test_codex_cli_discovery_prefers_newest_desktop_binary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    local_app_data = tmp_path / "LocalAppData"
+    desktop_bin = local_app_data / "OpenAI" / "Codex" / "bin"
+    older_desktop = desktop_bin / "older" / "codex.exe"
+    current_desktop = desktop_bin / "current" / "codex.exe"
+    path_codex = tmp_path / "npm" / "codex.cmd"
+    for binary in (older_desktop, current_desktop, path_codex):
+        binary.parent.mkdir(parents=True, exist_ok=True)
+        binary.touch()
+        binary.chmod(0o755)
+    os.utime(older_desktop, (1, 1))
+    os.utime(current_desktop, (2, 2))
+    monkeypatch.setattr(host_setup.sys, "platform", "win32")
+    monkeypatch.setenv("LOCALAPPDATA", str(local_app_data))
+    monkeypatch.setattr(host_setup.os, "get_exec_path", lambda: [str(path_codex.parent)])
+    monkeypatch.setattr(host_setup.shutil, "which", lambda *_args, **_kwargs: str(path_codex))
+
+    candidates = host_setup._codex_binary_candidates(None)
+
+    assert candidates == (current_desktop.resolve(), older_desktop.resolve(), path_codex.resolve())
+    assert host_setup._select_codex_binary(None) == current_desktop.resolve()
+
+
 def test_mcp_registration_skips_matching_transport(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

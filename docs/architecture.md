@@ -56,6 +56,8 @@ Uninstall removes only the `keepygaga` MCP registration, managed Contract block,
 
 Host setup and uninstall use only built-in Hooks and stable launchers. Migration retains ownership-based removal of legacy Hook commands; it never loads an external merger, probes an external Hook runtime, or writes that runtime’s configuration.
 
+Codex host reconciliation accepts an explicit CLI path as authoritative. Otherwise, it prefers `CODEX_CLI_PATH`, then the newest bundled Codex Desktop CLI on Windows, before ordinary `PATH` discovery. This prevents a stale global npm CLI from interpreting a newer Desktop-owned `config.toml`; systems without a bundled Desktop CLI retain normal `PATH` behavior.
+
 ## Installation and versioning
 
 The canonical distribution path is a tagged GitHub Release installed as a `uv` tool. Source checkouts remain a contributor workflow, not the user update channel. Tag workflows inspect wheel and sdist inventories, persist one workflow-canonical distribution bundle before exposing individual artifacts, and verify the published asset set before making the Release public. Reruns do not overwrite that bundle, but this is not GitHub immutable-release enforcement or cryptographic provenance. PyPI is not an active release channel; enabling it later requires trusted publishing and must consume the same verified GitHub assets rather than rebuilding them.
