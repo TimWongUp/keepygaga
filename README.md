@@ -99,7 +99,7 @@ keepygaga uninstall --yes
 
 For a current-host-only update, download the newer wheel and matching `SHA256SUMS`, rehash the exact absolute wheel path, set `UV_TOOL_DIR` to the `lifecycle.tool_root` returned by planned `status` for that command, run `uv tool install --force /absolute/private/path/keepygaga-X.Y.Z-py3-none-any.whl`, then run `keepygaga install --yes --host HOST`. Run `keepygaga repair --yes` instead only when you intentionally want to reconcile every recorded host.
 
-`keepygaga upgrade` returns `manual_review` without changing anything: `uv tool upgrade` cannot discover a newer versioned Release wheel. Live installation metadata distinguishes the package manager from its source; locally downloaded archives require origin verification before replacement because their metadata does not retain the official download URL.
+`keepygaga upgrade` returns `manual_review` without changing anything: `uv tool upgrade` cannot discover a newer versioned Release wheel. Live installation metadata distinguishes the package manager from its source; locally downloaded archives require origin verification before runtime replacement because their metadata does not retain the official download URL. Same-version initialization and host reconciliation remain available without replacing the runtime.
 
 Claude Code lifecycle commands honor `CLAUDE_CONFIG_DIR`; keep that environment variable set for install, status, repair, and uninstall.
 

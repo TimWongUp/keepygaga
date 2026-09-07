@@ -800,9 +800,22 @@ def test_runtime_plan_uses_live_source_metadata(
             {}, latest_version=version, host="codex"
         )
         assert base["install_source"] == expected
-        if expected != "release-wheel":
+        if expected == "local-archive" and version == installer.__version__:
+            assert result is None
+        elif expected != "release-wheel":
             assert result is not None and result["action"] == "manual_review"
         elif version == "99.0.0":
             assert result is not None and result["action"] == "update"
         else:
             assert result is None
+
+
+def test_same_version_local_wheel_can_initialize(tmp_path, monkeypatch, uv_tool_root):
+    monkeypatch.setattr(installer, "_channel", lambda: "uv-tool")
+    monkeypatch.setattr(installer, "_install_source", lambda: "local-archive")
+    result = installer.status(
+        tmp_path / "config.toml", latest_version=installer.__version__, host="codex"
+    )
+    lifecycle = result["lifecycle"]
+    assert isinstance(lifecycle, dict)
+    assert lifecycle["action"] == "initialize"

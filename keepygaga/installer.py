@@ -653,7 +653,13 @@ def _runtime_lifecycle(
             "manual_review",
             "the installation owner is unknown; matching versions do not verify a release runtime",
         )
-    if live_channel == "uv-tool" and base["install_source"] != "release-wheel":
+    if (
+        live_channel == "uv-tool"
+        and base["install_source"] != "release-wheel"
+        and not (
+            base["install_source"] == "local-archive" and current_parts == latest_parts
+        )
+    ):
         return base, _lifecycle_result(
             base,
             "manual_review",

@@ -23,7 +23,7 @@ Use this procedure when a user asks an Agent to install or update Keepygaga. Opt
 
 Do not inventory, activate, repair, or rewrite sibling Agents on the fast path. Existing valid configuration, `profile.md`, `preferences.md`, and dynamic pages are user data and are reused without another initialization interview.
 
-For `manual_review` caused by a local archive, inspect the existing installation evidence. A local filename or matching version is insufficient to prove official origin. Continue only after the source is independently verified and any replacement of an unknown source is explicitly authorized; otherwise report the blocker. `uv-tool` names the package manager, not the publisher.
+A local archive at the selected version may proceed to initialization or host reconciliation without runtime replacement; matching versions do not prove publisher authenticity. For `manual_review` caused by a local archive that needs replacement, inspect the existing installation evidence. A local filename or matching version is insufficient to prove official origin. Continue only after the source is independently verified and any replacement of an unknown source is explicitly authorized; otherwise report the blocker. `uv-tool` names the package manager, not the publisher.
 
 This step is complete when exactly one lifecycle action is selected.
 

@@ -99,7 +99,7 @@ keepygaga uninstall --yes
 
 只更新当前宿主时，下载新版 wheel 与同一 Release 的 `SHA256SUMS`，在安装前立即重新校验将要执行的绝对路径，把该命令的 `UV_TOOL_DIR` 设为规划版 `status` 返回的 `lifecycle.tool_root`，再运行 `uv tool install --force /absolute/private/path/keepygaga-X.Y.Z-py3-none-any.whl`，最后执行 `keepygaga install --yes --host HOST`。只有明确要对齐所有已记录宿主时，才改用 `keepygaga repair --yes`。
 
-`keepygaga upgrade` 返回 `manual_review`，不修改运行时或宿主：`uv tool upgrade` 无法发现更新的版本化 Release wheel。安装来源与包管理器分别判断；本地下载的归档不会保留官方下载 URL，因此替换前需要独立核实原安装来源。
+`keepygaga upgrade` 返回 `manual_review`，不修改运行时或宿主：`uv tool upgrade` 无法发现更新的版本化 Release wheel。安装来源与包管理器分别判断；本地下载的归档不会保留官方下载 URL，因此替换运行时前需要独立核实原安装来源。同版本下仍可初始化或对齐宿主，无需替换运行时。
 
 Claude Code 生命周期命令遵循 `CLAUDE_CONFIG_DIR`；安装、状态检查、修复和卸载时应保持该环境变量一致。
 
