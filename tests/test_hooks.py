@@ -97,9 +97,11 @@ def test_builtin_fragment_replaces_entries_after_launcher_and_config_move(
     migrated = merge_hook_fragment(installed, new_fragment)
     commands = _commands(migrated)
 
-    assert all(str(tmp_path / "old") not in command for command in commands)
+    assert all((tmp_path / "old").as_posix() not in command for command in commands)
     assert sum(command.count("--owner=keepygaga-hook-v1") for command in commands) == 4
-    assert any(str(tmp_path / "new" / "keepygaga") in command for command in commands)
+    assert any(
+        (tmp_path / "new" / "keepygaga").as_posix() in command for command in commands
+    )
 
 
 def test_hook_merge_preserves_unrelated_generic_command(tmp_path: Path) -> None:
@@ -568,7 +570,7 @@ def test_windows_owner_marker_is_idempotent(tmp_path: Path, monkeypatch) -> None
 
     assert second == first
     command = fragment["payload"]["SessionStart"][0]["hooks"][0]["command"]
-    assert command.startswith(str(tmp_path / "keepygaga.exe"))
+    assert command.startswith((tmp_path / "keepygaga.exe").as_posix())
     assert '"' not in command
     assert "--config-base64" in command
     assert _decoded_config_path(command) == str(tmp_path / "config.toml")
@@ -588,7 +590,9 @@ def test_windows_launcher_with_spaces_remains_quoted(
     )
 
     command = fragment["payload"]["SessionStart"][0]["hooks"][0]["command"]
-    assert command.startswith(f'"{tmp_path / "Keepygaga Tool" / "keepygaga.exe"}"')
+    assert command.startswith(
+        f'"{(tmp_path / "Keepygaga Tool" / "keepygaga.exe").as_posix()}"'
+    )
     assert command.count('"') == 2
     assert "--config-base64" in command
     assert _decoded_config_path(command) == str(tmp_path / "config.toml")
@@ -688,3 +692,22 @@ def test_windows_codex_command_executes_through_command_shell(
         "<keepygaga-bootstrap>" if event == "SessionStart" else "记忆与资料路由规则"
     )
     assert expected in additional_context
+
+
+def test_hook_command_uses_posix_paths_on_windows(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(fragments.os, "name", "nt")
+    launcher = tmp_path / "venv" / "Scripts" / "keepygaga.exe"
+    config_path = tmp_path / "AppData" / "keepygaga.toml"
+    fragment = build_fragment(
+        "claude",
+        launcher=launcher,
+        config_path=config_path,
+    )
+    commands = _commands(fragment["payload"])
+    assert len(commands) >= 3
+    for command in commands:
+        assert "\\" not in command
+        assert launcher.as_posix() in command
+        assert config_path.as_posix() in command

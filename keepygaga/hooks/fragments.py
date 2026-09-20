@@ -45,9 +45,9 @@ def _command(
     *,
     compact: bool = False,
 ) -> str:
-    arguments = [str(launcher)]
+    arguments = [launcher.as_posix()]
     if platform != "codex":
-        arguments.extend(("--config", str(config_path)))
+        arguments.extend(("--config", config_path.as_posix()))
     arguments.extend(
         (
             "hook",
@@ -94,15 +94,27 @@ def build_fragment(
     command_markers: list[str] = []
     legacy_builtin_token_sets = [
         [
-            str(launcher),
+            launcher.as_posix(),
             "--config",
-            str(config_path),
+            config_path.as_posix(),
             "hook",
             "run",
             action,
         ]
         for action in ("context", "route", "closeout")
     ]
+    if os.name == "nt":
+        legacy_builtin_token_sets.extend(
+            [
+                str(launcher),
+                "--config",
+                str(config_path),
+                "hook",
+                "run",
+                action,
+            ]
+            for action in ("context", "route", "closeout")
+        )
     legacy_external_token_sets = [
         [str(USER_HOME / root / script), platform]
         for root in LEGACY_HOOK_RELATIVE_ROOTS
