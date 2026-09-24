@@ -448,6 +448,12 @@ def install(
             for value in results.values()
         )
     )
+    # Sibling hosts share this runtime; stale Hook commands keep failing until repaired.
+    stale_hosts = [
+        host
+        for host, recorded in state_hosts.items()
+        if host in SUPPORTED_HOSTS and recorded != _host_state(host)
+    ]
     return {
         "status": "applied" if changed else "no_op",
         "version": __version__,
@@ -455,6 +461,14 @@ def install(
         "memory": initialized,
         "hosts": results,
         "state_path": str(state_path(config_path)),
+        **(
+            {
+                "stale_hosts": stale_hosts,
+                "next_step": "run keepygaga repair --yes to reconcile stale_hosts",
+            }
+            if stale_hosts
+            else {}
+        ),
     }
 
 

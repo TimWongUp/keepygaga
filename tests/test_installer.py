@@ -90,6 +90,33 @@ def test_install_uses_selected_hosts_and_records_observational_state(
     assert "[memory.limits]" in generated
     assert "fixed_page_chars = 2000" in generated
     assert "lowering never deletes existing pages" in generated
+    assert "stale_hosts" not in result
+
+
+def test_install_reports_sibling_hosts_left_on_an_older_runtime(
+    tmp_path: Path, monkeypatch
+) -> None:
+    config_path = tmp_path / "config.toml"
+    state = tmp_path / "install-state.json"
+    state.write_text(
+        json.dumps(
+            {
+                "schema_version": installer.INSTALLER_SCHEMA_VERSION,
+                "hosts": {
+                    "codex": {"reconciled_version": "0.0.1"},
+                    "claude-code": {"reconciled_version": "0.0.1"},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(installer, "state_path", lambda *_args: state)
+    monkeypatch.setattr(installer, "_call_host", lambda *_args: {"status": "no_op"})
+
+    result = installer.install(config_path, tmp_path / "agents-memory", ["codex"])
+
+    assert result["stale_hosts"] == ["claude-code"]
+    assert result["next_step"] == "run keepygaga repair --yes to reconcile stale_hosts"
 
 
 def test_uninstall_preserves_config_and_memory(tmp_path: Path, monkeypatch) -> None:
