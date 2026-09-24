@@ -1018,15 +1018,13 @@ def setup_grok_host(
     )
 
 
-def _prepare_hermes_config(
+def _merge_hermes_mcp(
+    merged: MutableMapping[str, Any],
     path: Path,
     *,
     invocation: McpInvocation,
     config_path: Path,
-    hook_selection: dict[str, Any],
-) -> HermesConfigPlan:
-    original, loaded = _load_yaml_object(path)
-    merged = deepcopy(loaded)
+) -> bool:
     raw_servers = merged.get("mcp_servers")
     if raw_servers is None:
         merged["mcp_servers"] = {}
@@ -1052,7 +1050,22 @@ def _prepare_hermes_config(
     )
     if current_key != "keepygaga":
         servers.pop(current_key)
-    mcp_changed = current_key != "keepygaga" or previous_mcp != servers["keepygaga"]
+    return current_key != "keepygaga" or previous_mcp != servers["keepygaga"]
+
+
+def _prepare_hermes_config(
+    path: Path,
+    *,
+    invocation: McpInvocation,
+    config_path: Path,
+    hook_selection: dict[str, Any],
+    update_mcp: bool = True,
+) -> HermesConfigPlan:
+    original, loaded = _load_yaml_object(path)
+    merged = deepcopy(loaded)
+    mcp_changed = update_mcp and _merge_hermes_mcp(
+        merged, path, invocation=invocation, config_path=config_path
+    )
     before_hooks = deepcopy(merged.get("hooks"))
     try:
         hook_merged = merge_hook_fragment(_plain_data(merged), hook_selection)
@@ -1143,6 +1156,49 @@ def setup_hermes_host(
         **components,
         restart_required=True,
     )
+
+
+def reconcile_host_hooks(host: str, config_path: Path) -> dict[str, object]:
+    """Align only Keepygaga-owned Hooks, leaving MCP and rules untouched."""
+    specs = {item.host: item for item in (CLAUDE_CODE, WORKBUDDY, ANTIGRAVITY)}
+    default_home = specs[host].default_home if host in specs else f".{host}"
+    home = _resolve_home(None, default_home, host, create=False)
+    if not home.is_dir():
+        return _absent_component(home, kind=f"{host} home")
+    lock = FileLock(str(home / ".keepygaga-host-setup.lock"), timeout=30)
+    try:
+        lock.acquire()
+    except (FileLockTimeout, OSError) as exc:
+        raise HostSetupError(f"{host} setup lock could not be acquired: {exc}") from exc
+    try:
+        if host == "grok":
+            fragment = _hook_fragment("grok", config_path, enabled=False)
+            plans = [
+                _prepare_json_hooks_removal(home / "hooks" / name, fragment)
+                for name in ("keepygaga.json", "agent-hook-runtime.json")
+            ]
+            results = {
+                str(plan.path): _apply_file(plan) for plan in plans if plan is not None
+            }
+            return _json_result(_component_status(results), files=results)
+        if host == "hermes":
+            plan = _prepare_hermes_config(
+                home / "config.yaml",
+                invocation=_select_mcp_invocation(None),
+                config_path=config_path,
+                hook_selection=_hook_fragment("hermes", config_path),
+                update_mcp=False,
+            )
+            return _apply_file(plan.file)
+        spec = specs[host]
+        return _apply_hooks(
+            _prepare_json_hooks(
+                home / spec.hook_relative,
+                _hook_fragment(spec.hook_fragment, config_path),
+            )
+        )
+    finally:
+        lock.release()
 
 
 def _prepare_rules_removal(path: Path) -> FilePlan | None:

@@ -350,6 +350,14 @@ def _write_state(
 def _call_host(
     host: str, action: str, config_path: Path, config: KeepygagaConfig
 ) -> dict[str, object]:
+    if action == "hooks":
+        if host == "codex":
+            from keepygaga.host_setup import reconcile_codex_host_hooks
+
+            return reconcile_codex_host_hooks(config_path)
+        from keepygaga.host_adapters import reconcile_host_hooks
+
+        return reconcile_host_hooks(host, config_path)
     module_name, setup_name, uninstall_name = _HOST_CALLS[host]
     selected = getattr(
         importlib.import_module(module_name),
@@ -366,6 +374,21 @@ def _host_state(host: str) -> dict[str, object]:
         "hook_protocol_version": HOOK_PROTOCOL_VERSION if hooks else None,
         "hooks_enabled": hooks,
     }
+
+
+def _reconcile_sibling_hooks(
+    hosts: Sequence[str], config_path: Path, config: KeepygagaConfig
+) -> dict[str, object]:
+    """Sibling hosts share this runtime, so their obsolete Hook commands would fail."""
+    results: dict[str, object] = {}
+    for host in hosts:
+        if host not in SUPPORTED_HOSTS:
+            continue
+        try:
+            results[host] = _call_host(host, "hooks", config_path, config)
+        except Exception as exc:
+            results[host] = {"status": "failed", "message": str(exc)}
+    return results
 
 
 def install(
@@ -440,15 +463,18 @@ def install(
                     "state": {"status": "failed", "message": str(exc)},
                 },
             ) from exc
+    sibling_hooks = _reconcile_sibling_hooks(
+        [host for host in state_hosts if host not in results], config_path, config
+    )
     changed = (
         config_result.get("status") == "applied"
         or initialized.get("status") == "applied"
         or any(
             isinstance(value, Mapping) and value.get("status") == "applied"
-            for value in results.values()
+            for value in (*results.values(), *sibling_hooks.values())
         )
     )
-    # Sibling hosts share this runtime; stale Hook commands keep failing until repaired.
+    # Hooks alone do not make a sibling current; its MCP and rules may still lag.
     stale_hosts = [
         host
         for host, recorded in state_hosts.items()
@@ -461,6 +487,7 @@ def install(
         "memory": initialized,
         "hosts": results,
         "state_path": str(state_path(config_path)),
+        **({"sibling_hooks": sibling_hooks} if sibling_hooks else {}),
         **(
             {
                 "stale_hosts": stale_hosts,

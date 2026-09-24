@@ -623,6 +623,22 @@ def reconcile_codex_hooks(codex_home: Path, config_path: Path) -> dict[str, obje
     return _apply_codex_hooks_plan(_prepare_codex_hooks(codex_home, config_path))
 
 
+def reconcile_codex_host_hooks(config_path: Path) -> dict[str, object]:
+    """Align only Keepygaga-owned Codex Hooks, leaving MCP and rules untouched."""
+    home = _resolve_codex_home(None, create=False)
+    if not home.is_dir():
+        return _json_result("no_op", path=str(home), reason="Codex home was not found")
+    lock = FileLock(str(home / ".keepygaga-host-setup.lock"), timeout=30)
+    try:
+        lock.acquire()
+    except (FileLockTimeout, OSError) as exc:
+        raise HostSetupError(f"Codex setup lock could not be acquired: {exc}") from exc
+    try:
+        return reconcile_codex_hooks(home, config_path)
+    finally:
+        lock.release()
+
+
 def codex_wiring_current(config_path: Path) -> bool:
     home = _resolve_codex_home(None, create=False)
     if not home.is_dir():

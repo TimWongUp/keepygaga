@@ -14,6 +14,7 @@ from ruamel.yaml import YAML
 from keepygaga import host_adapters
 from keepygaga.config import KeepygagaConfig, MemoryFilesConfig
 from keepygaga.host_adapters import (
+    reconcile_host_hooks,
     setup_antigravity_host,
     setup_claude_code_host,
     setup_grok_host,
@@ -638,6 +639,50 @@ def test_workbuddy_hook_merge_preserves_unrelated_entries(
         python=Path(sys.executable),
     )
     assert second["status"] == "no_op"
+
+
+def test_hooks_only_reconcile_removes_obsolete_closeout_and_keeps_mcp(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
+    config_path, _config = setup_source(tmp_path)
+    home = tmp_path / ".claude"
+    home.mkdir()
+    mcp = tmp_path / ".claude.json"
+    mcp.write_bytes(b'{"mcpServers": {"keepygaga": {"command": "/old/keepygaga-mcp"}}}')
+    rules = home / "CLAUDE.md"
+    rules.write_bytes(b"# Personal rules\n")
+    closeout = (
+        "/old/keepygaga --config /old/config.toml hook run closeout "
+        "--owner=keepygaga-hook-v1 --host claude --event PostToolUse"
+    )
+    prettier = {"matcher": "Write|Edit", "hooks": [{"command": "prettier"}]}
+    (home / "settings.json").write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "PostToolUse": [
+                        prettier,
+                        {"matcher": "Write|Edit", "hooks": [{"command": closeout}]},
+                    ]
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = reconcile_host_hooks("claude-code", config_path)
+
+    assert result["status"] == "applied"
+    loaded = json.loads((home / "settings.json").read_text(encoding="utf-8"))
+    assert loaded["hooks"]["PostToolUse"] == [prettier]
+    assert "hook run route" in json.dumps(loaded["hooks"]["UserPromptSubmit"])
+    assert mcp.read_bytes() == (
+        b'{"mcpServers": {"keepygaga": {"command": "/old/keepygaga-mcp"}}}'
+    )
+    assert rules.read_bytes() == b"# Personal rules\n"
+    assert reconcile_host_hooks("claude-code", config_path)["status"] == "no_op"
 
 
 def test_grok_setup_uses_user_cli_and_is_idempotent(

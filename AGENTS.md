@@ -12,7 +12,7 @@
 - 修改核心记忆模型、Tool 语义、version、写入不变量或宿主集成时读 `docs/architecture.md`。
 - 修改验证、Doctor、smoke、失败分流或证据路由时读 `docs/operations.md`。
 - 修改宿主长期记忆规则或其托管块时读 `docs/agent-contract.md`。
-- 安装、升级或修复宿主接线时先按用户请求确定目标 Agent；默认只处理当前工作的 Agent，只有用户明确要求时才加入其他目标。用户入口为 `keepygaga install|status|repair|upgrade|uninstall`，确定性专家入口为 `keepygaga host setup|uninstall codex|claude-code|workbuddy|grok|hermes|antigravity`；`antigravity` 指 Antigravity CLI，不等同于 Gemini CLI。卸载只拆除目标宿主的 `keepygaga` MCP、Keepygaga 托管块和 Keepygaga-owned Hook，不删除 Memory Root、产品配置或其他 MCP/Hook。Hook 由本包内置；不接入外部 Agent Hook Runtime，也不修改范围外 Agent 的全局规则或 Hook。
+- 安装、升级或修复宿主接线时先按用户请求确定目标 Agent；默认只处理当前工作的 Agent，只有用户明确要求时才加入其他目标；例外是 `install` 会同时对齐其他已记录宿主中 Keepygaga-owned Hook，以免共享运行时更新后残留失效命令，但不改它们的 MCP 与规则。用户入口为 `keepygaga install|status|repair|upgrade|uninstall`，确定性专家入口为 `keepygaga host setup|uninstall codex|claude-code|workbuddy|grok|hermes|antigravity`；`antigravity` 指 Antigravity CLI，不等同于 Gemini CLI。卸载只拆除目标宿主的 `keepygaga` MCP、Keepygaga 托管块和 Keepygaga-owned Hook，不删除 Memory Root、产品配置或其他 MCP/Hook。Hook 由本包内置；不接入外部 Agent Hook Runtime，也不修改范围外 Agent 的全局规则或 Hook。
 - 追溯拆仓或动作型 MCP Tool 名的理由时读 `docs/adr/`；ADR 不覆盖当前代码与测试。
 - 长期上下文只在本 repo 维护；Vault 中已退役的旧项目上下文只作历史归档，不能成为当前 Authority。
 
