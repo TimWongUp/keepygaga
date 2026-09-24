@@ -12,6 +12,8 @@ from keepygaga.hooks.merge import FRAGMENT_SCHEMA
 from keepygaga.host_common import validate_hook_command_path
 
 OWNER = "keepygaga-hook-v1"
+# Hook actions older releases projected that the current runtime rejects.
+RETIRED_ACTIONS = ("closeout",)
 USER_HOME = Path.home()
 LEGACY_HOOK_RELATIVE_ROOTS = (
     Path("Code/agent-hook-runtime/hooks"),
@@ -101,7 +103,7 @@ def build_fragment(
             "run",
             action,
         ]
-        for action in ("context", "route", "closeout")
+        for action in ("context", "route", *RETIRED_ACTIONS)
     ]
     if os.name == "nt":
         legacy_builtin_token_sets.extend(
@@ -113,7 +115,7 @@ def build_fragment(
                 "run",
                 action,
             ]
-            for action in ("context", "route", "closeout")
+            for action in ("context", "route", *RETIRED_ACTIONS)
         )
     legacy_external_token_sets = [
         [str(USER_HOME / root / script), platform]
@@ -128,7 +130,7 @@ def build_fragment(
     owned_command_signatures = [
         [executable, action, f"--owner={OWNER}", platform]
         for executable in sorted(executable_names)
-        for action in ("context", "route", "closeout")
+        for action in ("context", "route", *RETIRED_ACTIONS)
     ]
     payload: dict[str, list[dict[str, object]]] = {}
     target = "shared-context-bootstrap" if host == "antigravity" else "hooks"
@@ -244,4 +246,24 @@ def build_fragment(
         "owned_command_suffix_token_sets": [],
         "owned_command_signatures": owned_command_signatures,
         "payload": payload,
+    }
+
+
+def retired_hooks_fragment(fragment: dict[str, Any]) -> dict[str, Any]:
+    """Narrow ownership to retired Hook actions so a strip leaves live Hooks alone."""
+    return {
+        **fragment,
+        "owned_command_markers": [],
+        "owned_command_token_sets": [
+            tokens
+            for tokens in fragment["owned_command_token_sets"]
+            if tokens[-1] in RETIRED_ACTIONS
+        ],
+        "owned_command_suffix_token_sets": [],
+        "owned_command_signatures": [
+            signature
+            for signature in fragment["owned_command_signatures"]
+            if signature[1] in RETIRED_ACTIONS
+        ],
+        "payload": {},
     }

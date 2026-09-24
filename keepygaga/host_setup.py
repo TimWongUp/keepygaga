@@ -16,7 +16,7 @@ from filelock import Timeout as FileLockTimeout
 from keepygaga import __version__
 from keepygaga import host_common as _host_common
 from keepygaga.config import KeepygagaConfig
-from keepygaga.hooks.fragments import build_fragment
+from keepygaga.hooks.fragments import build_fragment, retired_hooks_fragment
 from keepygaga.hooks.merge import merge_hook_fragment
 from keepygaga.host_common import (
     END_MARKER,
@@ -623,8 +623,8 @@ def reconcile_codex_hooks(codex_home: Path, config_path: Path) -> dict[str, obje
     return _apply_codex_hooks_plan(_prepare_codex_hooks(codex_home, config_path))
 
 
-def reconcile_codex_host_hooks(config_path: Path) -> dict[str, object]:
-    """Align only Keepygaga-owned Codex Hooks, leaving MCP and rules untouched."""
+def remove_retired_codex_hooks(config_path: Path) -> dict[str, object]:
+    """Remove only Keepygaga Codex Hook commands for retired actions; add nothing."""
     home = _resolve_codex_home(None, create=False)
     if not home.is_dir():
         return _json_result("no_op", path=str(home), reason="Codex home was not found")
@@ -634,7 +634,9 @@ def reconcile_codex_host_hooks(config_path: Path) -> dict[str, object]:
     except (FileLockTimeout, OSError) as exc:
         raise HostSetupError(f"Codex setup lock could not be acquired: {exc}") from exc
     try:
-        return reconcile_codex_hooks(home, config_path)
+        return _apply_codex_hook_strip(
+            _prepare_codex_hook_strip(home, config_path, retired_only=True)
+        )
     finally:
         lock.release()
 
@@ -750,7 +752,9 @@ def _remove_unused_codex_hook_keys(
         merged.pop(target, None)
 
 
-def _prepare_codex_hook_strip(codex_home: Path, config_path: Path) -> CodexHookPlan:
+def _prepare_codex_hook_strip(
+    codex_home: Path, config_path: Path, *, retired_only: bool = False
+) -> CodexHookPlan:
     try:
         launcher = resolve_launcher("keepygaga")
     except RuntimeError as exc:
@@ -758,6 +762,8 @@ def _prepare_codex_hook_strip(codex_home: Path, config_path: Path) -> CodexHookP
     fragment = build_fragment(
         "codex", launcher=launcher, config_path=config_path.resolve(), enabled=False
     )
+    if retired_only:
+        fragment = retired_hooks_fragment(fragment)
     hooks_path = codex_home / "hooks.json"
     hooks_original, existing = _load_codex_hooks(hooks_path)
     try:
