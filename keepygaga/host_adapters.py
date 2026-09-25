@@ -17,7 +17,7 @@ from filelock import Timeout as FileLockTimeout
 
 from keepygaga import __version__
 from keepygaga.config import KeepygagaConfig
-from keepygaga.hooks.fragments import build_fragment
+from keepygaga.hooks.fragments import build_fragment, retired_hooks_fragment
 from keepygaga.hooks.merge import merge_hook_fragment
 from keepygaga.host_common import (
     HostSetupError,
@@ -1143,6 +1143,56 @@ def setup_hermes_host(
         **components,
         restart_required=True,
     )
+
+
+def remove_retired_hooks(host: str, config_path: Path) -> dict[str, object]:
+    """Remove only Keepygaga Hook commands for retired actions; add nothing."""
+    specs = {item.host: item for item in (CLAUDE_CODE, WORKBUDDY, ANTIGRAVITY)}
+    default_home = specs[host].default_home if host in specs else f".{host}"
+    home = _resolve_home(None, default_home, host, create=False)
+    if not home.is_dir():
+        return _absent_component(home, kind=f"{host} home")
+    fragment_host = specs[host].hook_fragment if host in specs else host
+    retired = retired_hooks_fragment(
+        _hook_fragment(fragment_host, config_path, enabled=False)
+    )
+    lock = FileLock(str(home / ".keepygaga-host-setup.lock"), timeout=30)
+    try:
+        lock.acquire()
+    except (FileLockTimeout, OSError) as exc:
+        raise HostSetupError(f"{host} setup lock could not be acquired: {exc}") from exc
+    try:
+        if host == "hermes":
+            path = home / "config.yaml"
+            original, loaded = _load_yaml_object(path)
+            if original is None:
+                return _absent_component(path, kind="Hermes config")
+            merged = deepcopy(loaded)
+            if not _remove_hermes_hooks(merged, retired):
+                return _json_result("no_op", path=str(path))
+            return _apply_file(FilePlan(path, original, _yaml_bytes(merged)))
+        paths = (
+            [
+                home / "hooks" / name
+                for name in ("keepygaga.json", "agent-hook-runtime.json")
+            ]
+            if host == "grok"
+            else [home / specs[host].hook_relative]
+        )
+        components: dict[str, object] = {}
+        try:
+            for path in paths:
+                plan = _prepare_json_hooks_removal(path, retired)
+                components[str(path)] = (
+                    _apply_file(plan)
+                    if plan is not None
+                    else _absent_component(path, kind="hooks file")
+                )
+        except Exception as exc:
+            _raise_component_failure(exc, components)
+        return _json_result(_component_status(components), files=components)
+    finally:
+        lock.release()
 
 
 def _prepare_rules_removal(path: Path) -> FilePlan | None:

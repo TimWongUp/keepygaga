@@ -13,7 +13,9 @@ from ruamel.yaml import YAML
 
 from keepygaga import host_adapters
 from keepygaga.config import KeepygagaConfig, MemoryFilesConfig
+from keepygaga.hooks import fragments
 from keepygaga.host_adapters import (
+    remove_retired_hooks,
     setup_antigravity_host,
     setup_claude_code_host,
     setup_grok_host,
@@ -638,6 +640,80 @@ def test_workbuddy_hook_merge_preserves_unrelated_entries(
         python=Path(sys.executable),
     )
     assert second["status"] == "no_op"
+
+
+def test_retired_hook_removal_keeps_live_hooks_and_adds_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
+    config_path, _config = setup_source(tmp_path)
+    home = tmp_path / ".claude"
+    home.mkdir()
+    mcp = tmp_path / ".claude.json"
+    mcp.write_bytes(b'{"mcpServers": {"keepygaga": {"command": "/old/keepygaga-mcp"}}}')
+    owned = "/old/keepygaga --config /old/config.toml hook run {} "
+    owned += "--owner=keepygaga-hook-v1 --host claude --event {}"
+    prettier = {"matcher": "Write|Edit", "hooks": [{"command": "prettier"}]}
+    route = {"hooks": [{"command": owned.format("route", "UserPromptSubmit")}]}
+    external = fragments.USER_HOME / "Code/agent-hook-runtime/hooks/closeout_hook.py"
+    closeout = {
+        "hooks": [
+            {"command": owned.format("closeout", "PostToolUse")},
+            {"command": f'python3 "{external}" claude PostToolUse'},
+        ]
+    }
+    settings = home / "settings.json"
+    settings.write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "PostToolUse": [prettier, closeout],
+                    "UserPromptSubmit": [route],
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = remove_retired_hooks("claude-code", config_path)
+
+    assert result["status"] == "applied"
+    assert json.loads(settings.read_text(encoding="utf-8")) == {
+        "hooks": {"PostToolUse": [prettier], "UserPromptSubmit": [route]}
+    }
+    assert mcp.read_bytes() == (
+        b'{"mcpServers": {"keepygaga": {"command": "/old/keepygaga-mcp"}}}'
+    )
+    unchanged = settings.read_bytes()
+    assert remove_retired_hooks("claude-code", config_path)["status"] == "no_op"
+    assert settings.read_bytes() == unchanged
+
+
+def test_retired_hook_removal_keeps_evidence_of_partial_grok_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    config_path, _config = setup_source(tmp_path)
+    hooks = tmp_path / ".grok" / "hooks"
+    hooks.mkdir(parents=True)
+    closeout = (
+        "keepygaga --config /old/config.toml hook run closeout "
+        "--owner=keepygaga-hook-v1 --host grok --event Stop"
+    )
+    (hooks / "keepygaga.json").write_text(
+        json.dumps({"hooks": {"Stop": [{"hooks": [{"command": closeout}]}]}}),
+        encoding="utf-8",
+    )
+    (hooks / "agent-hook-runtime.json").write_text("{invalid", encoding="utf-8")
+
+    with pytest.raises(HostSetupPartialError) as caught:
+        remove_retired_hooks("grok", config_path)
+
+    written = caught.value.components[str(hooks / "keepygaga.json")]
+    assert written["status"] == "applied"  # type: ignore[index]
+    assert written["backup"]  # type: ignore[index]
+    assert "closeout" not in (hooks / "keepygaga.json").read_text(encoding="utf-8")
 
 
 def test_grok_setup_uses_user_cli_and_is_idempotent(
