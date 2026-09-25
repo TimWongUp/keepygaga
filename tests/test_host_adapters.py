@@ -13,6 +13,7 @@ from ruamel.yaml import YAML
 
 from keepygaga import host_adapters
 from keepygaga.config import KeepygagaConfig, MemoryFilesConfig
+from keepygaga.hooks import fragments
 from keepygaga.host_adapters import (
     remove_retired_hooks,
     setup_antigravity_host,
@@ -655,7 +656,13 @@ def test_retired_hook_removal_keeps_live_hooks_and_adds_nothing(
     owned += "--owner=keepygaga-hook-v1 --host claude --event {}"
     prettier = {"matcher": "Write|Edit", "hooks": [{"command": "prettier"}]}
     route = {"hooks": [{"command": owned.format("route", "UserPromptSubmit")}]}
-    closeout = {"hooks": [{"command": owned.format("closeout", "PostToolUse")}]}
+    external = fragments.USER_HOME / "Code/agent-hook-runtime/hooks/closeout_hook.py"
+    closeout = {
+        "hooks": [
+            {"command": owned.format("closeout", "PostToolUse")},
+            {"command": f'python3 "{external}" claude PostToolUse'},
+        ]
+    }
     settings = home / "settings.json"
     settings.write_text(
         json.dumps(

@@ -14,6 +14,7 @@ from keepygaga.host_common import validate_hook_command_path
 OWNER = "keepygaga-hook-v1"
 # Hook actions older releases projected that the current runtime rejects.
 RETIRED_ACTIONS = ("closeout",)
+_RETIRED_SCRIPTS = tuple(f"{action}_hook.py" for action in RETIRED_ACTIONS)
 USER_HOME = Path.home()
 LEGACY_HOOK_RELATIVE_ROOTS = (
     Path("Code/agent-hook-runtime/hooks"),
@@ -123,7 +124,7 @@ def build_fragment(
         for script in (
             "context_hook.py",
             "memory_route_hook.py",
-            "closeout_hook.py",
+            *_RETIRED_SCRIPTS,
         )
     ]
     executable_names = {launcher.name, "keepygaga", "keepygaga.exe"}
@@ -257,7 +258,8 @@ def retired_hooks_fragment(fragment: dict[str, Any]) -> dict[str, Any]:
         "owned_command_token_sets": [
             tokens
             for tokens in fragment["owned_command_token_sets"]
-            if tokens[-1] in RETIRED_ACTIONS
+            # Built-in sets end with the action; legacy external sets start with a script.
+            if tokens[-1] in RETIRED_ACTIONS or Path(tokens[0]).name in _RETIRED_SCRIPTS
         ],
         "owned_command_suffix_token_sets": [],
         "owned_command_signatures": [
