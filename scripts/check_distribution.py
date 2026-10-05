@@ -65,10 +65,15 @@ def main() -> int:
             "keepygaga/hooks/context.py",
             contract,
         )
+        if artifact.suffix != ".whl":
+            required += (
+                "contracts/core-memory-v1/contract.json",
+                "scripts/check_distribution.py",
+            )
         if any(
             not any(name.endswith(item) for name in normalized) for item in required
         ):
-            raise SystemExit(f"standalone runtime assets missing from {artifact}")
+            raise SystemExit(f"required distribution assets missing from {artifact}")
         content_requirements = {
             "keepygaga/mcp_instructions.md": (
                 "trusted first-stage semantic routes",

@@ -417,6 +417,7 @@ def test_codex_cli_discovery_prefers_newest_desktop_binary(
         binary.chmod(0o755)
     os.utime(older_desktop, (1, 1))
     os.utime(current_desktop, (2, 2))
+    monkeypatch.delenv("CODEX_CLI_PATH", raising=False)
     monkeypatch.setattr(host_setup.sys, "platform", "win32")
     monkeypatch.setenv("LOCALAPPDATA", str(local_app_data))
     monkeypatch.setattr(host_setup.os, "get_exec_path", lambda: [str(path_codex.parent)])
