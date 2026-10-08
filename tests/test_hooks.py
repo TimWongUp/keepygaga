@@ -694,9 +694,7 @@ def test_windows_codex_command_executes_through_command_shell(
     payload = json.loads(completed.stdout)
     assert payload["hookSpecificOutput"]["hookEventName"] == event
     additional_context = payload["hookSpecificOutput"]["additionalContext"]
-    expected = (
-        "<keepygaga-bootstrap>" if event == "SessionStart" else "记忆与资料路由规则"
-    )
+    expected = "<keepygaga-bootstrap>" if event == "SessionStart" else "记忆路由规则"
     assert expected in additional_context
 
 
