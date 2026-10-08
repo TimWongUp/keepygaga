@@ -381,10 +381,16 @@ def test_context_bootstrap_escapes_home_fact_control_delimiters(
     assert rendered.count("</memory_scopes>") == 1
 
 
-def test_memory_hook_reminders_keep_noop_decisions_silent() -> None:
-    for reminder in (route.REMINDER, route.COMPACT_REMINDER):
-        assert "静默" in reminder
-        assert "原任务" in reminder
+def test_memory_hook_reminders_scope_checks_and_silence_to_memory_updates() -> None:
+    assert route.REMINDER == (
+        "按已加载的记忆路由规则判断本轮是否需要读取记忆；"
+        "完成实质性工作前检查是否需要更新记忆，无需更新时不在回复中提及。"
+    )
+    assert route.COMPACT_REMINDER == (
+        "上下文刚完成压缩。先恢复当前任务目标、用户约束、已完成工作和待办，"
+        "沿用已有授权继续推进。完成实质性工作前，按已加载规则检查是否遗漏应维护的稳定项目上下文或用户长期记忆；"
+        "需要时核验后更新。压缩本身不构成写入理由，无需更新时不在回复中提及。"
+    )
 
 
 @pytest.mark.parametrize("compact", [False, True])
@@ -688,9 +694,7 @@ def test_windows_codex_command_executes_through_command_shell(
     payload = json.loads(completed.stdout)
     assert payload["hookSpecificOutput"]["hookEventName"] == event
     additional_context = payload["hookSpecificOutput"]["additionalContext"]
-    expected = (
-        "<keepygaga-bootstrap>" if event == "SessionStart" else "记忆与资料路由规则"
-    )
+    expected = "<keepygaga-bootstrap>" if event == "SessionStart" else "记忆路由规则"
     assert expected in additional_context
 
 
