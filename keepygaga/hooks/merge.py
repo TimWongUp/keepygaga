@@ -3,14 +3,23 @@
 from __future__ import annotations
 
 import shlex
+import sys
+import warnings
 from copy import deepcopy
-from typing import Any
+from typing import Any, Literal
 
 FRAGMENT_SCHEMA = "keepygaga-hook-fragment-v1"
+
+_REMOVE = object()
+_SHELL_CONTROL_CHARACTERS = frozenset("();<>|&")
 
 
 class HookFragmentError(ValueError):
     pass
+
+
+class MixedHookCommandWarning(UserWarning):
+    """A Keepygaga-owned hook command is combined with other shell commands."""
 
 
 def _valid_token_sets(value: object, *, length: int | None = None) -> bool:
@@ -68,10 +77,41 @@ def _has_owned_command(
     token_sets: tuple[tuple[str, ...], ...],
     suffix_sets: tuple[tuple[str, ...], ...],
     signatures: tuple[tuple[str, str, str, str], ...],
-) -> bool:
+) -> Literal["owned", "mixed"] | None:
     command = value.get("command")
     if not isinstance(command, str):
-        return False
+        return None
+    if not _matches_owned_command(
+        command, markers, token_sets, suffix_sets, signatures
+    ):
+        return None
+    return "mixed" if _has_shell_control(command) else "owned"
+
+
+def _has_shell_control(command: str) -> bool:
+    if any(marker in command for marker in ("\n", "\r", "`", "$(")):
+        return True
+    lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
+    lexer.whitespace_split = True
+    lexer.commenters = ""
+    if sys.platform == "win32":
+        # cmd does not use single quotes or backslashes to escape operators.
+        lexer.quotes = '"'
+        lexer.escape = ""
+    try:
+        tokens = list(lexer)
+    except ValueError:
+        return True
+    return any(token and set(token) <= _SHELL_CONTROL_CHARACTERS for token in tokens)
+
+
+def _matches_owned_command(
+    command: str,
+    markers: tuple[str, ...],
+    token_sets: tuple[tuple[str, ...], ...],
+    suffix_sets: tuple[tuple[str, ...], ...],
+    signatures: tuple[tuple[str, str, str, str], ...],
+) -> bool:
     normalized = command.replace("\\", "/")
     if any(marker in normalized for marker in markers):
         return True
@@ -112,8 +152,10 @@ def _has_owned_command(
                 or candidate[0].rsplit("/", 1)[-1].lower() != executable.lower()
             ):
                 continue
-            command = candidate[3:] if candidate[1:2] == ["--config"] else candidate[1:]
-            if command[:6] == ["hook", "run", action, owner, "--host", host]:
+            arguments = (
+                candidate[3:] if candidate[1:2] == ["--config"] else candidate[1:]
+            )
+            if arguments[:6] == ["hook", "run", action, owner, "--host", host]:
                 signature_match = True
                 break
         if signature_match:
@@ -127,17 +169,27 @@ def _strip_owned(
     token_sets: tuple[tuple[str, ...], ...],
     suffix_sets: tuple[tuple[str, ...], ...],
     signatures: tuple[tuple[str, str, str, str], ...],
-) -> Any | None:
+) -> Any:
     if isinstance(value, dict):
-        if _has_owned_command(value, markers, token_sets, suffix_sets, signatures):
-            return None
+        ownership = _has_owned_command(
+            value, markers, token_sets, suffix_sets, signatures
+        )
+        if ownership == "owned":
+            return _REMOVE
+        if ownership == "mixed":
+            warnings.warn(
+                "kept a hook command that combines a Keepygaga command with other "
+                f"shell commands; review it manually: {value['command']!r}",
+                MixedHookCommandWarning,
+                stacklevel=2,
+            )
         cleaned: dict[str, Any] = {}
         for key, nested in value.items():
             result = _strip_owned(nested, markers, token_sets, suffix_sets, signatures)
-            if result is not None:
+            if result is not _REMOVE:
                 cleaned[key] = result
         if "hooks" in value and not cleaned.get("hooks"):
-            return None
+            return _REMOVE
         return cleaned
     if isinstance(value, list):
         return [
@@ -148,7 +200,7 @@ def _strip_owned(
                     nested, markers, token_sets, suffix_sets, signatures
                 )
             )
-            is not None
+            is not _REMOVE
         ]
     return value
 
@@ -185,7 +237,7 @@ def merge_hook_fragment(
         for signature in fragment.get("owned_command_signatures", [])
     )
     cleaned = _strip_owned(current, markers, token_sets, suffix_sets, signatures)
-    if not isinstance(cleaned, dict):
+    if cleaned is _REMOVE or not isinstance(cleaned, dict):
         cleaned = {}
     cleaned = {
         event: entries for event, entries in cleaned.items() if entries not in ([], {})

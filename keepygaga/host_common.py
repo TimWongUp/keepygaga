@@ -8,6 +8,7 @@ import tempfile
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from keepygaga.config import PROJECT_ROOT, KeepygagaConfig
 from keepygaga.diagnostics import run_doctor
@@ -19,6 +20,19 @@ VERSION_PREFIX = "<!-- KEEPYGAGA:CONTRACT:"
 CONTRACT_RELATIVE_PATH = Path("docs/agent-contract.md")
 LEGACY_CONTRACT_RELATIVE_PATH = Path("docs/legacy-agent-contract-v0.md")
 EXPECTED_ANY = object()
+
+
+class DuplicateJsonKeyError(ValueError):
+    pass
+
+
+def unique_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    loaded: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in loaded:
+            raise DuplicateJsonKeyError(key)
+        loaded[key] = value
+    return loaded
 
 
 class HostSetupError(RuntimeError):

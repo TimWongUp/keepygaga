@@ -20,6 +20,7 @@ from keepygaga.config import KeepygagaConfig
 from keepygaga.hooks.fragments import build_fragment, retired_hooks_fragment
 from keepygaga.hooks.merge import merge_hook_fragment
 from keepygaga.host_common import (
+    DuplicateJsonKeyError,
     HostSetupError,
     HostSetupPartialError,
     atomic_write,
@@ -33,6 +34,7 @@ from keepygaga.host_common import (
     probe_keepygaga_python,
     remove_managed_contract,
     run_captured,
+    unique_json_object,
     validate_host_source,
 )
 from keepygaga.launchers import resolve_launcher
@@ -100,19 +102,6 @@ class HermesConfigPlan:
     file: FilePlan
     mcp_changed: bool
     hooks_changed: bool
-
-
-class _DuplicateJsonKeyError(ValueError):
-    pass
-
-
-def _unique_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
-    loaded: dict[str, Any] = {}
-    for key, value in pairs:
-        if key in loaded:
-            raise _DuplicateJsonKeyError(key)
-        loaded[key] = value
-    return loaded
 
 
 def _ensure_workbuddy_legacy_home(legacy_home: Path) -> None:
@@ -224,9 +213,9 @@ def _load_json_object(path: Path) -> tuple[bytes | None, dict[str, Any]]:
     try:
         original = path.read_bytes()
         loaded = json.loads(
-            original.decode("utf-8"), object_pairs_hook=_unique_json_object
+            original.decode("utf-8"), object_pairs_hook=unique_json_object
         )
-    except _DuplicateJsonKeyError as exc:
+    except DuplicateJsonKeyError as exc:
         raise HostSetupError(
             f"host config contains duplicate JSON key {exc.args[0]!r}: {path}"
         ) from exc

@@ -2883,3 +2883,28 @@ def test_yaml_scalar_compatibility(memory_store: tuple[Path, MemoryStore]) -> No
     assert read["status"] == "ok"
     assert read["files"][0]["description"] == "1e3"  # type: ignore[index]
     assert read["files"][0]["aliases"] == ["1e4"]  # type: ignore[index]
+
+
+def test_staging_fsync_failure_leaves_no_temp_file(
+    memory_store: tuple[Path, MemoryStore], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root, store = memory_store
+    before = (root / "profile.md").read_bytes()
+
+    def fail_fsync(_descriptor: int) -> None:
+        raise OSError("simulated fsync failure")
+
+    monkeypatch.setattr(os, "fsync", fail_fsync)
+    result = store.add(
+        [
+            AddOperation(
+                path="profile.md",
+                if_version=version(store, "profile.md"),
+                facts=[fact("Must not persist.")],
+            )
+        ]
+    )
+
+    assert result["status"] == "write_failed"
+    assert (root / "profile.md").read_bytes() == before
+    assert not list(root.glob(".profile.md.*.tmp"))

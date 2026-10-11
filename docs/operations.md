@@ -13,6 +13,8 @@ Download `keepygaga-X.Y.Z-py3-none-any.whl` and `SHA256SUMS` from the same lates
 - `keepygaga uninstall --yes` removes recorded host wiring while preserving config and memory.
 - `keepygaga host setup|uninstall HOST` remains the deterministic expert path.
 
+Custom config files have separate install-state files. When the legacy shared state belongs to a custom config, installing the default config is blocked before any host or memory writes. Inspect the recorded config path and move the legacy file to its config-specific state path (for example, `install-state.a.toml.json` for `a.toml`) only after confirming that destination is absent and no installer is running. If the destination exists, inspect both records and resolve the conflict explicitly; do not overwrite either. The recorded config can then reuse its host record and the default config can create its own state.
+
 Install state is discovery evidence only. If it disagrees with a host's live configuration, the host file and official diagnostic win.
 
 The optional `[memory.limits]` table controls fixed-page characters, dynamic-page characters, and the `topics`, `areas`, and `people` page counts. New installations write the current defaults with adjustment comments; repair and upgrade preserve existing configuration bytes. The Store reloads these limits on every MCP call. Doctor and status report both effective values and whether they came from built-in defaults or the live configuration path. Invalid, unknown, non-integer, or non-positive values fail with the exact `memory.limits` field instead of falling back silently.
