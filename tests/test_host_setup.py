@@ -1518,3 +1518,28 @@ def test_uninstall_codex_mcp_verification_error_is_partial(
     recovery = payload["recovery"]
     assert isinstance(recovery, dict)
     assert recovery["action"] == "restore_file"
+
+
+def test_setup_rejects_duplicate_codex_hook_keys_before_host_writes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    memory_root = tmp_path / "memory"
+    monkeypatch.setattr(
+        host_setup,
+        "validate_host_source",
+        lambda *_args: (memory_root, {"status": "ok"}),
+    )
+    codex_home = tmp_path / ".codex"
+    codex_home.mkdir()
+    hooks_path = codex_home / "hooks.json"
+    original = '{"hooks": {"Stop": []}, "hooks": {"SessionStart": []}}'
+    hooks_path.write_text(original, encoding="utf-8")
+
+    with pytest.raises(HostSetupError, match="duplicate JSON key 'hooks'"):
+        host_setup.setup_codex_host(
+            tmp_path / "config.toml", KeepygagaConfig(), codex_home=codex_home
+        )
+
+    assert hooks_path.read_text(encoding="utf-8") == original
+    assert not (codex_home / "config.toml").exists()
+    assert not (codex_home / "AGENTS.md").exists()

@@ -22,6 +22,7 @@ from keepygaga.host_common import (
     END_MARKER,
     EXPECTED_ANY,
     START_MARKER,
+    DuplicateJsonKeyError,
     HostSetupError,
     HostSetupPartialError,
     atomic_write,
@@ -38,6 +39,7 @@ from keepygaga.host_common import (
     read_utf8,
     remove_managed_contract,
     run_captured,
+    unique_json_object,
     validate_hook_command_path,
     validate_host_source,
 )
@@ -496,7 +498,13 @@ def _load_codex_hooks(path: Path) -> tuple[bytes | None, dict[str, Any]]:
     if original is None:
         return None, {}
     try:
-        loaded = json.loads(original.decode("utf-8"))
+        loaded = json.loads(
+            original.decode("utf-8"), object_pairs_hook=unique_json_object
+        )
+    except DuplicateJsonKeyError as exc:
+        raise HostSetupError(
+            f"Codex hooks file contains duplicate JSON key {exc.args[0]!r}: {path}"
+        ) from exc
     except (UnicodeError, json.JSONDecodeError) as exc:
         raise HostSetupError(f"Codex hooks file is invalid JSON: {path}") from exc
     if not isinstance(loaded, dict):
