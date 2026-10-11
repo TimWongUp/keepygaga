@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import shlex
+import sys
 import warnings
 from copy import deepcopy
 from typing import Any, Literal
@@ -88,10 +89,15 @@ def _has_owned_command(
 
 
 def _has_shell_control(command: str) -> bool:
-    if "\n" in command or "\r" in command or "`" in command:
+    if any(marker in command for marker in ("\n", "\r", "`", "$(")):
         return True
     lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
     lexer.whitespace_split = True
+    lexer.commenters = ""
+    if sys.platform == "win32":
+        # cmd does not use single quotes or backslashes to escape operators.
+        lexer.quotes = '"'
+        lexer.escape = ""
     try:
         tokens = list(lexer)
     except ValueError:

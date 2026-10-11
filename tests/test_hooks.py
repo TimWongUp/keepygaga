@@ -16,6 +16,7 @@ from keepygaga.hooks import (
     fragments,
     route,
 )
+from keepygaga.hooks import merge as hook_merge
 from keepygaga.hooks.fragments import build_fragment
 from keepygaga.hooks.merge import MixedHookCommandWarning, merge_hook_fragment
 from keepygaga.host_common import HostSetupError
@@ -717,14 +718,26 @@ def test_hook_command_uses_posix_paths_on_windows(
         assert config_path.as_posix() in command
 
 
-def test_hook_merge_keeps_mixed_owned_command_and_warns(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("platform", "suffix"),
+    [
+        ("linux", " && user-backup"),
+        ("linux", ' --event "$(user-backup; echo SessionStart)"'),
+        ("win32", " #tag & user-backup"),
+        ("win32", " --event 'Stop & user-backup & rem '"),
+    ],
+)
+def test_hook_merge_keeps_mixed_owned_command_and_warns(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, platform: str, suffix: str
+) -> None:
     fragment = build_fragment(
         "codex",
         launcher=tmp_path / "keepygaga",
         config_path=tmp_path / "config.toml",
     )
     owned = _commands(fragment["payload"])[0]
-    mixed = f"{owned} && user-backup"
+    mixed = f"{owned}{suffix}"
+    monkeypatch.setattr(hook_merge.sys, "platform", platform)
     existing = {
         "hooks": {
             "Stop": [

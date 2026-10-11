@@ -187,10 +187,17 @@ def ensure_config(config_path: Path, memory_root: Path) -> dict[str, object]:
     return {"status": status, "path": str(config_path), "backup": backup}
 
 
-def _read_state_snapshot(config_path: Path) -> tuple[dict[str, Any], bytes | None]:
+def _read_state_snapshot(
+    config_path: Path, *, for_write: bool = False
+) -> tuple[dict[str, Any], bytes | None]:
     path = state_path(config_path)
     value, original = _read_state_file(path)
     if not _state_belongs_to(value, config_path):
+        if for_write:
+            raise HostSetupError(
+                f"install state belongs to another config: {path}; migrate the "
+                "recorded config state to its config-specific path before installing this config"
+            )
         value = {}
     legacy = path.with_name(_STATE_FILE_NAME)
     if original is None and legacy != path:
@@ -247,7 +254,7 @@ def _load_state(config_path: Path) -> dict[str, Any]:
 
 
 def _read_install_snapshot(config_path: Path) -> tuple[dict[str, Any], bytes | None]:
-    state, snapshot = _read_state_snapshot(config_path)
+    state, snapshot = _read_state_snapshot(config_path, for_write=True)
     if "upgrade_generation" in state:
         _, recorded_parts = _release_version(
             state["installed_version"], label="recorded application version"
@@ -344,7 +351,9 @@ def _write_state(
     path = state_path(config_path)
     try:
         with _state_guard(config_path):
-            live_state, live_snapshot = _read_state_snapshot(config_path)
+            live_state, live_snapshot = _read_state_snapshot(
+                config_path, for_write=True
+            )
             if live_snapshot != expected_original:
                 raise HostSetupError(f"write conflict while updating {path}")
             generation = upgrade_generation or live_state.get("upgrade_generation")
