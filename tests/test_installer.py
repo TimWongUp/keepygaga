@@ -856,3 +856,45 @@ def test_same_version_local_wheel_can_initialize(tmp_path, monkeypatch, uv_tool_
     lifecycle = result["lifecycle"]
     assert isinstance(lifecycle, dict)
     assert lifecycle["action"] == "initialize"
+
+
+def test_configs_in_same_directory_have_independent_state_paths(
+    tmp_path: Path,
+) -> None:
+    first = tmp_path / "a.toml"
+    second = tmp_path / "b.toml"
+
+    assert installer.state_path(first) != installer.state_path(second)
+    assert installer.state_path(tmp_path / "config.toml") == (
+        tmp_path.resolve() / "install-state.json"
+    )
+
+
+def _state_payload(config_path: Path) -> str:
+    return json.dumps(
+        {
+            "schema_version": installer.INSTALLER_SCHEMA_VERSION,
+            "config_path": str(config_path.resolve()),
+            "hosts": {"codex": {}},
+        }
+    )
+
+
+def test_load_state_ignores_state_recorded_for_another_config(
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "config.toml"
+    installer.state_path(config_path).write_text(
+        _state_payload(tmp_path / "other.toml"), encoding="utf-8"
+    )
+
+    assert installer._load_state(config_path) == {}
+
+
+def test_load_state_reads_matching_legacy_shared_state(tmp_path: Path) -> None:
+    config_path = tmp_path / "a.toml"
+    legacy = tmp_path / "install-state.json"
+    legacy.write_text(_state_payload(config_path), encoding="utf-8")
+
+    assert set(installer._load_state(config_path)["hosts"]) == {"codex"}
+    assert installer._load_state(tmp_path / "b.toml") == {}
