@@ -1119,10 +1119,10 @@ class MemoryStore:
                 suffix=".tmp",
                 delete=False,
             ) as handle:
+                staged[relative] = Path(handle.name)
                 handle.write(after.text)
                 handle.flush()
                 os.fsync(handle.fileno())
-                staged[relative] = Path(handle.name)
 
     def _apply_commit(
         self,
