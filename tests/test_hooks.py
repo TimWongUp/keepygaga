@@ -17,7 +17,7 @@ from keepygaga.hooks import (
     route,
 )
 from keepygaga.hooks.fragments import build_fragment
-from keepygaga.hooks.merge import merge_hook_fragment
+from keepygaga.hooks.merge import MixedHookCommandWarning, merge_hook_fragment
 from keepygaga.host_common import HostSetupError
 from keepygaga.memory import (
     AddOperation,
@@ -715,3 +715,42 @@ def test_hook_command_uses_posix_paths_on_windows(
         assert "\\" not in command
         assert launcher.as_posix() in command
         assert config_path.as_posix() in command
+
+
+def test_hook_merge_keeps_mixed_owned_command_and_warns(tmp_path: Path) -> None:
+    fragment = build_fragment(
+        "codex",
+        launcher=tmp_path / "keepygaga",
+        config_path=tmp_path / "config.toml",
+    )
+    owned = _commands(fragment["payload"])[0]
+    mixed = f"{owned} && user-backup"
+    existing = {
+        "hooks": {
+            "Stop": [
+                {"hooks": [{"type": "command", "command": mixed}]},
+                {"hooks": [{"type": "command", "command": owned}]},
+            ]
+        }
+    }
+
+    with pytest.warns(MixedHookCommandWarning, match="user-backup"):
+        merged = merge_hook_fragment(existing, fragment)
+
+    commands = _commands(merged)
+    assert mixed in commands
+    assert commands.count(owned) == 1
+
+
+def test_hook_merge_preserves_unrelated_null_values(tmp_path: Path) -> None:
+    fragment = build_fragment(
+        "codex",
+        launcher=tmp_path / "keepygaga",
+        config_path=tmp_path / "config.toml",
+    )
+    user_hook = {"type": "command", "command": "user-backup", "metadata": None}
+    existing = {"hooks": {"Stop": [{"matcher": None, "hooks": [user_hook, None]}]}}
+
+    merged = merge_hook_fragment(existing, fragment)
+
+    assert {"matcher": None, "hooks": [user_hook, None]} in merged["hooks"]["Stop"]
