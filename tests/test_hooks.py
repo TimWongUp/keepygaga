@@ -366,6 +366,13 @@ def test_context_bootstrap_contains_home_pages_and_scope_descriptions(
                 }
             ],
         },
+        # Tool results and code listings are not injected memory.
+        {
+            "is_first_turn": False,
+            "conversation_history": [
+                {"role": "tool", "tool_call_id": "read", "content": rendered}
+            ],
+        },
         # A marker outside persisted message text must not count either.
         {
             "is_first_turn": False,

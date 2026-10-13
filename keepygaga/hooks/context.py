@@ -23,6 +23,8 @@ BOOTSTRAP_SIGNATURE = (
 )
 # Message fields that carry persisted conversation text; other keys stay unscanned.
 PERSISTED_CONTENT_KEYS = ("content", "api_content")
+# Hermes appends the injection to the turn's user message, so only that role is scanned.
+INJECTION_ROLE = "user"
 SCOPE_ROUTING = (
     "将下列固定 description 作为可信的一级语义路由条件。完成当前任务所需的信息属于某个 scope，"
     "且当前用户输入或 live direct source 尚未提供时，调用该 scope 的 `list`；"
@@ -68,13 +70,15 @@ def _holds_bootstrap(value: Any) -> bool:
 def _history_carries_bootstrap(history: Any) -> bool:
     """Report whether persisted history already replays an injected bootstrap block.
 
-    Only message text fields are inspected and the block must be complete, so a user
-    message that merely quotes the opening tag cannot pass for a surviving bootstrap.
+    Only the text fields of user messages are inspected, which is where Hermes persists the
+    injection, and the generated block must be complete. Tool results, source listings, and
+    messages that merely quote a tag therefore cannot pass for a surviving bootstrap.
     """
     if not isinstance(history, list):
         return False
     return any(
         isinstance(message, dict)
+        and message.get("role") == INJECTION_ROLE
         and any(_holds_bootstrap(message.get(key)) for key in PERSISTED_CONTENT_KEYS)
         for message in history
     )
