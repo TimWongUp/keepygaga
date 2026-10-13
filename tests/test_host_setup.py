@@ -33,7 +33,7 @@ def test_canonical_contract_uses_independent_contract_version() -> None:
 def test_canonical_contract_is_short_and_delegates_full_protocol() -> None:
     contract = host_setup.load_canonical_contract()
 
-    assert "MCP server instructions" in contract
+    assert "MCP server instructions when exposed" in contract
     assert "current Page Snapshot" in contract
     assert "explicit current-turn user request" in contract
     assert "Memory Scopes are `topics`" in contract
@@ -53,15 +53,11 @@ def test_canonical_contract_is_short_and_delegates_full_protocol() -> None:
     assert "`areas/projects.md`" in contract
     assert "optional dynamic page" in contract
     assert "may be absent before its first Fact" in contract
-    assert "Before the first write, list `areas`" in contract
-    assert "create the canonical page only when none exists" in contract
-    assert "rather than duplicate conflicting legacy state" in contract
     assert "exactly one Fact per maintained project" in contract
     assert "latest verified integrated outcome" in contract
-    assert "normally `origin/main`" in contract
-    assert "otherwise mark it unreleased" in contract
-    assert "credential-free canonical remote URLs" in contract
-    assert "rendered as Markdown autolinks" in contract
+    assert "open PRs, and host installation state never establish progress" in contract
+    assert "never duplicate a conflicting legacy page" in contract
+    assert "project-index rules in the Keepygaga MCP server instructions" in contract
     assert "cross-Agent user preferences belong only in `preferences.md`" in contract
     assert "Prose style and code style do not decide between them" in contract
     assert "ask before changing either source" in contract

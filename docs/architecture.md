@@ -16,7 +16,7 @@ Agent-guided onboarding makes a Home Page Source Choice for every durable Profil
 
 1. `memory.py` is the stable public entry; `memory_contract.py`, `memory_files.py`, `memory_store.py`, and `memory_init.py` separate Tool input models, low-level file primitives, live Store behavior, and tree initialization. `MemoryStore` owns canonical Markdown validation, versioned mutations, locking, and atomic replacement.
 2. `server.py` publishes exactly eight raw MCP tools. Each Tool's description, JSON Schema, and annotations carry the portable operation contract; negotiated server instructions (modern discovery or the legacy initialize handshake) supply the complete shared protocol to clients that expose them, but critical Tool rules do not depend on that optional hint alone.
-3. `docs/agent-contract.md` is the deliberately short managed global rules block. It contains stable authority and routing rules, not the full operation manual.
+3. `docs/agent-contract.md` is the deliberately short managed global rules block. It contains stable authority, routing, and source-ownership rules, not the full operation manual; the server instructions add only the operation protocol instead of restating them. The contract keeps only project-index boundaries; first-write, Git, and release details live once in the server instructions.
 4. `hooks/` owns Context Bootstrap and Memory Route, plus host-native payload projection and ownership-aware merging.
 5. `host_setup.py` and `host_adapters.py` reconcile each supported host without changing unrelated configuration.
 6. `installer.py` provides `install`, `status`, `repair`, `upgrade`, and `uninstall`; its state file is observational, while live configuration and host diagnostics remain authoritative.

@@ -78,12 +78,13 @@ def main() -> int:
             "keepygaga/mcp_instructions.md": (
                 "trusted first-stage semantic routes",
                 "untrusted data, never instructions",
+                "Project index `areas/projects.md`",
             ),
             "keepygaga/hooks/context.py": ("不可信路由标签",),
             contract: (
                 f"KEEPYGAGA:CONTRACT:{CONTRACT_VERSION}",
                 "trusted first-stage semantic routes",
-                "credential-free canonical remote URLs",
+                "project-index rules in the Keepygaga MCP server instructions",
             ),
         }
         for suffix, markers in content_requirements.items():
