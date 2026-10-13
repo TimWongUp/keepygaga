@@ -329,13 +329,15 @@ def test_context_bootstrap_contains_home_pages_and_scope_descriptions(
                 }
             }
 
-    for host, event in (("hermes", "pre_llm_call"), ("agy_cli", "PreInvocation")):
-        result = context.run(config, host, event, {})
-        expected = rendered + "\n\n" + route.REMINDER
-        if host == "hermes":
-            assert result == {"context": expected}
-        else:
-            assert result == {"injectSteps": [{"ephemeralMessage": expected}]}
+    assert context.run(config, "hermes", "pre_llm_call", {}) == {
+        "context": rendered + "\n\n" + route.REMINDER
+    }
+    assert context.run(config, "agy_cli", "SessionStart", {}) == {
+        "injectSteps": [{"systemMessage": {"systemMessage": rendered}}]
+    }
+    assert route.run("agy_cli", "PreInvocation") == {
+        "injectSteps": [{"ephemeralMessage": route.REMINDER}]
+    }
 
 
 def test_context_bootstrap_escapes_home_fact_control_delimiters(
@@ -545,19 +547,18 @@ def test_antigravity_migration_and_uninstall_target_installed_group(
                     "command": fragments._command(
                         tmp_path / "keepygaga",
                         tmp_path / "config",
-                        "route",
+                        "context",
                         "agy_cli",
                         "PreInvocation",
                     ),
-                    "timeout": 2,
+                    "timeout": 10,
                 },
-                *install["payload"]["PreInvocation"],
             ]
         }
     }
     installed = merge_hook_fragment(existing, install)
     assert installed["shared-context-bootstrap"] == install["payload"]
-    assert len(_commands(installed)) == 1
+    assert len(_commands(installed)) == 2
     assert merge_hook_fragment(installed, install) == installed
     removed = merge_hook_fragment(installed, uninstall)
 

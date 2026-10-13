@@ -37,6 +37,8 @@ def additional_context_payload(
             }
         }
     if kind == "inject_steps":
+        if event == "SessionStart":
+            return {"injectSteps": [{"systemMessage": {"systemMessage": context}}]}
         return {"injectSteps": [{"ephemeralMessage": context}]}
     if kind == "context":
         return {"context": context}

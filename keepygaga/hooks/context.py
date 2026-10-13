@@ -99,6 +99,6 @@ def run(
             f"动态注入失败：{exc}。不要用猜测或其他检索替代；向用户报告该错误。\n"
             "</keepygaga-bootstrap-error>"
         )
-    if host in {"hermes", "agy_cli"}:
+    if host == "hermes":
         context += "\n\n" + REMINDER
     return additional_context_payload(host, actual_event, context)
