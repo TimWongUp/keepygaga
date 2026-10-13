@@ -399,6 +399,20 @@ def test_context_bootstrap_contains_home_pages_and_scope_descriptions(
                 }
             ],
         },
+        # Copying only the version headers out of a transcript is not the block.
+        {
+            "is_first_turn": False,
+            "conversation_history": [
+                {
+                    "role": "user",
+                    "content": "\n".join(
+                        line
+                        for line in rendered.splitlines()
+                        if line.startswith(("<profile ", "<preferences "))
+                    ),
+                }
+            ],
+        },
     ):
         assert context.run(config, "hermes", "pre_llm_call", {"extra": extra}) == {
             "context": rendered + "\n\n" + route.REMINDER

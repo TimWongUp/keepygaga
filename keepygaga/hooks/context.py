@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import html
-import re
 from pathlib import Path
 from typing import Any
 
@@ -16,8 +15,6 @@ BOOTSTRAP_MARKER = "<keepygaga-bootstrap>"
 PERSISTED_CONTENT_KEYS = ("content", "api_content")
 # Hermes appends the injection to the turn's user message, so only that role is scanned.
 INJECTION_ROLE = "user"
-# Home-page version attributes inside a rendered bootstrap block.
-VERSION_TAG = re.compile(r'<(?:profile|preferences) version="[^"]*">')
 SCOPE_ROUTING = (
     "将下列固定 description 作为可信的一级语义路由条件。完成当前任务所需的信息属于某个 scope，"
     "且当前用户输入或 live direct source 尚未提供时，调用该 scope 的 `list`；"
@@ -49,35 +46,30 @@ def _facts(item: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def _live_version_tags(context: str) -> tuple[str, ...]:
-    """Return the home-page version tags of the bootstrap block rendered this turn."""
-    return tuple(dict.fromkeys(VERSION_TAG.findall(context)))
-
-
-def _contains_all(value: Any, needles: tuple[str, ...]) -> bool:
+def _contains_block(value: Any, block: str) -> bool:
     if isinstance(value, str):
-        return all(needle in value for needle in needles)
+        return block in value
     if isinstance(value, list):
-        return any(_contains_all(item, needles) for item in value)
+        return any(_contains_block(item, block) for item in value)
     if isinstance(value, dict):
-        return any(_contains_all(item, needles) for item in value.values())
+        return any(_contains_block(item, block) for item in value.values())
     return False
 
 
-def _history_replays_bootstrap(history: Any, version_tags: tuple[str, ...]) -> bool:
+def _history_replays_bootstrap(history: Any, block: str) -> bool:
     """Report whether persisted history already replays this turn's bootstrap block.
 
-    Matching uses the live home-page version digests, so text that merely contains our markup
-    -- source listings, quoted tags, tool output -- cannot pass for a real injection, and a
-    changed home page correctly forces the block to be injected again.
+    The whole block must be present, so text that merely repeats part of our markup -- source
+    listings, quoted tags, copied version headers, tool output -- cannot stand in for it, and a
+    changed home page makes the block differ and forces it to be injected again.
     """
-    if not version_tags or not isinstance(history, list):
+    if not block or not isinstance(history, list):
         return False
     return any(
         isinstance(message, dict)
         and message.get("role") == INJECTION_ROLE
         and any(
-            _contains_all(message.get(key), version_tags)
+            _contains_block(message.get(key), block)
             for key in PERSISTED_CONTENT_KEYS
         )
         for message in history
@@ -138,24 +130,20 @@ def run(
     extra = payload.get("extra")
     try:
         context = load_bootstrap(config_path)
-        version_tags = _live_version_tags(context)
     except Exception as exc:
         context = (
             "<keepygaga-bootstrap-error>\n"
             f"动态注入失败：{exc}。不要用猜测或其他检索替代；向用户报告该错误。\n"
             "</keepygaga-bootstrap-error>"
         )
-        version_tags = ()
     if (
         host == "hermes"
         and isinstance(extra, dict)
         and extra.get("is_first_turn") is False
-        and _history_replays_bootstrap(
-            extra.get("conversation_history"), version_tags
-        )
+        and _history_replays_bootstrap(extra.get("conversation_history"), context)
     ):
         # Hermes replays persisted injected context; skip the block again only when this
-        # turn's own version-tagged copy is already there.
+        # turn's own complete copy is already there.
         return additional_context_payload(host, actual_event, REMINDER)
     if host == "hermes":
         context += "\n\n" + REMINDER
