@@ -225,14 +225,20 @@ def build_fragment(
         }
     elif enabled and host == "antigravity":
         payload = {
-            "PreInvocation": [
+            "SessionStart": [
                 _entry(
                     _command(
-                        launcher, config_path, "context", platform, "PreInvocation"
+                        launcher, config_path, "context", platform, "SessionStart"
                     ),
                     10,
                 ),
-            ]
+            ],
+            "PreInvocation": [
+                _entry(
+                    _command(launcher, config_path, "route", platform, "PreInvocation"),
+                    2,
+                ),
+            ],
         }
 
     return {
