@@ -353,11 +353,17 @@ def test_context_bootstrap_contains_home_pages_and_scope_descriptions(
             "is_first_turn": False,
             "conversation_history": [{"role": "user", "content": "hi"}],
         },
-        # Quoting the opening tag alone is not proof that a bootstrap survived.
+        # Quoting the tags alone is not proof that a bootstrap survived.
         {
             "is_first_turn": False,
             "conversation_history": [
-                {"role": "user", "content": "解释 <keepygaga-bootstrap> 标签"}
+                {
+                    "role": "user",
+                    "content": (
+                        "解释 <keepygaga-bootstrap> 与 </keepygaga-bootstrap> "
+                        "以及 <memory_scopes> 这些标签"
+                    ),
+                }
             ],
         },
         # A marker outside persisted message text must not count either.

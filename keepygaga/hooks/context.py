@@ -11,7 +11,16 @@ from keepygaga.hooks.route import REMINDER
 
 HOME_PAGES = ("profile.md", "preferences.md")
 BOOTSTRAP_MARKER = "<keepygaga-bootstrap>"
-BOOTSTRAP_CLOSE = "</keepygaga-bootstrap>"
+# Structural markers of a complete generated bootstrap block. Detection requires all of
+# them, so a message that merely quotes a tag cannot pass for a surviving bootstrap.
+BOOTSTRAP_SIGNATURE = (
+    BOOTSTRAP_MARKER,
+    "</keepygaga-bootstrap>",
+    "<profile version=",
+    "<preferences version=",
+    "<memory_scopes>",
+    "</memory_scopes>",
+)
 # Message fields that carry persisted conversation text; other keys stay unscanned.
 PERSISTED_CONTENT_KEYS = ("content", "api_content")
 SCOPE_ROUTING = (
@@ -48,7 +57,7 @@ def _facts(item: dict[str, Any]) -> str:
 def _holds_bootstrap(value: Any) -> bool:
     """Report whether one persisted message field contains a complete bootstrap block."""
     if isinstance(value, str):
-        return BOOTSTRAP_MARKER in value and BOOTSTRAP_CLOSE in value
+        return all(marker in value for marker in BOOTSTRAP_SIGNATURE)
     if isinstance(value, list):
         return any(_holds_bootstrap(item) for item in value)
     if isinstance(value, dict):
