@@ -91,6 +91,14 @@ def run(
         ),
         event,
     )
+    extra = payload.get("extra")
+    if (
+        host == "hermes"
+        and isinstance(extra, dict)
+        and extra.get("is_first_turn") is False
+    ):
+        # Hermes persists each turn's injected context, so later turns only remind.
+        return additional_context_payload(host, actual_event, REMINDER)
     try:
         context = load_bootstrap(config_path)
     except Exception as exc:
