@@ -10,6 +10,11 @@ from keepygaga.hooks.protocol import additional_context_payload
 from keepygaga.hooks.route import REMINDER
 
 HOME_PAGES = ("profile.md", "preferences.md")
+BOOTSTRAP_MARKER = "<keepygaga-bootstrap>"
+# Message fields that carry persisted conversation text; other keys stay unscanned.
+PERSISTED_CONTENT_KEYS = ("content", "api_content")
+# Hermes appends the injection to the turn's user message, so only that role is scanned.
+INJECTION_ROLE = "user"
 SCOPE_ROUTING = (
     "将下列固定 description 作为可信的一级语义路由条件。完成当前任务所需的信息属于某个 scope，"
     "且当前用户输入或 live direct source 尚未提供时，调用该 scope 的 `list`；"
@@ -41,6 +46,36 @@ def _facts(item: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _contains_block(value: Any, block: str) -> bool:
+    if isinstance(value, str):
+        return block in value
+    if isinstance(value, list):
+        return any(_contains_block(item, block) for item in value)
+    if isinstance(value, dict):
+        return any(_contains_block(item, block) for item in value.values())
+    return False
+
+
+def _history_replays_bootstrap(history: Any, block: str) -> bool:
+    """Report whether persisted history already replays this turn's bootstrap block.
+
+    The whole block must be present, so text that merely repeats part of our markup -- source
+    listings, quoted tags, copied version headers, tool output -- cannot stand in for it, and a
+    changed home page makes the block differ and forces it to be injected again.
+    """
+    if not block or not isinstance(history, list):
+        return False
+    return any(
+        isinstance(message, dict)
+        and message.get("role") == INJECTION_ROLE
+        and any(
+            _contains_block(message.get(key), block)
+            for key in PERSISTED_CONTENT_KEYS
+        )
+        for message in history
+    )
+
+
 def load_bootstrap(config_path: Path) -> str:
     from keepygaga.config import load_config
     from keepygaga.memory_store import MemoryStore
@@ -69,7 +104,8 @@ def load_bootstrap(config_path: Path) -> str:
         for scope, description in SCOPE_DESCRIPTIONS.items()
     ]
     return (
-        "<keepygaga-bootstrap>\n"
+        BOOTSTRAP_MARKER
+        + "\n"
         f'<profile version="{profile["version"]}">\n{_facts(profile)}\n</profile>\n\n'
         f'<preferences version="{preferences["version"]}">\n{_facts(preferences)}\n</preferences>\n\n'
         "<memory_scopes>\n"
@@ -91,6 +127,7 @@ def run(
         ),
         event,
     )
+    extra = payload.get("extra")
     try:
         context = load_bootstrap(config_path)
     except Exception as exc:
@@ -99,6 +136,15 @@ def run(
             f"动态注入失败：{exc}。不要用猜测或其他检索替代；向用户报告该错误。\n"
             "</keepygaga-bootstrap-error>"
         )
-    if host in {"hermes", "agy_cli"}:
+    if (
+        host == "hermes"
+        and isinstance(extra, dict)
+        and extra.get("is_first_turn") is False
+        and _history_replays_bootstrap(extra.get("conversation_history"), context)
+    ):
+        # Hermes replays persisted injected context; skip the block again only when this
+        # turn's own complete copy is already there.
+        return additional_context_payload(host, actual_event, REMINDER)
+    if host == "hermes":
         context += "\n\n" + REMINDER
     return additional_context_payload(host, actual_event, context)

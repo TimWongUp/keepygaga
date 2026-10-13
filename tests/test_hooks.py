@@ -329,13 +329,100 @@ def test_context_bootstrap_contains_home_pages_and_scope_descriptions(
                 }
             }
 
-    for host, event in (("hermes", "pre_llm_call"), ("agy_cli", "PreInvocation")):
-        result = context.run(config, host, event, {})
-        expected = rendered + "\n\n" + route.REMINDER
-        if host == "hermes":
-            assert result == {"context": expected}
-        else:
-            assert result == {"injectSteps": [{"ephemeralMessage": expected}]}
+    assert context.run(config, "hermes", "pre_llm_call", {}) == {
+        "context": rendered + "\n\n" + route.REMINDER
+    }
+    # A later turn whose persisted history still carries the bootstrap only reminds.
+    assert context.run(
+        config,
+        "hermes",
+        "pre_llm_call",
+        {
+            "extra": {
+                "is_first_turn": False,
+                "conversation_history": [
+                    {"role": "user", "api_content": rendered + "\n\n" + route.REMINDER}
+                ],
+            }
+        },
+    ) == {"context": route.REMINDER}
+    # A multimodal user turn persists the same block inside a text part.
+    assert context.run(
+        config,
+        "hermes",
+        "pre_llm_call",
+        {
+            "extra": {
+                "is_first_turn": False,
+                "conversation_history": [
+                    {"role": "user", "content": [{"type": "text", "text": rendered}]}
+                ],
+            }
+        },
+    ) == {"context": route.REMINDER}
+    # Later turns whose history no longer holds the bootstrap keep the full context.
+    for extra in (
+        {"is_first_turn": False},
+        {
+            "is_first_turn": False,
+            "conversation_history": [{"role": "user", "content": "hi"}],
+        },
+        # Quoting or pasting our markup is not proof that a bootstrap survived; the live
+        # home-page version digests are what identify a real injection.
+        {
+            "is_first_turn": False,
+            "conversation_history": [
+                {
+                    "role": "user",
+                    "content": (
+                        "请审查这段源码：\n"
+                        + Path(context.__file__).read_text(encoding="utf-8")
+                    ),
+                }
+            ],
+        },
+        # Tool results and code listings are not injected memory.
+        {
+            "is_first_turn": False,
+            "conversation_history": [
+                {"role": "tool", "tool_call_id": "read", "content": rendered}
+            ],
+        },
+        # A marker outside persisted message text must not count either.
+        {
+            "is_first_turn": False,
+            "conversation_history": [
+                {
+                    "role": "assistant",
+                    "tool_input": {"query": rendered},
+                    "content": "done",
+                }
+            ],
+        },
+        # Copying only the version headers out of a transcript is not the block.
+        {
+            "is_first_turn": False,
+            "conversation_history": [
+                {
+                    "role": "user",
+                    "content": "\n".join(
+                        line
+                        for line in rendered.splitlines()
+                        if line.startswith(("<profile ", "<preferences "))
+                    ),
+                }
+            ],
+        },
+    ):
+        assert context.run(config, "hermes", "pre_llm_call", {"extra": extra}) == {
+            "context": rendered + "\n\n" + route.REMINDER
+        }
+    assert context.run(config, "agy_cli", "SessionStart", {}) == {
+        "injectSteps": [{"systemMessage": {"systemMessage": rendered}}]
+    }
+    assert route.run("agy_cli", "PreInvocation") == {
+        "injectSteps": [{"ephemeralMessage": route.REMINDER}]
+    }
 
 
 def test_context_bootstrap_escapes_home_fact_control_delimiters(
@@ -545,19 +632,18 @@ def test_antigravity_migration_and_uninstall_target_installed_group(
                     "command": fragments._command(
                         tmp_path / "keepygaga",
                         tmp_path / "config",
-                        "route",
+                        "context",
                         "agy_cli",
                         "PreInvocation",
                     ),
-                    "timeout": 2,
+                    "timeout": 10,
                 },
-                *install["payload"]["PreInvocation"],
             ]
         }
     }
     installed = merge_hook_fragment(existing, install)
     assert installed["shared-context-bootstrap"] == install["payload"]
-    assert len(_commands(installed)) == 1
+    assert len(_commands(installed)) == 2
     assert merge_hook_fragment(installed, install) == installed
     removed = merge_hook_fragment(installed, uninstall)
 
