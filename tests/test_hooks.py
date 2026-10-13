@@ -332,9 +332,31 @@ def test_context_bootstrap_contains_home_pages_and_scope_descriptions(
     assert context.run(config, "hermes", "pre_llm_call", {}) == {
         "context": rendered + "\n\n" + route.REMINDER
     }
+    # A later turn whose persisted history still carries the bootstrap only reminds.
     assert context.run(
-        config, "hermes", "pre_llm_call", {"extra": {"is_first_turn": False}}
+        config,
+        "hermes",
+        "pre_llm_call",
+        {
+            "extra": {
+                "is_first_turn": False,
+                "conversation_history": [
+                    {"role": "user", "api_content": rendered + "\n\n" + route.REMINDER}
+                ],
+            }
+        },
     ) == {"context": route.REMINDER}
+    # Later turns whose history no longer holds the bootstrap keep the full context.
+    for extra in (
+        {"is_first_turn": False},
+        {
+            "is_first_turn": False,
+            "conversation_history": [{"role": "user", "content": "hi"}],
+        },
+    ):
+        assert context.run(config, "hermes", "pre_llm_call", {"extra": extra}) == {
+            "context": rendered + "\n\n" + route.REMINDER
+        }
     assert context.run(config, "agy_cli", "SessionStart", {}) == {
         "injectSteps": [{"systemMessage": {"systemMessage": rendered}}]
     }

@@ -10,6 +10,7 @@ from keepygaga.hooks.protocol import additional_context_payload
 from keepygaga.hooks.route import REMINDER
 
 HOME_PAGES = ("profile.md", "preferences.md")
+BOOTSTRAP_MARKER = "<keepygaga-bootstrap>"
 SCOPE_ROUTING = (
     "将下列固定 description 作为可信的一级语义路由条件。完成当前任务所需的信息属于某个 scope，"
     "且当前用户输入或 live direct source 尚未提供时，调用该 scope 的 `list`；"
@@ -41,6 +42,17 @@ def _facts(item: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _carries_bootstrap(value: Any) -> bool:
+    """Report whether session history already holds an injected bootstrap block."""
+    if isinstance(value, str):
+        return BOOTSTRAP_MARKER in value
+    if isinstance(value, list):
+        return any(_carries_bootstrap(item) for item in value)
+    if isinstance(value, dict):
+        return any(_carries_bootstrap(item) for item in value.values())
+    return False
+
+
 def load_bootstrap(config_path: Path) -> str:
     from keepygaga.config import load_config
     from keepygaga.memory_store import MemoryStore
@@ -69,7 +81,8 @@ def load_bootstrap(config_path: Path) -> str:
         for scope, description in SCOPE_DESCRIPTIONS.items()
     ]
     return (
-        "<keepygaga-bootstrap>\n"
+        BOOTSTRAP_MARKER
+        + "\n"
         f'<profile version="{profile["version"]}">\n{_facts(profile)}\n</profile>\n\n'
         f'<preferences version="{preferences["version"]}">\n{_facts(preferences)}\n</preferences>\n\n'
         "<memory_scopes>\n"
@@ -96,8 +109,10 @@ def run(
         host == "hermes"
         and isinstance(extra, dict)
         and extra.get("is_first_turn") is False
+        and _carries_bootstrap(extra.get("conversation_history"))
     ):
-        # Hermes persists each turn's injected context, so later turns only remind.
+        # Hermes replays persisted injected context; only downgrade when the history
+        # proves the earlier bootstrap survived, so non-persisting paths keep it.
         return additional_context_payload(host, actual_event, REMINDER)
     try:
         context = load_bootstrap(config_path)
