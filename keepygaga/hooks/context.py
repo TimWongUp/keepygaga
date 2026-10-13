@@ -11,6 +11,9 @@ from keepygaga.hooks.route import REMINDER
 
 HOME_PAGES = ("profile.md", "preferences.md")
 BOOTSTRAP_MARKER = "<keepygaga-bootstrap>"
+BOOTSTRAP_CLOSE = "</keepygaga-bootstrap>"
+# Message fields that carry persisted conversation text; other keys stay unscanned.
+PERSISTED_CONTENT_KEYS = ("content", "api_content")
 SCOPE_ROUTING = (
     "将下列固定 description 作为可信的一级语义路由条件。完成当前任务所需的信息属于某个 scope，"
     "且当前用户输入或 live direct source 尚未提供时，调用该 scope 的 `list`；"
@@ -42,15 +45,30 @@ def _facts(item: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def _carries_bootstrap(value: Any) -> bool:
-    """Report whether session history already holds an injected bootstrap block."""
+def _holds_bootstrap(value: Any) -> bool:
+    """Report whether one persisted message field contains a complete bootstrap block."""
     if isinstance(value, str):
-        return BOOTSTRAP_MARKER in value
+        return BOOTSTRAP_MARKER in value and BOOTSTRAP_CLOSE in value
     if isinstance(value, list):
-        return any(_carries_bootstrap(item) for item in value)
+        return any(_holds_bootstrap(item) for item in value)
     if isinstance(value, dict):
-        return any(_carries_bootstrap(item) for item in value.values())
+        return any(_holds_bootstrap(item) for item in value.values())
     return False
+
+
+def _history_carries_bootstrap(history: Any) -> bool:
+    """Report whether persisted history already replays an injected bootstrap block.
+
+    Only message text fields are inspected and the block must be complete, so a user
+    message that merely quotes the opening tag cannot pass for a surviving bootstrap.
+    """
+    if not isinstance(history, list):
+        return False
+    return any(
+        isinstance(message, dict)
+        and any(_holds_bootstrap(message.get(key)) for key in PERSISTED_CONTENT_KEYS)
+        for message in history
+    )
 
 
 def load_bootstrap(config_path: Path) -> str:
@@ -109,7 +127,7 @@ def run(
         host == "hermes"
         and isinstance(extra, dict)
         and extra.get("is_first_turn") is False
-        and _carries_bootstrap(extra.get("conversation_history"))
+        and _history_carries_bootstrap(extra.get("conversation_history"))
     ):
         # Hermes replays persisted injected context; only downgrade when the history
         # proves the earlier bootstrap survived, so non-persisting paths keep it.
