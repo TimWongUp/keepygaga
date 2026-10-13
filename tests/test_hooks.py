@@ -346,6 +346,20 @@ def test_context_bootstrap_contains_home_pages_and_scope_descriptions(
             }
         },
     ) == {"context": route.REMINDER}
+    # A multimodal user turn persists the same block inside a text part.
+    assert context.run(
+        config,
+        "hermes",
+        "pre_llm_call",
+        {
+            "extra": {
+                "is_first_turn": False,
+                "conversation_history": [
+                    {"role": "user", "content": [{"type": "text", "text": rendered}]}
+                ],
+            }
+        },
+    ) == {"context": route.REMINDER}
     # Later turns whose history no longer holds the bootstrap keep the full context.
     for extra in (
         {"is_first_turn": False},
@@ -353,15 +367,16 @@ def test_context_bootstrap_contains_home_pages_and_scope_descriptions(
             "is_first_turn": False,
             "conversation_history": [{"role": "user", "content": "hi"}],
         },
-        # Quoting the tags alone is not proof that a bootstrap survived.
+        # Quoting or pasting our markup is not proof that a bootstrap survived; the live
+        # home-page version digests are what identify a real injection.
         {
             "is_first_turn": False,
             "conversation_history": [
                 {
                     "role": "user",
                     "content": (
-                        "解释 <keepygaga-bootstrap> 与 </keepygaga-bootstrap> "
-                        "以及 <memory_scopes> 这些标签"
+                        "请审查这段源码：\n"
+                        + Path(context.__file__).read_text(encoding="utf-8")
                     ),
                 }
             ],

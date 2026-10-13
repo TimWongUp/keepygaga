@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import html
+import re
 from pathlib import Path
 from typing import Any
 
@@ -11,20 +12,12 @@ from keepygaga.hooks.route import REMINDER
 
 HOME_PAGES = ("profile.md", "preferences.md")
 BOOTSTRAP_MARKER = "<keepygaga-bootstrap>"
-# Structural markers of a complete generated bootstrap block. Detection requires all of
-# them, so a message that merely quotes a tag cannot pass for a surviving bootstrap.
-BOOTSTRAP_SIGNATURE = (
-    BOOTSTRAP_MARKER,
-    "</keepygaga-bootstrap>",
-    "<profile version=",
-    "<preferences version=",
-    "<memory_scopes>",
-    "</memory_scopes>",
-)
 # Message fields that carry persisted conversation text; other keys stay unscanned.
 PERSISTED_CONTENT_KEYS = ("content", "api_content")
 # Hermes appends the injection to the turn's user message, so only that role is scanned.
 INJECTION_ROLE = "user"
+# Home-page version attributes inside a rendered bootstrap block.
+VERSION_TAG = re.compile(r'<(?:profile|preferences) version="[^"]*">')
 SCOPE_ROUTING = (
     "将下列固定 description 作为可信的一级语义路由条件。完成当前任务所需的信息属于某个 scope，"
     "且当前用户输入或 live direct source 尚未提供时，调用该 scope 的 `list`；"
@@ -56,30 +49,37 @@ def _facts(item: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def _holds_bootstrap(value: Any) -> bool:
-    """Report whether one persisted message field contains a complete bootstrap block."""
+def _live_version_tags(context: str) -> tuple[str, ...]:
+    """Return the home-page version tags of the bootstrap block rendered this turn."""
+    return tuple(dict.fromkeys(VERSION_TAG.findall(context)))
+
+
+def _contains_all(value: Any, needles: tuple[str, ...]) -> bool:
     if isinstance(value, str):
-        return all(marker in value for marker in BOOTSTRAP_SIGNATURE)
+        return all(needle in value for needle in needles)
     if isinstance(value, list):
-        return any(_holds_bootstrap(item) for item in value)
+        return any(_contains_all(item, needles) for item in value)
     if isinstance(value, dict):
-        return any(_holds_bootstrap(item) for item in value.values())
+        return any(_contains_all(item, needles) for item in value.values())
     return False
 
 
-def _history_carries_bootstrap(history: Any) -> bool:
-    """Report whether persisted history already replays an injected bootstrap block.
+def _history_replays_bootstrap(history: Any, version_tags: tuple[str, ...]) -> bool:
+    """Report whether persisted history already replays this turn's bootstrap block.
 
-    Only the text fields of user messages are inspected, which is where Hermes persists the
-    injection, and the generated block must be complete. Tool results, source listings, and
-    messages that merely quote a tag therefore cannot pass for a surviving bootstrap.
+    Matching uses the live home-page version digests, so text that merely contains our markup
+    -- source listings, quoted tags, tool output -- cannot pass for a real injection, and a
+    changed home page correctly forces the block to be injected again.
     """
-    if not isinstance(history, list):
+    if not version_tags or not isinstance(history, list):
         return False
     return any(
         isinstance(message, dict)
         and message.get("role") == INJECTION_ROLE
-        and any(_holds_bootstrap(message.get(key)) for key in PERSISTED_CONTENT_KEYS)
+        and any(
+            _contains_all(message.get(key), version_tags)
+            for key in PERSISTED_CONTENT_KEYS
+        )
         for message in history
     )
 
@@ -136,23 +136,27 @@ def run(
         event,
     )
     extra = payload.get("extra")
-    if (
-        host == "hermes"
-        and isinstance(extra, dict)
-        and extra.get("is_first_turn") is False
-        and _history_carries_bootstrap(extra.get("conversation_history"))
-    ):
-        # Hermes replays persisted injected context; only downgrade when the history
-        # proves the earlier bootstrap survived, so non-persisting paths keep it.
-        return additional_context_payload(host, actual_event, REMINDER)
     try:
         context = load_bootstrap(config_path)
+        version_tags = _live_version_tags(context)
     except Exception as exc:
         context = (
             "<keepygaga-bootstrap-error>\n"
             f"动态注入失败：{exc}。不要用猜测或其他检索替代；向用户报告该错误。\n"
             "</keepygaga-bootstrap-error>"
         )
+        version_tags = ()
+    if (
+        host == "hermes"
+        and isinstance(extra, dict)
+        and extra.get("is_first_turn") is False
+        and _history_replays_bootstrap(
+            extra.get("conversation_history"), version_tags
+        )
+    ):
+        # Hermes replays persisted injected context; skip the block again only when this
+        # turn's own version-tagged copy is already there.
+        return additional_context_payload(host, actual_event, REMINDER)
     if host == "hermes":
         context += "\n\n" + REMINDER
     return additional_context_payload(host, actual_event, context)
