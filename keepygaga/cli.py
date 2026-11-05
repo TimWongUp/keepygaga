@@ -5,6 +5,7 @@ import base64
 import binascii
 import importlib
 import json
+import os
 import sys
 from collections.abc import Mapping
 from contextlib import suppress
@@ -374,7 +375,25 @@ def _run_host_command(args: argparse.Namespace, config_path: Path) -> int:
     return 0
 
 
+def _demote_host_pythonpath() -> None:
+    """Hooks inherit the host's PYTHONPATH; its packages must not replace this tool's own.
+
+    Moved behind them rather than dropped, since a host path may also be this tool's own.
+    """
+
+    def normal(path: str) -> str:
+        return os.path.normcase(os.path.abspath(path))
+
+    host_paths = {
+        normal(path)
+        for path in os.environ.get("PYTHONPATH", "").split(os.pathsep)
+        if path
+    }
+    sys.path.sort(key=lambda path: normal(path) in host_paths)
+
+
 def main(argv: list[str] | None = None) -> int:
+    _demote_host_pythonpath()
     parser = _parser()
     args = parser.parse_args(argv)
     if args.command is None:

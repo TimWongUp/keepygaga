@@ -6,6 +6,7 @@ import os
 import shutil
 import subprocess
 import sys
+import sysconfig
 from pathlib import Path
 
 import pytest
@@ -516,6 +517,47 @@ def test_route_cli_needs_no_memory_config_or_session_state(
             "additionalContext": route.COMPACT_REMINDER if compact else route.REMINDER,
         }
     }
+
+
+@pytest.mark.parametrize("own_packages", [False, True])
+def test_context_cli_prefers_own_packages_over_host_pythonpath(
+    tmp_path: Path, own_packages: bool
+) -> None:
+    memory_root = tmp_path / "agents-memory"
+    initialize_memory_tree(memory_root, MemoryFilesConfig(root=str(memory_root)))
+    config = tmp_path / "keepygaga.toml"
+    config.write_text(f"[memory]\nroot = '{memory_root}'\n", encoding="utf-8")
+    host_packages = tmp_path / "host"
+    (host_packages / "pydantic").mkdir(parents=True)
+    (host_packages / "pydantic" / "__init__.py").write_text(
+        "raise ImportError('host pydantic')", encoding="utf-8"
+    )
+    pythonpath = (
+        sysconfig.get_path("purelib") if own_packages else f"{host_packages}{os.sep}"
+    )
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "keepygaga.cli",
+            "--config",
+            str(config),
+            "hook",
+            "run",
+            "context",
+            "--host",
+            "hermes",
+            "--event",
+            "pre_llm_call",
+        ],
+        input="{}",
+        capture_output=True,
+        encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONPATH": pythonpath},
+        check=True,
+    )
+    assert "<profile version=" in completed.stdout
+    assert "keepygaga-bootstrap-error" not in completed.stdout
 
 
 @pytest.mark.parametrize("host", ["codex", "claude", "workbuddy"])
