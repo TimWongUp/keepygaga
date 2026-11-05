@@ -4,4 +4,4 @@
 
 Hermes `subagent_start` is an observer event whose return value is ignored; it is not a context-injection surface. Keepygaga does not project a separate closeout event. Round-trip YAML merging removes obsolete Keepygaga-owned closeout and standalone route projections while preserving unrelated keys, comments, ordering, and Hook entries.
 
-Hermes hooks inherit its `PYTHONPATH`, which points at Hermes dependencies built for its own Python. The Keepygaga CLI drops that variable and its `sys.path` entries before loading any dependency, so a hook always runs on the packages installed with Keepygaga.
+Hermes hooks inherit its `PYTHONPATH`, which points at Hermes dependencies built for its own Python. The Keepygaga CLI moves those entries behind its own on `sys.path` before loading any dependency, so a hook runs on the packages installed with Keepygaga.
