@@ -518,6 +518,40 @@ def test_route_cli_needs_no_memory_config_or_session_state(
     }
 
 
+def test_context_cli_ignores_packages_on_host_pythonpath(tmp_path: Path) -> None:
+    host_packages = tmp_path / "host"
+    (host_packages / "pydantic").mkdir(parents=True)
+    (host_packages / "pydantic" / "__init__.py").write_text(
+        "raise ImportError('host pydantic')", encoding="utf-8"
+    )
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "keepygaga.cli",
+            "--config",
+            str(tmp_path / "absent.toml"),
+            "hook",
+            "run",
+            "context",
+            "--host",
+            "hermes",
+            "--event",
+            "pre_llm_call",
+        ],
+        input="{}",
+        capture_output=True,
+        encoding="utf-8",
+        env={
+            **os.environ,
+            "PYTHONIOENCODING": "utf-8",
+            "PYTHONPATH": str(host_packages),
+        },
+        check=True,
+    )
+    assert "host pydantic" not in completed.stdout
+
+
 @pytest.mark.parametrize("host", ["codex", "claude", "workbuddy"])
 def test_fragment_removes_owned_post_tool_use_and_preserves_other_hooks(
     tmp_path: Path, host: str
